@@ -1,0 +1,36 @@
+# Lucid - local development stack.
+# Beta runs on Neo4j only (DR-005: synergy state in Neo4j, no Postgres).
+services:
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-lucid2026}"
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      NEO4J_URI: "bolt://neo4j:7687"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  neo4j_data:

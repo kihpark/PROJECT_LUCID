@@ -1,5 +1,28 @@
+# --- Python ---
 **/__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# --- Virtual environments ---
 pitch/.venv/
+backend/.venv/
+.venv/
+venv/
+
+# --- Environment / secrets ---
+.env
+
+# --- Docker / Neo4j volumes ---
+neo4j_data/
+
+# --- Embeddings / model cache ---
+backend/.faiss_index/
+*.faiss
+
+# --- Logs ---
 *.log
+
+# --- Office lock files ---
 ~$*.docx
 ~$*.pptx
