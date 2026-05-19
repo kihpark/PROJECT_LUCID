@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<!--
+  Lucid - Stellar Knowledge Graph (S1 prototype)
+  A self-contained D3.js v7 prototype of the stellar metaphor.
+  Spec: docs/visual-design.md, docs/feature-spec-stellar-graph.md
+  Every visual property encodes real FactNode data - this is not decoration.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lucid - Stellar Knowledge Graph</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  /* ---- Universe background ---- */
+  html, body {
+    margin: 0; height: 100%; background: #07090f; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+    color: #c8cee0;
+  }
+  svg { display: block; width: 100vw; height: 100vh; }
+
+  /* ---- Star body: the element that recedes / springs back elastically ----
+     Elastic Navigation (DR-020): filtered stars never disappear. They scale
+     to 0.4x and fade to 8% opacity, then spring back. Spec timings: 300ms out,
+     400ms spring in - approximated here with one springy cubic-bezier. */
+  .star-body {
+    transform-origin: 0 0;
+    transition: opacity .38s cubic-bezier(.34,1.45,.64,1),
+                transform .38s cubic-bezier(.34,1.45,.64,1);
+  }
+  .star-body.receded { opacity: .08; transform: scale(.4); }
+  .star-body.emphasized { filter: brightness(1.15); }
+
+  /* ---- Stale star: gray + orange dashed border + slow pulse (is_stale) ---- */
+  @keyframes stalePulse { 0%,100% { opacity:.45 } 50% { opacity:.9 } }
+  .stale .star-core { animation: stalePulse 2.6s ease-in-out infinite; }
+
+  /* ---- Pending star: dim + flicker (PendingFact, orbits outside) ---- */
+  @keyframes flicker {
+    0%,100% { opacity:.55 } 25% { opacity:.25 } 50% { opacity:.6 } 75% { opacity:.3 }
+  }
+  .pending .star-body { animation: flicker 1.8s steps(1) infinite; }
+
+  /* ---- Contradiction edge: red pulse at 0.5Hz (2s period) - DR-023 ---- */
+  @keyframes redPulse { 0%,100% { stroke-opacity:.22 } 50% { stroke-opacity:.72 } }
+  .edge-contradicts { animation: redPulse 2s ease-in-out infinite; }
+
+  .node { cursor: pointer; }
+  .star-label, .constellation-label {
+    pointer-events: none; text-anchor: middle;
+    font-family: inherit; fill: #aeb6cc;
+  }
+  .star-label { font-size: 9px; opacity: 0; transition: opacity .2s; }
+  .constellation-label {
+    font-size: 15px; fill: #6f7a99; letter-spacing: .12em;
+    text-transform: uppercase; transition: opacity .25s;
+  }
+
+  /* ---- Elastic filter panel ---- */
+  #panel {
+    position: fixed; top: 18px; left: 18px; width: 234px;
+    background: rgba(16,19,30,.92); border: 1px solid #232838;
+    border-radius: 10px; padding: 16px 18px; backdrop-filter: blur(6px);
+  }
+  #panel h1 { font-size: 14px; margin: 0 0 2px; color: #eef1f8; letter-spacing:.04em; }
+  #panel .sub { font-size: 11px; color: #6f7a99; margin-bottom: 14px; }
+  #panel .group { margin-bottom: 13px; }
+  #panel .group-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .12em;
+    color: #7d87a4; margin-bottom: 7px;
+  }
+  #panel label { display: flex; align-items: center; font-size: 12.5px; margin: 5px 0; }
+  #panel label .swatch {
+    width: 9px; height: 9px; border-radius: 50%; margin: 0 7px 0 6px;
+  }
+  #panel input[type=checkbox] { accent-color: #6b8afd; }
+  #panel select {
+    width: 100%; background: #0d1018; color: #c8cee0;
+    border: 1px solid #2a3047; border-radius: 6px; padding: 5px 7px; font-size: 12px;
+  }
+  #legend { font-size: 10.5px; color: #6f7a99; line-height: 1.6; margin-top: 4px; }
+
+  /* ---- Hover tooltip ---- */
+  #tooltip {
+    position: fixed; pointer-events: none; opacity: 0; max-width: 280px;
+    background: rgba(12,15,24,.97); border: 1px solid #2a3047;
+    border-radius: 8px; padding: 10px 12px; font-size: 12px;
+    transition: opacity .12s; z-index: 10;
+  }
+  #tooltip .claim { color: #eef1f8; margin-bottom: 6px; line-height: 1.45; }
+  #tooltip .meta { color: #8d96b0; font-size: 11px; }
+  #tooltip .meta b { color: #c8cee0; font-weight: 600; }
+  #hud {
+    position: fixed; bottom: 14px; right: 18px;
+    font-size: 10.5px; color: #4d5670;
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== Elastic filter panel ===================== -->
+<div id="panel">
+  <h1>Stellar Knowledge Graph</h1>
+  <div class="sub">Lucid &middot; verified second brain</div>
+
+  <div class="group">
+    <div class="group-title">Domain</div>
+    <div id="domain-filters"></div>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Validation level</div>
+    <select id="level-filter">
+      <option value="1">L1+  (all facts)</option>
+      <option value="2">L2+  (team consensus)</option>
+      <option value="3">L3+  (community)</option>
+      <option value="4">L4   (expert certified)</option>
+    </select>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Legend</div>
+    <div id="legend">
+      Brightness = validation (L1 dim &rarr; L4 brilliant)<br/>
+      Size = connection count<br/>
+      Dashed gray = stale &middot; Red line = contradiction
+    </div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+<div id="hud">scroll = zoom &middot; drag a star to reposition</div>
+<svg id="sky"></svg>
+
+<script>
+/* =====================================================================
+   1. SAMPLE DATA - 25 facts matching Lucid's data model.
+      Fields mirror GET /api/spaces/{sid}/graph (feature-spec section "API
+      Contract"). validation_level is the derived 1-4 tier; domain drives
+      color; is_stale / is_pending drive special states.
+   ===================================================================== */
+const DATA = {
+  nodes: [
+    // -- Constellation c1: AI Governance (policy) --
+    { id:"f1",  claim:"The EU AI Act took effect in August 2024", domain:"policy", confidence:"HIGH", validation_level:4, is_stale:false, is_pending:false, jurisdiction:["EU"], valid_until:null, constellation:"c1" },
+    { id:"f2",  claim:"The EU AI Act took 36 months to pass into law", domain:"policy", confidence:"HIGH", validation_level:3, is_stale:false, is_pending:false, jurisdiction:["EU"], valid_until:null, constellation:"c1" },
+    { id:"f3",  claim:"23% of EU AI Act clauses were softened from draft to final", domain:"policy", confidence:"MEDIUM", validation_level:2, is_stale:true, is_pending:false, jurisdiction:["EU"], valid_until:"2024-12-01", constellation:"c1" },
+    { id:"f4",  claim:"The UK AI-regulation framework is principle-first", domain:"policy", confidence:"HIGH", validation_level:3, is_stale:false, is_pending:false, jurisdiction:["UK"], valid_until:null, constellation:"c1" },
+    { id:"f5",  claim:"Korea's AI Framework Act passed in December 2024", domain:"policy", confidence:"HIGH", validation_level:3, is_stale:false, is_pending:false, jurisdiction:["KR"], valid_until:null, constellation:"c1" },
+    { id:"f6",  claim:"Korea's AI Act weights promotion over restriction", domain:"policy", confidence:"HIGH", validation_level:2, is_stale:false, is_pending:false, jurisdiction:["KR"], valid_until:null, constellation:"c1" },
+    { id:"f7",  claim:"China's generative-AI rules took effect in August 2023", domain:"policy", confidence:"HIGH", validation_level:4, is_stale:false, is_pending:false, jurisdiction:["CN"], valid_until:null, constellation:"c1" },
+    { id:"f25", claim:"Draft: EU AI Act enforcement guidelines expected 2025", domain:"policy", confidence:"MEDIUM", validation_level:1, is_stale:false, is_pending:true, jurisdiction:["EU"], valid_until:null, constellation:"c1" },
+
+    // -- Constellation c2: Behavioral Economics (science) --
+    { id:"f8",  claim:"The average loss-aversion coefficient is 2.25", domain:"science", confidence:"HIGH", validation_level:4, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c2" },
+    { id:"f9",  claim:"Loss framing drives behavior change more than gain framing", domain:"science", confidence:"HIGH", validation_level:3, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c2" },
+    { id:"f10", claim:"Prospect theory was formalized by Kahneman and Tversky in 1979", domain:"science", confidence:"HIGH", validation_level:4, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c2" },
+    { id:"f11", claim:"Anchoring bias shifts numerical estimates toward the anchor", domain:"science", confidence:"HIGH", validation_level:2, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c2" },
+    { id:"f12", claim:"Default options strongly shape opt-in rates", domain:"science", confidence:"MEDIUM", validation_level:2, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c2" },
+
+    // -- Constellation c3: Renewable Energy (economics / technology) --
+    { id:"f13", claim:"The renewable transition raises electricity prices short-term", domain:"economics", confidence:"MEDIUM", validation_level:2, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c3" },
+    { id:"f14", claim:"The renewable transition lowers electricity prices long-term", domain:"economics", confidence:"MEDIUM", validation_level:1, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c3" },
+    { id:"f15", claim:"Solar PV module cost fell about 90% over the 2010s", domain:"economics", confidence:"HIGH", validation_level:3, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c3" },
+    { id:"f16", claim:"Grid-scale storage capacity doubled in 2023", domain:"technology", confidence:"MEDIUM", validation_level:1, is_stale:true, is_pending:false, jurisdiction:["global"], valid_until:"2024-12-31", constellation:"c3" },
+    { id:"f17", claim:"Korea targets a 30% renewable share by 2030", domain:"policy", confidence:"MEDIUM", validation_level:2, is_stale:false, is_pending:false, jurisdiction:["KR"], valid_until:"2030-01-01", constellation:"c3" },
+
+    // -- Constellation c4: LLM Industry (technology) --
+    { id:"f18", claim:"ChatGPT has 100M monthly active users", domain:"technology", confidence:"MEDIUM", validation_level:1, is_stale:true, is_pending:false, jurisdiction:["global"], valid_until:"2024-06-01", constellation:"c4" },
+    { id:"f19", claim:"OpenAI announced it surpassed 200M users in 2024", domain:"technology", confidence:"HIGH", validation_level:3, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c4" },
+    { id:"f20", claim:"ChatGPT has 100M weekly active users as of Sep 2024", domain:"technology", confidence:"HIGH", validation_level:3, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c4" },
+    { id:"f21", claim:"LLM inference cost fell roughly 10x during 2024", domain:"technology", confidence:"MEDIUM", validation_level:2, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c4" },
+    { id:"f22", claim:"Open-weight models narrowed the gap with frontier models", domain:"technology", confidence:"MEDIUM", validation_level:2, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c4" },
+    { id:"f23", claim:"Multimodal models can extract facts from video", domain:"technology", confidence:"HIGH", validation_level:2, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c4" },
+    { id:"f24", claim:"Vector plus graph databases enable hybrid retrieval", domain:"technology", confidence:"HIGH", validation_level:3, is_stale:false, is_pending:false, jurisdiction:["global"], valid_until:null, constellation:"c4" },
+  ],
+  edges: [
+    // AI Governance
+    { source:"f1", target:"f2", type:"REINFORCES",  weight:0.4 },
+    { source:"f2", target:"f3", type:"SUPPORTS",    weight:0.85 },
+    { source:"f1", target:"f4", type:"SUPPORTS",    weight:0.85 },
+    { source:"f4", target:"f5", type:"SUPPORTS",    weight:0.85 },
+    { source:"f5", target:"f6", type:"EXAMPLE_OF",  weight:0.70 },
+    { source:"f1", target:"f7", type:"SUPPORTS",    weight:0.85 },
+    { source:"f25", target:"f1", type:"DERIVED_FROM", weight:1.0 },
+    // Behavioral Economics
+    { source:"f10", target:"f8", type:"DERIVED_FROM", weight:1.0 },
+    { source:"f8", target:"f9", type:"SUPPORTS",    weight:0.85 },
+    { source:"f9", target:"f10", type:"EXAMPLE_OF", weight:0.70 },
+    { source:"f10", target:"f11", type:"SUPPORTS", weight:0.85 },
+    { source:"f11", target:"f12", type:"SUPPORTS", weight:0.85 },
+    // Renewable Energy
+    { source:"f13", target:"f14", type:"CONTRADICTS", weight:0.0 },
+    { source:"f13", target:"f15", type:"SUPPORTS",   weight:0.85 },
+    { source:"f15", target:"f16", type:"REINFORCES", weight:0.4 },
+    { source:"f17", target:"f15", type:"SUPPORTS",   weight:0.85 },
+    { source:"f13", target:"f17", type:"SUPPORTS",   weight:0.85 },
+    // LLM Industry
+    { source:"f18", target:"f19", type:"CONTRADICTS", weight:0.0 },
+    { source:"f18", target:"f20", type:"CONTRADICTS", weight:0.0 },
+    { source:"f19", target:"f20", type:"SUPPORTS",   weight:0.85 },
+    { source:"f21", target:"f22", type:"SUPPORTS",   weight:0.85 },
+    { source:"f22", target:"f23", type:"EXAMPLE_OF", weight:0.70 },
+    { source:"f23", target:"f24", type:"SUPPORTS",   weight:0.85 },
+    // Cross-cluster bridges (the connections the user never went looking for)
+    { source:"f9",  target:"f6",  type:"EXAMPLE_OF", weight:0.70 },
+    { source:"f21", target:"f15", type:"SUPPORTS",   weight:0.85 },
+  ],
+  constellations: [
+    { id:"c1", label:"AI Governance",        centroid:{ x:0.30, y:0.32 } },
+    { id:"c2", label:"Behavioral Economics", centroid:{ x:0.72, y:0.30 } },
+    { id:"c3", label:"Renewable Energy",     centroid:{ x:0.32, y:0.72 } },
+    { id:"c4", label:"LLM Industry",         centroid:{ x:0.73, y:0.71 } },
+  ],
+};
+
+/* =====================================================================
+   2. VISUAL ENCODING - every property maps to data (visual-design.md s.2)
+   ===================================================================== */
+const DOMAIN_COLOR = {
+  policy:"#f0a500", science:"#4a9eff", economics:"#00d4aa",
+  technology:"#9a7aff", unclassified:"#8888aa",
+};
+// Brightness by validation level: L1 dim -> L4 brilliant.
+const BRIGHTNESS = { 1:0.30, 2:0.55, 3:0.75, 4:1.0 };
+const STALE_COLOR = "#8888aa";
+const STALE_BORDER = "#f0a500";
+
+// connection_count = node degree, computed from edges.
+const degree = {};
+DATA.nodes.forEach(n => degree[n.id] = 0);
+DATA.edges.forEach(e => { degree[e.source]++; degree[e.target]++; });
+DATA.nodes.forEach(n => { n.connection_count = degree[n.id]; });
+
+// Star radius: base 6px + 1px per connection, capped at 14px.
+const starRadius = d => Math.min(14, 6 + d.connection_count);
+
+/* =====================================================================
+   3. SVG SETUP - universe canvas, glow filter, zoomable root, layers
+   ===================================================================== */
+let W = window.innerWidth, H = window.innerHeight;
+const svg = d3.select("#sky").attr("viewBox", [0,0,W,H]);
+
+const defs = svg.append("defs");
+const glow = defs.append("filter").attr("id","glow")
+  .attr("x","-80%").attr("y","-80%").attr("width","260%").attr("height","260%");
+glow.append("feGaussianBlur").attr("stdDeviation",3.2).attr("result","b");
+const merge = glow.append("feMerge");
+merge.append("feMergeNode").attr("in","b");
+merge.append("feMergeNode").attr("in","SourceGraphic");
+
+// Root group - everything inside pans / zooms together.
+const root = svg.append("g");
+const edgeLayer  = root.append("g").attr("class","edges");
+const labelLayer = root.append("g").attr("class","constellation-labels");
+const nodeLayer  = root.append("g").attr("class","nodes");
+
+const centroidOf = id => DATA.constellations.find(c => c.id === id).centroid;
+
+/* =====================================================================
+   4. FORCE SIMULATION - galaxy layout: nodes cluster around their
+      constellation centroid; pending facts are pushed to an outer orbit.
+   ===================================================================== */
+const sim = d3.forceSimulation(DATA.nodes)
+  .force("link", d3.forceLink(DATA.edges).id(d => d.id)
+    .distance(e => e.type === "CONTRADICTS" ? 150 : 70)
+    .strength(0.45))
+  .force("charge", d3.forceManyBody().strength(-220))
+  .force("collide", d3.forceCollide().radius(d => starRadius(d) + 9))
+  // Pull each star toward its constellation centroid.
+  .force("cx", d3.forceX(d => centroidOf(d.constellation).x * W).strength(0.09))
+  .force("cy", d3.forceY(d => centroidOf(d.constellation).y * H).strength(0.09))
+  // PendingFacts orbit outside the main cluster (visual-design.md s.2).
+  .force("orbit", d3.forceRadial(
+      d => d.is_pending ? Math.min(W,H) * 0.46 : 0, W/2, H/2)
+    .strength(d => d.is_pending ? 0.35 : 0));
+
+/* =====================================================================
+   5. RENDER EDGES - styled per type (visual-design.md s.5)
+   ===================================================================== */
+const EDGE_STYLE = {
+  DERIVED_FROM: { stroke:"#ffffff", opacity:0.15, dash:null },
+  SUPPORTS:     { stroke:"#4a9eff", opacity:0.30, dash:"5,4" },
+  EXAMPLE_OF:   { stroke:"#00d4aa", opacity:0.35, dash:"5,4" },
+  CONTRADICTS:  { stroke:"#ff4a4a", opacity:0.50, dash:null },
+  REINFORCES:   { stroke:"#ffffff", opacity:0.25, dash:null },
+};
+const edgeSel = edgeLayer.selectAll("line")
+  .data(DATA.edges).join("line")
+  .attr("class", e => e.type === "CONTRADICTS" ? "edge edge-contradicts" : "edge")
+  .attr("stroke", e => EDGE_STYLE[e.type].stroke)
+  .attr("stroke-width", e => e.type === "CONTRADICTS" ? 2 : 1.4)
+  .attr("stroke-dasharray", e => EDGE_STYLE[e.type].dash)
+  .attr("stroke-opacity", e => EDGE_STYLE[e.type].opacity);
+
+/* =====================================================================
+   6. RENDER CONSTELLATION LABELS - faint, at each cluster centroid
+   ===================================================================== */
+const conLabels = labelLayer.selectAll("text")
+  .data(DATA.constellations).join("text")
+  .attr("class","constellation-label")
+  .attr("x", c => c.centroid.x * W)
+  .attr("y", c => c.centroid.y * H)
+  .text(c => c.label);
+
+/* =====================================================================
+   7. RENDER STARS - one <g.node> per fact; inner <g.star-body> is the
+      element that recedes elastically when filtered.
+   ===================================================================== */
+const nodeSel = nodeLayer.selectAll("g.node")
+  .data(DATA.nodes).join("g")
+  .attr("class", d =>
+    "node" + (d.is_stale ? " stale" : "") + (d.is_pending ? " pending" : ""))
+  .call(makeDrag(sim));
+
+const body = nodeSel.append("g").attr("class","star-body");
+
+// Halo - blurred glow, intensity scales with validation brightness.
+body.append("circle")
+  .attr("class","star-halo")
+  .attr("r", d => starRadius(d) * 2.4)
+  .attr("fill", d => d.is_stale ? STALE_COLOR : DOMAIN_COLOR[d.domain])
+  .attr("fill-opacity", d => BRIGHTNESS[d.validation_level] * 0.45)
+  .attr("filter","url(#glow)");
+
+// Core - the star itself. Brightness = validation level.
+body.append("circle")
+  .attr("class","star-core")
+  .attr("r", starRadius)
+  .attr("fill", d => d.is_stale ? STALE_COLOR : DOMAIN_COLOR[d.domain])
+  .attr("fill-opacity", d => BRIGHTNESS[d.validation_level])
+  .attr("stroke", d => d.is_stale ? STALE_BORDER : "none")
+  .attr("stroke-width", d => d.is_stale ? 1.6 : 0)
+  .attr("stroke-dasharray", d => d.is_stale ? "3,2" : null);
+
+// L4 facts get a blazing white ring (visual-design.md s.2).
+body.filter(d => d.validation_level === 4)
+  .append("circle")
+  .attr("r", d => starRadius(d) + 3.5)
+  .attr("fill","none").attr("stroke","#ffffff").attr("stroke-opacity",0.9)
+  .attr("stroke-width",1.3);
+
+// Per-star label - hidden until the user zooms in (AC-7).
+body.append("text")
+  .attr("class","star-label")
+  .attr("y", d => starRadius(d) + 13)
+  .text(d => d.claim.length > 26 ? d.claim.slice(0,26) + "..." : d.claim);
+
+/* =====================================================================
+   8. SIMULATION TICK - reposition stars, edges, labels each frame
+   ===================================================================== */
+sim.on("tick", () => {
+  edgeSel
+    .attr("x1", e => e.source.x).attr("y1", e => e.source.y)
+    .attr("x2", e => e.target.x).attr("y2", e => e.target.y);
+  nodeSel.attr("transform", d => `translate(${d.x},${d.y})`);
+});
+
+/* =====================================================================
+   9. DRAG - reposition a star (warms the simulation while dragging)
+   ===================================================================== */
+function makeDrag(simulation) {
+  return d3.drag()
+    .on("start", (event,d) => {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x; d.fy = d.y;
+    })
+    .on("drag", (event,d) => { d.fx = event.x; d.fy = event.y; })
+    .on("end", (event,d) => {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null; d.fy = null;
+    });
+}
+
+/* =====================================================================
+   10. ZOOM - scroll to zoom. Zoom in reveals star labels (AC-7);
+       zoom out lets constellation labels dominate (AC-8).
+   ===================================================================== */
+svg.call(d3.zoom().scaleExtent([0.4,5]).on("zoom", (event) => {
+  root.attr("transform", event.transform);
+  const k = event.transform.k;
+  d3.selectAll(".star-label").style("opacity", k > 1.8 ? 0.95 : 0);
+  conLabels.style("opacity", k > 2.6 ? 0.15 : 0.65);
+}));
+
+/* =====================================================================
+   11. ELASTIC NAVIGATION - the core differentiator (DR-020).
+       Filtered stars recede to 8% opacity + 0.4x scale; they NEVER
+       disappear. Clearing the filter springs them back.
+   ===================================================================== */
+const tooltip = d3.select("#tooltip");
+
+// Build domain checkboxes from the palette.
+const domainBox = d3.select("#domain-filters");
+Object.keys(DOMAIN_COLOR).filter(d => d !== "unclassified").forEach(dom => {
+  const label = domainBox.append("label");
+  label.append("input")
+    .attr("type","checkbox").attr("checked",true).attr("data-domain",dom)
+    .on("change", applyFilter);
+  label.append("span").attr("class","swatch")
+    .style("background", DOMAIN_COLOR[dom]);
+  label.append("span").text(dom.charAt(0).toUpperCase() + dom.slice(1));
+});
+d3.select("#level-filter").on("change", applyFilter);
+
+function applyFilter() {
+  const activeDomains = new Set();
+  d3.selectAll("#domain-filters input").each(function() {
+    if (this.checked) activeDomains.add(this.getAttribute("data-domain"));
+  });
+  const minLevel = +d3.select("#level-filter").property("value");
+  const filtering = activeDomains.size < 4 || minLevel > 1;
+
+  // Decide visibility per star.
+  DATA.nodes.forEach(n => {
+    n._visible = activeDomains.has(n.domain) && n.validation_level >= minLevel;
+  });
+
+  // Stars recede or spring back; passing stars get a brightness emphasis.
+  body
+    .classed("receded",   d => !d._visible)
+    .classed("emphasized", d => filtering && d._visible);
+
+  // An edge recedes with its endpoints (visual-design.md s.5).
+  edgeSel.attr("stroke-opacity", e => {
+    const base = EDGE_STYLE[e.type].opacity;
+    return (e.source._visible && e.target._visible) ? base : base * 0.06;
+  });
+}
+
+/* =====================================================================
+   12. HOVER TOOLTIP - claim, confidence, validation level (AC-4)
+   ===================================================================== */
+const LEVEL_NAME = { 1:"L1 Self", 2:"L2 Team", 3:"L3 Community", 4:"L4 Expert" };
+nodeSel
+  .on("mouseover", (event,d) => {
+    let state = d.is_pending ? " &middot; PENDING" : (d.is_stale ? " &middot; STALE" : "");
+    tooltip.html(
+      `<div class="claim">${d.claim}</div>` +
+      `<div class="meta"><b>${d.domain}</b> &middot; confidence ` +
+      `<b>${d.confidence}</b><br/>validation <b>${LEVEL_NAME[d.validation_level]}` +
+      `</b>${state}<br/>connections <b>${d.connection_count}</b></div>`)
+      .style("opacity",1);
+  })
+  .on("mousemove", (event) => {
+    tooltip.style("left", (event.clientX + 16) + "px")
+           .style("top",  (event.clientY + 16) + "px");
+  })
+  .on("mouseout", () => tooltip.style("opacity",0));
+
+/* =====================================================================
+   13. RESPONSIVE - keep the universe centered on resize
+   ===================================================================== */
+window.addEventListener("resize", () => {
+  W = window.innerWidth; H = window.innerHeight;
+  svg.attr("viewBox", [0,0,W,H]);
+  conLabels.attr("x", c => c.centroid.x * W).attr("y", c => c.centroid.y * H);
+  sim.force("cx", d3.forceX(d => centroidOf(d.constellation).x * W).strength(0.09))
+     .force("cy", d3.forceY(d => centroidOf(d.constellation).y * H).strength(0.09))
+     .alpha(0.4).restart();
+});
+</script>
+</body>
+</html>

@@ -668,7 +668,37 @@ Always start with models/ — zero dependencies.
 
 ---
 
-## 13. Decision Log
+## 13. Stellar Visual Language
+
+Lucid's knowledge graph uses a stellar (우주/별) metaphor where:
+  KnowledgeSpace  = Universe (우주)
+  FactNode        = Star (별)
+  Knowledge cluster = Constellation (별자리)
+  Validation level  = Star brightness (L1 dim → L4 brilliant)
+  Star color        = Domain (policy=amber, science=blue, econ=teal, tech=purple)
+  is_stale          = Flickering gray star
+  CONTRADICTS edge  = Red tension line with pulse animation
+
+Core UX principle — Elastic Navigation:
+  When filtered, irrelevant stars RECEDE to 8% opacity.
+  They never disappear. Context is always preserved.
+  On filter clear, stars spring back elastically.
+  This is the key differentiator from Obsidian's graph view.
+
+API requirement for graph endpoint:
+  GET /api/spaces/{sid}/graph must return validation_level (1-4),
+  is_stale, is_pending, connection_count, and constellation data.
+  See docs/visual-design.md and docs/feature-spec-stellar-graph.md.
+
+Do NOT implement the graph as a static node-link diagram.
+Every visual property must encode real data from the FactNode schema.
+
+Full spec: [`docs/visual-design.md`](docs/visual-design.md) and
+[`docs/feature-spec-stellar-graph.md`](docs/feature-spec-stellar-graph.md).
+
+---
+
+## 14. Decision Log
 
 Full log in [`docs/decision-log.md`](docs/decision-log.md).
 
@@ -694,6 +724,12 @@ Full log in [`docs/decision-log.md`](docs/decision-log.md).
 | DR-016 | space_id on every fact and API operation; Neo4j indexed |
 | DR-017 | Synergy Worker cadence: event-driven with debounce |
 | DR-018 | C2 may traverse EXAMPLE_OF/SUPPORTS, weighted + labeled |
+| DR-019 | Stellar metaphor: KnowledgeSpace=Universe, FactNode=Star |
+| DR-020 | Elastic Navigation: filtered stars recede, never disappear |
+| DR-021 | Star brightness encodes validation level L1-L4 |
+| DR-022 | Star color encodes domain (policy/science/econ/tech) |
+| DR-023 | Contradiction edges pulse red at 0.5Hz |
+| DR-024 | Constellation = emergent cluster via Louvain (not user-defined) |
 
 Still open: **O-3** — contradiction-flag UI placement (inline vs dedicated view).
 
