@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lucid-backend"
+version = "0.3.0"
+description = "Lucid - validation infrastructure for the post-AI internet (backend)."
+requires-python = ">=3.11"
+readme = "../README.md"
+license = { text = "Proprietary" }
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["api*", "core*", "models*"]
+exclude = ["tests*"]
+
+# --- Pytest ---
+# pytest.ini is the source of truth for now; mirrored here so `pytest --help` and
+# IDE integrations find consistent config when run from pyproject.
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "integration: requires a running Neo4j instance",
+]
+
+# --- Ruff ---
+# Sprint 0 baseline: enable a small high-signal rule set so the existing
+# scaffold passes today. Tighten in later sprints as code lands.
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+extend-exclude = [
+    ".pytest_cache",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401"]  # unused imports OK in test scaffolds
+
+# --- Mypy ---
+# Sprint 0 baseline: lenient. Strictness ratchets up sprint-by-sprint as
+# real implementations land (per beta-backlog.md section 5 Sprint 1A onwards).
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+no_implicit_optional = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+follow_imports = "silent"
+exclude = [
+    "tests/",
+    "build/",
+    "dist/",
+]
