@@ -56,6 +56,30 @@ must pass tests using `tests/mock_llm.py` BEFORE any real API calls.
 `tests/mock_llm.py` holds deterministic fake Claude responses; it is the
 first checkpoint of S0, not the last.
 
+### 1.1 Beta Capture Entry Points (DR-025, DR-026)
+
+Beta capture is restricted to two devices and seven entry points. The
+constraint is provenance: every captured fact must carry a verifiable
+`source_url`. Capture paths that cannot guarantee this are excluded.
+
+```
+Chrome Extension (Desktop) — 5 entry points
+  · Full page capture
+  · Highlight / selected text
+  · YouTube video (transcript → Whisper fallback)
+  · Page image right-click (Claude Vision)
+  · PDF opened in Chrome (pdfplumber)
+
+PWA Share Target (Mobile) — 2 entry points
+  · OS share sheet (Share Target)
+  · URL paste (iOS Share Target workaround)
+```
+
+Excluded from beta scope (no `source_url`):
+screenshot upload, camera capture, arbitrary file upload, clipboard
+auto-detect, voice memo, email forward. Full rationale and Phase 1
+policy options: [`docs/capture-stage-spec.md`](docs/capture-stage-spec.md).
+
 ---
 
 ## 2. Test Commands
@@ -277,9 +301,14 @@ accepted. Never conflate the two, and never derive one from the other.
 (:Object {
     uid: UUID,
     name: str,                    # Normalized entity name
-    object_class: str,            # "Company"|"Metric"|"Concept"|
-                                  # "GeopoliticalRegime"|"Person"|
-                                  # "LegalAct"|"Policy"
+    object_class: str,            # Lucid Ontology (12 classes):
+                                  # AtomicFact | Concept | Entity | Event |
+                                  # Procedure | Knowledge | Task | Metric |
+                                  # Resource | Problem | Source
+                                  # Entity subclasses (DR-030):
+                                  # Person | Organization | Service |
+                                  # Product | Place
+                                  # See docs/structure-stage-spec.md §4
     observed_properties: JSON     # Latest known property values
 })
 ```
@@ -381,6 +410,23 @@ these indexes each is a full graph scan.
     last_run_at: str, status: str
 })
 ```
+
+---
+
+## 4.5 CSVS Stage Specifications
+
+Detailed beta scope for each CSVS loop stage lives in docs/:
+
+```
+docs/capture-stage-spec.md       Capture (C) — input entry points
+docs/structure-stage-spec.md     Structure (S) — atomic fact decomposition
+```
+
+When implementing any feature that touches these stages, read the relevant
+specification first. Do not deviate from beta scope without explicit PO approval.
+
+Validate (V) and Surface (S) specifications are pending and will be added
+to docs/ as they are finalized.
 
 ---
 
@@ -540,6 +586,21 @@ GET    /api/stats                      Global (anonymized)
 12. **ToS-safe capture only.** No instaloader (Meta ToS violation). Instagram
     capture via browser extension only (user-visible screen). YouTube: transcript
     API first, yt-dlp only as last resort with local processing.
+
+13. **Confidence is NOT assigned at Structure stage.** It is derived at
+    Validate/Surface from publisher authority, validation tier, time freshness,
+    and consensus signals. The Structurer never emits a `confidence` value.
+    (DR-028. See docs/structure-stage-spec.md §1. NOTE: the AtomicFact
+    Pydantic stub in section 4 still carries a `confidence` field from the
+    pre-spec model and must be removed in implementation — see CONFLICTS.md.)
+
+14. **Two capture modes: careful and trusted.** Careful mode (default) sends
+    every extracted fact to PendingFact for HITL validation. Trusted mode
+    auto-accepts facts from a user-registered trusted source list straight into
+    FactNode with `auto_accepted=true` and `trust_basis` metadata. Auto-accepted
+    facts surface in a separate review tab and automatically rejoin the main
+    queue when a contradiction is detected, the trust registration is revoked,
+    or `valid_until` expires. (DR-027. See docs/structure-stage-spec.md §2.)
 
 ---
 
