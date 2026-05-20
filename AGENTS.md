@@ -419,20 +419,30 @@ these indexes each is a full graph scan.
 
 ---
 
-## 4.5 CSVS Stage Specifications
+## 4.5 CSVS Stage Specifications and Beta Execution
 
-Complete beta scope for each CSVS loop stage lives in docs/:
+Complete beta scope and execution plan in docs/:
 
 ```
 docs/capture-stage-spec.md       Capture (C)    Input entry points
 docs/structure-stage-spec.md     Structure (S)  AtomicFact decomposition
 docs/validate-stage-spec.md      Validate (V)   HITL judgment
-docs/surface-stage-spec.md       Surface (S)    Active surfacing of facts
+docs/surface-stage-spec.md       Surface (S)    Active surfacing
+docs/beta-backlog.md             Beta plan      Sprint decomposition + user strategy
 ```
 
-When implementing any feature touching these stages, read the relevant
-specification first. Do not deviate from beta scope without explicit
-PO approval.
+### How to use these documents
+
+When implementing any feature, read in this order:
+  1. AGENTS.md (this file) — project-wide invariants
+  2. docs/beta-backlog.md — current sprint and dependencies
+  3. The specific stage spec for the feature you're touching
+
+Do not deviate from beta scope without explicit PO approval. Sprint
+dependencies in beta-backlog.md §4 are strict: do not skip ahead even
+if a later sprint looks simple, because earlier sprints establish data
+contracts that later ones depend on. Sprints sharing a number prefix
+(1A/1B, 2A/2B/2C, 4A/4B, 6A/6B/6C/6D) can be executed in parallel.
 
 ### Cross-stage invariants
 
@@ -440,33 +450,36 @@ These rules span multiple stages and must be enforced consistently:
 
 1. **Source provenance enforcement**
    No FactNode exists without verifiable source_url + captured_at.
-   Untraced capture (screenshots, raw file upload, camera) is excluded
-   from beta. See capture-stage-spec.md §3.
+   Untraced capture excluded from beta. See capture-stage-spec.md §3.
 
 2. **Capture mode determines validation path**
-   `careful` mode → PendingFact queue → Validate UI
-   `trusted` mode → immediate FactNode + separate Auto-accepted tab
-   Set at Capture, executed at Validate. See validate-stage-spec.md §2.
+   `careful` → PendingFact queue → Validate UI
+   `trusted` → immediate FactNode + Auto-accepted tab
+   See validate-stage-spec.md §2.
 
 3. **No AI confidence at Structure stage**
-   Confidence is NOT assigned during decomposition. It is derived at
-   Validate/Surface from publisher_class, validation level (L1-L4),
-   time freshness, and consensus signals. See structure-stage-spec.md §1.
+   Confidence derived at Validate/Surface from publisher_class,
+   validation level (L1-L4), time freshness, consensus signals.
+   See structure-stage-spec.md §1.
 
 4. **Surface identity protocol**
-   All Lucid responses (Active Recall, Passive Recall) must begin with
-   identity-affirming phrases:
-   - "As far as I know..."
-   - "According to your knowledge graph..."
-   - "기흥님 그래프 기준으로..."
-   And must cite fn-ID for every claim. No LLM general knowledge in answers.
+   All Lucid responses begin with identity-affirming phrases
+   ("As far as I know...", "According to your knowledge graph...").
+   All claims cite fn-ID. No LLM general knowledge in answers.
    See surface-stage-spec.md §2.
 
 5. **User on/off control**
-   Surface mode must be toggle-able per device (browser extension icon,
-   mobile main screen, desktop menu bar). OFF disables Active Recall,
-   Contradiction toasts, Staleness alerts. Capture and queue updates
-   continue in background. See surface-stage-spec.md §4.
+   Surface mode is toggle-able per device.
+   OFF disables Active Recall, Contradiction toasts, Staleness alerts.
+   Capture and queue updates continue in background.
+   See surface-stage-spec.md §4.
+
+6. **Wedge discovery posture (NEW)**
+   Beta is for wedge discovery, not wedge validation. Do not hard-code
+   assumptions about target user segments in code or copy. Earlier
+   hypotheses about academic researchers as the primary segment have
+   been retracted; archetype emerges from beta usage data.
+   See beta-backlog.md §1. (DR-053)
 
 ---
 

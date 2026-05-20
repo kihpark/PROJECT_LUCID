@@ -1,6 +1,6 @@
 # CSVS Stage Specs — Integration Conflicts
 
-**Branch:** `feat/lucid-csvs-complete` (continues `feat/lucid-csvs-stages`)
+**Branch:** `feat/lucid-beta-backlog` (continues `feat/lucid-csvs-complete`)
 **Date:** 2026-05-20 (updated; original 2026-05-20)
 **Status:** Open — needs PO review
 
@@ -8,10 +8,11 @@ This file records conflicts surfaced while integrating the four CSVS
 stage specifications into AGENTS.md and the decision log:
 
 ```
-docs/capture-stage-spec.md    (integrated first handoff)
-docs/structure-stage-spec.md  (integrated first handoff)
-docs/validate-stage-spec.md   (integrated this handoff)
-docs/surface-stage-spec.md    (integrated this handoff)
+docs/capture-stage-spec.md    (integrated CSVS handoff 1)
+docs/structure-stage-spec.md  (integrated CSVS handoff 1)
+docs/validate-stage-spec.md   (integrated CSVS handoff 2)
+docs/surface-stage-spec.md    (integrated CSVS handoff 2)
+docs/beta-backlog.md          (integrated this handoff)
 ```
 
 The task instruction is: flag conflicts rather than silently overwrite.
@@ -19,7 +20,7 @@ Each item below was resolved with the safest defensible call; flagged
 here so the PO can confirm or revise.
 
 **Cumulative renumbering offset:** task IDs Y..Z became actual IDs
-Y+2..Z+2 across both handoffs (see C-1 and C-7).
+Y+2..Z+2 across all three handoffs (see C-1, C-7, C-11).
 
 ---
 
@@ -332,3 +333,117 @@ this conflict via a NOTE pointing to CONFLICTS.md. Cross-stage invariant
 (remove from AtomicFact entirely / move to FactNode as the derived
 cached value / keep both as separate concepts). Implementation work to
 update Pydantic models and any seed data follows the chosen path.
+
+
+---
+
+## C-11. DR-051..DR-061 renumbered to DR-053..DR-063
+
+**Conflict.** The Beta Backlog handoff specified that the beta execution
+decisions would be numbered DR-051..DR-061. After the prior CSVS Complete
+handoff, DR-051 and DR-052 were already taken:
+
+```
+DR-051  Staleness detection: daily background scan + dynamic trigger
+DR-052  Stale facts shown with label, not hidden from Surface
+```
+
+**Resolution applied.** Same +2 offset for the third time. The beta
+backlog decisions are now **DR-053..DR-063**. AGENTS.md §4.5 invariant 6
+cites DR-053; no other in-line citation updates were needed in this
+handoff.
+
+The +2 offset has now stabilized across three handoffs and is the
+de-facto convention. If the PO wants the task-supplied IDs to be the
+canonical ones, the existing decisions at DR-023..DR-024, DR-033..DR-034,
+DR-051..DR-052 would need to be moved (probably to a separate DR-200+
+visual-language block).
+
+Mapping (this handoff):
+
+| Task ID | Final ID | Decision |
+|---------|----------|----------|
+| DR-051  | DR-053   | Beta is wedge discovery, not validation |
+| DR-052  | DR-054   | Universal recruitment + self-selection |
+| DR-053  | DR-055   | Beta target: 30-40 users |
+| DR-054  | DR-056   | Archetype: 5 dimensions |
+| DR-055  | DR-057   | Sprint-based decomposition |
+| DR-056  | DR-058   | 15 sprints total (see C-13) |
+| DR-057  | DR-059   | Sprint definition level C |
+| DR-058  | DR-060   | P0/P1 launch-gate classification |
+| DR-059  | DR-061   | Beta launch criteria (all 4 required) |
+| DR-060  | DR-062   | Phase 1 expansion via family/academic |
+| DR-061  | DR-063   | Marketing message validated in beta |
+
+---
+
+## C-12. Stale "researcher" / segment-fix references in older docs
+
+**Conflict.** DR-053 explicitly retracts the assumption that academic
+researchers are the primary target segment. Beta is wedge **discovery**,
+not validation. But several older docs and one AGENTS.md cell still
+encode the retracted assumption. Per the task ("flag them — do not
+silently overwrite"), nothing was edited; each occurrence is listed
+here for the PO to decide.
+
+**Found (10 locations across 7 files):**
+
+| File | Line | Context | Severity |
+|------|------|---------|----------|
+| AGENTS.md | 27 | Three-contexts table: "Personal \| Individual researcher \| ..." | High — appears in the project's first table |
+| AGENTS.md | 288 | `validator_role: str # "researcher" \| "official" \| "expert"` | Low — enum value, not a target-segment claim |
+| LUCID_UNIFIED.md | 88 | "학술연구자, 금융애널리스트, 저널리스트, 정책실무자" — 4 named target segments | High — pitch doc still names the four old segments |
+| LUCID_CONTEXT_PROMPT.md | 126 | "첫 고객: ... ① 학술·산업 연구자 ② 금융·전략 애널리스트 ③ 저널리스트·콘텐츠 제작자 ④ 정책·법무 실무자" | High — context prompt for future agents still names the four segments |
+| docs/demo-scenario.md | 97 | "Persona: a researcher studying the LLM industry" | Medium — demo narrative |
+| docs/integration-architecture.md | 454 | "cannot copy a researcher's accumulated, personal, validated graph" | Low — incidental |
+| docs/synergy/01-use-case-spec.md | 48 | "an academic or industry researcher, a strategy/financial..." | Medium — use-case persona doc |
+| docs/synergy/02-narrative-memo.md | (~20 occurrences across lines 38-220) | Narrative uses "researcher" as the consistent example persona | Medium — narrative memo |
+| docs/synergy/04-scenarios-visual.md | 170 | "The researcher is writing paper P-06" | Medium — same narrative tradition |
+| docs/beta-backlog.md | 20 | "이전 가정(학술 연구자 중심)은 무효화되었다" | Not stale — this is the doc that retracts the assumption |
+
+**Resolution applied.** None. All occurrences preserved as-is.
+
+**PO action.** For each High-severity item, decide:
+
+1. **AGENTS.md line 27 "Individual researcher"** — replace with
+   "Individual knowledge worker", "Individual user", or leave as an
+   illustrative example (this row is the *Personal* context, so it
+   names one possible Personal-context user, not "the target user").
+   Recommend: change to "Individual user" or "Individual knowledge
+   worker" to remove the segment lock-in.
+
+2. **LUCID_UNIFIED.md line 88 and LUCID_CONTEXT_PROMPT.md line 126** —
+   these are pitch/context docs that future agents will read. The
+   "first-customer" list of four segments is now a hypothesis retracted
+   by DR-053. Recommend: rewrite to "knowledge workers whose
+   professional credibility depends on factual accuracy — to be refined
+   by beta wedge-discovery data" (or similar non-committal phrasing).
+
+For Medium-severity items (narrative/demo docs), recommend leaving as
+illustrative examples but adding a one-line note that the persona is
+illustrative and the actual wedge will be determined by beta data.
+
+The Low-severity items (AGENTS.md `validator_role` enum, incidental
+mentions) can stay; they don't encode target-segment claims.
+
+---
+
+## C-13. Sprint count: task says 12, listed IDs total 15
+
+**Conflict (PO-side internal inconsistency).** The task's DR-056 text
+reads:
+
+> 12 sprints total (0, 1A, 1B, 2A, 2B, 2C, 3, 4A, 4B, 5, 6A, 6B, 6C, 6D, 7)
+
+But the listed IDs total **15**, not 12 (count of comma-separated entries
+in the parenthesis). The task description body also says "12 Sprints
+(Sprint 0 through Sprint 7)" — Sprint 0 through Sprint 7 is 8 top-level
+numbers, also not 12. And `docs/beta-backlog.md` §4 clearly lists 15
+sub-sprints.
+
+**Resolution applied.** Stored as DR-058 with the correct count: "15
+sprints total". The list of IDs is preserved verbatim from the task.
+A note in DR-058 references this CONFLICTS.md entry.
+
+**PO action.** Confirm the intended number is 15 (matches the backlog
+spec) or specify which sprints to drop to reach 12.
