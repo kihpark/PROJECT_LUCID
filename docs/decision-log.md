@@ -44,6 +44,24 @@
 | DR-032 | Object matching thresholds: auto-merge (>0.95), semi-auto with user confirmation (0.85-0.95), keep separate (<0.85) | Hybrid approach — automation handles clear cases (case/spacing/transliteration variants) without bothering the user, ambiguous middle band asks for confirmation, low similarity stays separate and is mergeable via Curation. |
 | DR-033 | Knowledge nodes accept any noun-form domain (academic, professional, social, applied) | Free expansion in beta — no domain whitelist; Q2 matching algorithm consolidates synonyms organically; revisit in Phase 1 once distribution data is in. |
 | DR-034 | Curation operations in beta: Reclassify Object, Demote Fact, Drop Fact, Tag/Untag (4 ops only) | 4 ops only — Merge Objects, Split Object, Reclassify Fact, and Cross-space Move deferred to post-beta to keep curation surface tight. |
+| DR-035 | Validate offers 3 actions in beta: Accept / Edit / Reject | Minimize cognitive load — Skip and Bulk-accept deferred to Phase 1. See validate-stage-spec.md §5 and §11. |
+| DR-036 | Edit preserves history as alias list (text + edited_at pairs) | Search robustness + simplicity — `claim` holds the latest text, `aliases[]` retains prior phrasings so the search index still hits the original wording. See validate-stage-spec.md §14 Q1. |
+| DR-037 | Duplicate-fact policy is user-configurable: Quick / Strict / Hybrid | User autonomy on validation rigor — Quick auto-increments `source_count` and skips validation, Strict re-validates every duplicate, Hybrid does quick for same source / strict for new source. See validate-stage-spec.md §14 Q2. |
+| DR-038 | Auto-accepted (trusted) facts support Edit + Demote + Drop in beta | Full curation capability — even auto-accepted facts must be editable, demotable to PendingFact, or droppable from the Auto-accepted tab. See validate-stage-spec.md §7 and §14 Q3. |
+| DR-039 | No automatic source trust scoring in beta | User manages trusted sources manually — `trusted` mode applies only to user-registered sources; automatic source-quality scoring is deferred (would compromise user autonomy). See validate-stage-spec.md §14 Q4. |
+| DR-040 | Validation queue grouped by source (one capture = one group) | Context coherence — N facts from the same lecture/article share context and must be reviewed together. See validate-stage-spec.md §4. |
+| DR-041 | Visual feedback on Accept: star animation + conditional insight toast | Minimum gamification — star appears in mini-graph thumbnail on Accept; toast only fires on graph inflection (≥3 connected facts) or new constellation formation, max 2 per session. See validate-stage-spec.md §8. |
+| DR-042 | Streak / badges / score gamification excluded from beta | Focus on epistemic substance — gamification reviewed for Phase 1+. See validate-stage-spec.md §11. |
+| DR-043 | Surface includes 6 modes: On/Off, Active Recall, Passive Recall, Contradiction, Gatekeeping, Staleness | Comprehensive scope — Mode 0 (On/Off) gates the other five. See surface-stage-spec.md §3. |
+| DR-044 | Active Recall uses inline tooltip + dotted underline, not side panel | Information embedded in text — keywords get dotted underline, hover shows top-3 related facts inline; "See all" opens a separate panel only for navigation. See surface-stage-spec.md §5 and §14 Q1. |
+| DR-045 | Active Recall works in Lucid app + all Chrome extension text fields | Maximum reach without native apps — Gmail, Google Docs, Notion(web), Slack/Twitter/Discord composers, generic textarea/contenteditable. Desktop native apps and mobile keyboards deferred. See surface-stage-spec.md §5 and §14 Q2. |
+| DR-046 | Passive Recall (Ask Lucid) is the beta killer feature | Identity-affirming QnA — text-only in beta; voice ("Hey Lucid") deferred to Phase 1. See surface-stage-spec.md §6. |
+| DR-047 | All Surface responses begin with an identity phrase ("As far as I know..." or equivalent) and cite fn-ID for every claim | Epistemic commitment enforcement — separates Lucid from ChatGPT-style answer machines; violating this is a beta-blocking bug. See surface-stage-spec.md §2 and §6, and §14 Q6. |
+| DR-048 | Contradiction alerts: queue + Stellar View visual only, no toast | Protect user workflow — toast alerts are too disruptive for the contradiction firehose; user discovers contradictions via main-screen badge and red tension lines in Stellar View. See surface-stage-spec.md §7 and §14 Q4. |
+| DR-049 | Gatekeeping requires 3 conditions: contradicting facts + stronger authority + more recent verification | Conservative blocking — all three conditions must hold before Lucid warns; normal fact evolution (e.g., updated statistics from the same source) does NOT trigger a warning. See surface-stage-spec.md §8. |
+| DR-050 | Gatekeeping warns, never blocks. "Save anyway" is recorded as `override_warning: true` in metadata | User autonomy — Lucid surfaces conflicts but the user always decides. Overridden facts get a yellow border in Stellar View for post-hoc review. See surface-stage-spec.md §8 and §14 Q5. |
+| DR-051 | Staleness detection: daily background scan + dynamic trigger at Surface time | Hybrid approach — daily cron flags `is_stale=true` on facts past `valid_until`; if a stale fact is surfaced via Active/Passive Recall before the next scan, the dynamic trigger flags it immediately. See surface-stage-spec.md §9. |
+| DR-052 | Stale facts shown with label, not hidden from Surface | Honest degradation — staleness is visible (label + de-saturated star + slow flicker in Stellar View), and the user chooses re-validate / drop / keep-as-historical. Hiding would silently drop coverage. See surface-stage-spec.md §9. |
 
 ## Open
 
@@ -70,3 +88,11 @@
   and DR-024 (Louvain constellation) were already resolved. Following the same
   precedent above, the CSVS decisions were renumbered to DR-025..DR-034. AGENTS.md
   Section 1.1 and Critical Rules 13-14 cite the renumbered IDs. See CONFLICTS.md.
+- 2026-05-20: the CSVS Complete handoff specified DR-033..DR-050 for the
+  Validate and Surface decisions, but DR-033 (Knowledge nodes) and DR-034
+  (Curation 4 ops) were already taken by the prior CSVS handoff. Applying
+  the same +2 offset, the Validate/Surface decisions were renumbered to
+  DR-035..DR-052. AGENTS.md Section 4.5 cross-stage invariants do not
+  reference DR IDs directly, so no in-line citation updates are required.
+  Cumulative renumbering history is now: task IDs Y..Z map to actual IDs
+  Y+2..Z+2 across both CSVS handoffs. See CONFLICTS.md.

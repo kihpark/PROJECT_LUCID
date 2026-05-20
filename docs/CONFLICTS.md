@@ -1,14 +1,25 @@
 # CSVS Stage Specs — Integration Conflicts
 
-**Branch:** `feat/lucid-csvs-stages`
-**Date:** 2026-05-20
+**Branch:** `feat/lucid-csvs-complete` (continues `feat/lucid-csvs-stages`)
+**Date:** 2026-05-20 (updated; original 2026-05-20)
 **Status:** Open — needs PO review
 
-This file records conflicts surfaced while integrating
-`docs/capture-stage-spec.md` and `docs/structure-stage-spec.md` into
-AGENTS.md and the decision log. The task instruction was: flag conflicts
-rather than silently overwrite. Each item below was resolved with the
-safest defensible call; flagged here so the PO can confirm or revise.
+This file records conflicts surfaced while integrating the four CSVS
+stage specifications into AGENTS.md and the decision log:
+
+```
+docs/capture-stage-spec.md    (integrated first handoff)
+docs/structure-stage-spec.md  (integrated first handoff)
+docs/validate-stage-spec.md   (integrated this handoff)
+docs/surface-stage-spec.md    (integrated this handoff)
+```
+
+The task instruction is: flag conflicts rather than silently overwrite.
+Each item below was resolved with the safest defensible call; flagged
+here so the PO can confirm or revise.
+
+**Cumulative renumbering offset:** task IDs Y..Z became actual IDs
+Y+2..Z+2 across both handoffs (see C-1 and C-7).
 
 ---
 
@@ -153,31 +164,171 @@ re-checked for any references to dropped edges.
 
 ---
 
-## C-5. Section 14 (AGENTS.md decision log summary table) not updated
+## C-5. Section 14 (AGENTS.md decision log summary table) — RESOLVED
 
-**Conflict (lightweight).** AGENTS.md §14 holds a summary table of all
-DRs and ends at DR-024. The full log lives in `docs/decision-log.md`,
-which is now current through DR-034.
+**Conflict (lightweight).** AGENTS.md §14 held a summary table that ended
+at DR-024 after the first handoff while the full log was current through
+DR-034 (now DR-052 after this handoff).
 
-**Resolution applied.** Not updated — the task did not explicitly request
-it, and §14 is a denormalized convenience copy.
-
-**PO action.** Either (a) update §14 to mirror decision-log.md through
-DR-034, or (b) explicitly mark §14 as a sample/excerpt and point readers
-to decision-log.md as the source of truth.
+**Resolution applied (this handoff).** §14 was extended in the
+consistency pass (Operation 4) to mirror docs/decision-log.md through
+DR-052. The duplication is intentional — §14 is a single-screen quick
+reference for agents; the full log carries rationales. PO action: none.
 
 ---
 
-## C-6. Validate / Surface specs pending
+## C-6. Validate / Surface specs — INTEGRATED
 
-Per the task and Section 4.5, the Validate and Surface stage
-specifications are not yet finalized. Section 4.5 is structured so that
-adding two more spec references is a mechanical edit. CONFLICTS.md
-should be revisited when those specs land — they will likely surface
-similar tensions around HITL flow, ValidationMark assignment, and the
-derived confidence signal.
+Validate and Surface specs landed in this handoff. AGENTS.md §4.5 was
+expanded to reference all four specs and now includes the five
+cross-stage invariants (source provenance, capture mode -> validation
+path, no confidence at Structure, Surface identity protocol, user
+on/off control). Two new Critical Rules (15 and 16) codify the Surface
+identity protocol and Capture provenance enforcement. PO action: none,
+but see C-7 through C-10 for new flagged items surfaced by the
+integration.
 
 ---
 
 *If a resolution above is wrong, edit the offending file, update this
 file's status, and remove the corresponding entry.*
+
+
+---
+
+## C-7. DR-033..DR-050 renumbered to DR-035..DR-052
+
+**Conflict.** The CSVS Complete handoff specified that the Validate and
+Surface decisions would be numbered DR-033..DR-050. After the first
+handoff's renumbering, DR-033 and DR-034 were already taken:
+
+```
+DR-033  Knowledge nodes accept any noun-form domain in beta
+DR-034  Curation operations in beta: 4 ops only
+```
+
+**Resolution applied.** Continuing the +2 offset from the first handoff,
+the Validate/Surface decisions were renumbered DR-033..DR-050 →
+**DR-035..DR-052**. Section 4.5 cross-stage invariants do not reference
+DR IDs by number, so no in-line citation edits were needed. AGENTS.md
+Critical Rules 15-16 cite the renumbered IDs (DR-047, DR-025, DR-026).
+
+**PO action.** Confirm the renumbering is acceptable (it preserves all
+prior numbering and follows the exact precedent set on 2026-05-19), OR
+specify a different scheme (e.g., move stellar visual decisions
+DR-019..DR-024 to a separate DR-200+ block and free up DR-023..DR-050
+for CSVS).
+
+Mapping (this handoff):
+
+| Task ID | Final ID | Decision |
+|---------|----------|----------|
+| DR-033  | DR-035   | Validate beta actions: Accept / Edit / Reject |
+| DR-034  | DR-036   | Edit preserves history as alias list |
+| DR-035  | DR-037   | Duplicate-fact policy user-configurable |
+| DR-036  | DR-038   | Auto-accepted facts: Edit + Demote + Drop |
+| DR-037  | DR-039   | No automatic source trust scoring |
+| DR-038  | DR-040   | Validation queue grouped by source |
+| DR-039  | DR-041   | Visual feedback on Accept |
+| DR-040  | DR-042   | Gamification excluded |
+| DR-041  | DR-043   | Surface 6 modes |
+| DR-042  | DR-044   | Active Recall: inline tooltip |
+| DR-043  | DR-045   | Active Recall: Lucid app + Chrome extension |
+| DR-044  | DR-046   | Passive Recall is killer feature |
+| DR-045  | DR-047   | Identity phrase + fn-ID required |
+| DR-046  | DR-048   | Contradiction: queue + Stellar only |
+| DR-047  | DR-049   | Gatekeeping: 3 conditions |
+| DR-048  | DR-050   | Gatekeeping warns, never blocks |
+| DR-049  | DR-051   | Staleness: daily + dynamic |
+| DR-050  | DR-052   | Stale shown with label |
+
+---
+
+## C-8. Edge type vocabulary — still divergent (carryover from C-4)
+
+**Conflict (unchanged from first handoff).** Structure spec §5 defines
+an edge vocabulary that diverges from the one in AGENTS.md §4. Validate
+spec §5 (Accept body: Fact-Object and Fact-Fact relations formed) and
+Surface spec §6 (Passive Recall responses cite fn-ID) both depend on
+the Structure-spec vocabulary being canonical. The divergence is now
+load-bearing on three specs, not just one.
+
+**Concrete divergences:**
+
+| AGENTS.md §4 (current) | Structure spec §5 (canonical)            |
+|------------------------|-------------------------------------------|
+| ASSERTS_STATE          | ASSERTS_PROPERTY + DESCRIBES_STATE        |
+| HAS_CONCEPT            | (dropped; use PART_OF Object-to-Object)   |
+| MENTIONS               | (dropped; use INVOLVES Fact-to-Entity)    |
+| REINFORCES             | (dropped; not in new vocab)               |
+| -                      | ADDRESSES (Fact-to-Problem) - missing     |
+| -                      | USES (Fact-to-Resource) - missing         |
+| -                      | INVOLVES (Fact-to-Person/Org) - missing   |
+| -                      | PART_OF, INSTANCE_OF, LOCATED_IN,         |
+|                        | HAS_ROLE (Object-Object) - missing        |
+| -                      | INTERPRETS, SUPERSEDES (Fact-Fact)        |
+| DERIVED_FROM (F-to-Src)| CAPTURED_FROM (F-to-Src) - renamed?       |
+
+**Resolution applied.** Not touched. AGENTS.md §4 edge list is
+unchanged. This is implementation-touching and a silent rewrite would
+break C1 contradiction detection, the [:MENTIONS] / [:CONTRADICTS]
+references in §5 Synergy text, and the DERIVED_FROM references in
+§5/§12 of AGENTS.md.
+
+**PO action.** This needs a dedicated reconciliation pass before any
+Structure-stage code lands:
+
+1. Decide whether DERIVED_FROM is renamed to CAPTURED_FROM or both
+   names coexist (the Structure spec uses CAPTURED_FROM but DR-016
+   and Critical Rule 1 implicitly assume DERIVED_FROM).
+2. Confirm ASSERTS_PROPERTY + DESCRIBES_STATE supersede
+   ASSERTS_STATE everywhere.
+3. Decide the fate of REINFORCES, HAS_CONCEPT, MENTIONS - drop,
+   or keep as synergy-layer-only edges.
+4. AGENTS.md §4 Edge Types block gets a full rewrite and §5 Synergy
+   text gets a sweep for orphaned edge references.
+
+A follow-up branch (refactor/lucid-edge-vocab) is the natural home.
+
+---
+
+## C-9. Cross-stage invariant 5 wording — toast vs no-toast
+
+**Conflict (minor wording).** AGENTS.md §4.5 cross-stage invariant 5
+(verbatim from the task) reads:
+
+> OFF disables Active Recall, Contradiction toasts, Staleness alerts.
+
+But DR-048 (this handoff) and Surface spec §7 explicitly exclude
+contradiction toasts from beta. So in beta, "OFF disables Contradiction
+toasts" is a no-op - there are no toasts to disable.
+
+**Resolution applied.** Text kept verbatim per the task ("Do NOT alter
+content of the four specification files"). The PO-supplied invariant
+text is in AGENTS.md as-is.
+
+**PO action.** Either (a) reword invariant 5 to "OFF disables Active
+Recall, Contradiction badges and Stellar-View visual flags, Staleness
+alerts; background detection continues without surfacing", or (b) leave
+it as-is on the basis that Phase 1 may add contradiction toasts as a
+user-opt-in, in which case the invariant is forward-looking.
+
+---
+
+## C-10. AtomicFact confidence field — still unreconciled (carryover from C-2)
+
+**Conflict (unchanged from first handoff).** AGENTS.md §4 AtomicFact /
+FactNode Pydantic stubs still carry confidence: Literal[HIGH,MEDIUM,LOW].
+Structure spec §1 (DR-028, Critical Rule 13) says confidence is NOT
+assigned at Structure. Validate spec §6 reframes confidence as derived
+metadata shown at validation time (publisher class, time validity,
+related facts), not a value on the fact.
+
+**Resolution applied.** Stubs left in place; Critical Rule 13 references
+this conflict via a NOTE pointing to CONFLICTS.md. Cross-stage invariant
+3 reinforces the same point.
+
+**PO action.** Same as C-2 - choose one of the three reconciliations
+(remove from AtomicFact entirely / move to FactNode as the derived
+cached value / keep both as separate concepts). Implementation work to
+update Pydantic models and any seed data follows the chosen path.
