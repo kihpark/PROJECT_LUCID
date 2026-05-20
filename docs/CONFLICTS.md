@@ -1,6 +1,6 @@
 # CSVS Stage Specs — Integration Conflicts
 
-**Branch:** `feat/lucid-beta-backlog` (continues `feat/lucid-csvs-complete`)
+**Branch:** `feat/lucid-sprint-0` (continues `feat/lucid-beta-backlog`)
 **Date:** 2026-05-20 (updated; original 2026-05-20)
 **Status:** Open — needs PO review
 
@@ -12,7 +12,8 @@ docs/capture-stage-spec.md    (integrated CSVS handoff 1)
 docs/structure-stage-spec.md  (integrated CSVS handoff 1)
 docs/validate-stage-spec.md   (integrated CSVS handoff 2)
 docs/surface-stage-spec.md    (integrated CSVS handoff 2)
-docs/beta-backlog.md          (integrated this handoff)
+docs/beta-backlog.md          (integrated CSVS handoff 3)
+MASTER_HANDOFF.md             (v2 single source of truth; supersedes prior handoffs)
 ```
 
 The task instruction is: flag conflicts rather than silently overwrite.
@@ -447,3 +448,275 @@ A note in DR-058 references this CONFLICTS.md entry.
 
 **PO action.** Confirm the intended number is 15 (matches the backlog
 spec) or specify which sprints to drop to reach 12.
+
+
+---
+
+## C-14. MASTER_HANDOFF v2 removes the staleness system
+
+**Conflict (major, multi-doc).** `MASTER_HANDOFF.md` §2 design decision 3:
+
+> Stale 시스템 없음. 시점 사실은 영원히 진실 ("한국 금리 2024-12 기준 3.5%").
+> valid_until 필드 없음. is_stale 플래그 없음.
+
+This directly contradicts prior decisions integrated into the repo:
+
+- **DR-015** "valid_from required for policy/legal facts" — relies on
+  valid_until and is_stale as the staleness checker's inputs.
+- **DR-051** "Staleness detection: daily background scan + dynamic trigger"
+  — entire decision becomes moot.
+- **DR-052** "Stale facts shown with label, not hidden from Surface" —
+  moot.
+- **AGENTS.md Critical Rule 10** "valid_from is required for policy/legal
+  facts. ... is_stale must be checkable by background job."
+- **AGENTS.md §4 FactNode model** has `valid_from`, `valid_until`,
+  `is_stale: bool = False` as Pydantic fields.
+- **`surface-stage-spec.md` §9** entire Mode 5 (Staleness) is defined here.
+- **`docs/decision-log.md` DR-051, DR-052** notes.
+- **Cross-stage invariant 5** in §4.5: "OFF disables ... Staleness alerts"
+  — reference to a feature that the master handoff removes.
+
+**Resolution applied.** None — flagged here. Sprint 0 does not touch any
+of the affected files. PO action required before Sprint 1A (data models)
+because the FactNode schema is on the critical path.
+
+**PO action.** Choose one:
+
+1. **Accept v2 fully:** strip `valid_from`, `valid_until`, `is_stale`
+   from the FactNode model, retire DR-015 / DR-051 / DR-052, remove
+   Mode 5 from surface-stage-spec.md, rewrite Critical Rule 10, remove
+   "Staleness alerts" from cross-stage invariant 5.
+2. **Keep v1 partial:** retain `valid_from` for legal/policy context
+   (it is still useful as descriptive metadata) but drop `valid_until`
+   and `is_stale` and Mode 5. Reword Critical Rule 10 accordingly.
+3. **Reject v2 on this point:** keep the staleness system; update
+   MASTER_HANDOFF.md §2 decision 3 to match prior decisions.
+
+The Sprint 1A "Data Models + Neo4j Schema" sprint cannot start until
+this is decided — its DoD depends on the final FactNode shape.
+
+---
+
+## C-15. MASTER_HANDOFF v2 makes the Surface toggle non-bypassable for identity protocol
+
+**Conflict (medium, behavior).** MASTER_HANDOFF §2 design decision 4:
+
+> Identity protocol 강제. Surface 모든 응답은 "As far as I know..." 같은
+> 표현으로 시작. 사용자가 끌 수 없음 (베타).
+
+vs. **Cross-stage invariant 5** in AGENTS.md §4.5:
+
+> Surface mode must be toggle-able per device (browser extension icon,
+> mobile main screen, desktop menu bar). OFF disables Active Recall,
+> Contradiction toasts, Staleness alerts. ...
+
+These are not in direct contradiction (the toggle disables *modes*, but
+when Lucid does respond the identity protocol still fires), but the
+wording in invariant 5 implies Lucid can be fully silenced. The master
+handoff is more specific: Mode 0 toggles the surface modes, but any
+response that does fire MUST carry the identity protocol. Critical
+Rule 15 already encodes this — "violating this rule is a beta-blocking
+bug."
+
+**Resolution applied.** None. The two statements can coexist as written.
+Flagging only because the master handoff's "사용자가 끌 수 없음" wording
+is worth surfacing.
+
+**PO action.** Confirm interpretation: Mode 0 toggle silences modes;
+identity protocol fires whenever any response goes out and is not
+user-toggleable. If yes, no edit needed. If the intent is that
+*everything* Lucid says (including, e.g., logs or push notifications)
+must carry the identity phrase, expand Critical Rule 15.
+
+---
+
+## C-16. MASTER_HANDOFF v2 says "5 modes", surface-stage-spec.md says 6
+
+**Conflict (minor, naming).** MASTER_HANDOFF §4: "Surface — 5 Modes"
+listed as Mode 0 / 1 / 2 / 3 / 4 (with "Mode 5 Staleness는 베타에서
+제거됨" parenthetical).
+
+But `docs/surface-stage-spec.md` §3 says **6 modes** (counting Mode 0
+On/Off as one of them) and `DR-043` codifies it as 6.
+
+After removing Mode 5 (per C-14), the count becomes:
+- v1 spec: 6 modes (0, 1, 2, 3, 4, 5)
+- v2 spec: 5 modes (0, 1, 2, 3, 4)
+
+**Resolution applied.** None. DR-043 still says 6 modes; the v2 spec
+says 5.
+
+**PO action.** When resolving C-14, also update DR-043 to "5 modes" and
+edit the surface-stage-spec.md §3 mode list to drop Mode 5.
+
+---
+
+## C-17. MASTER_HANDOFF v2 introduces "Save / Decide" overlay that supersedes the careful/trusted-at-capture flow
+
+**Conflict (major, UX flow).** MASTER_HANDOFF §2 design decisions 1, 2,
+5, 6, and §9:
+
+> 1. Save / Decide 분리. "Save to Lucid" 클릭은 분석 트리거. 사실이
+>    그래프에 들어가는 결정은 Decide 단계에서.
+> 2. Per-source policy는 Settings에 한 번. Decide 시점에 "이 출처
+>    신뢰할까?" 같은 질문 절대 금지. Trusted/Careful은 Settings
+>    SET-2에서 한 번 설정.
+> 5. Warn, never block (Gatekeeping).
+> 6. Smart dismiss. ESC/×/바깥 클릭 = Pending 큐. ... auto-dismiss
+>    타이머 없음. "Done" 버튼 없음.
+
+> ❌ "지금 검증 / 나중에" 옛 분기. Decide 오버레이의 3 옵션
+>    (Accept all / Review / Discard)으로 대체.
+
+This rewrites the Capture/Validate handoff:
+
+- **Old (DR-027, validate-stage-spec.md §2):** capture mode (careful /
+  trusted) is selected per capture; careful → PendingFact queue,
+  trusted → immediate FactNode.
+- **New (MASTER_HANDOFF §2):** capture is one button. After background
+  analysis, a Decide overlay offers Accept all / Review / Discard.
+  Trust policy lives in Settings SET-2, not in the capture moment.
+
+Affected files / decisions:
+- **DR-027** "Two capture modes: careful + trusted" — reframed but not
+  retracted; the modes still exist, just live in Settings.
+- **AGENTS.md Critical Rule 14** "Two capture modes: careful and
+  trusted" — still correct but the *selection mechanism* shifts.
+- **AGENTS.md §4.5 cross-stage invariant 2** "Capture mode determines
+  validation path / Set at Capture, executed at Validate." → should
+  read "Set in Settings SET-2, executed at Validate."
+- **`docs/capture-stage-spec.md` §4-§5** still describe the old
+  "지금 검증 / 나중에" branch (DR-027 era). Need a rewrite to match
+  the Decide overlay.
+- **`docs/validate-stage-spec.md` §3, §5** describe a 3-action card
+  (Accept / Edit / Reject) — MASTER_HANDOFF says 3 options
+  (Accept all / Review / Discard). Same action count, different verbs.
+
+**Resolution applied.** None. Sprint 0 doesn't implement either flow.
+PO must decide before Sprint 2A (Chrome Extension Capture) and Sprint
+4A (Validate UI), because those sprints will implement whichever
+overlay design the PO confirms.
+
+**PO action.** Confirm that MASTER_HANDOFF §2 is authoritative for the
+UX flow. If yes, plan a doc-update PR to rewrite capture-stage-spec.md
+§4-§5 and validate-stage-spec.md §3, §5 to match.
+
+---
+
+## C-18. MASTER_HANDOFF v2 says no local LLM; AGENTS.md DR-008 says local embeddings
+
+**Conflict (minor, dep choice).** MASTER_HANDOFF §5 "베타 스택":
+
+> 로컬 모델 안 씀 (베타 단순화)
+
+vs. **DR-008** "Embed once at validation, with a LOCAL embedding model"
+and **AGENTS.md §10** which lists `EMBEDDING_MODEL=paraphrase-
+multilingual-MiniLM-L12-v2` and **§11** "Use a hosted embedding API —
+embeddings run on a local model (DR-008)."
+
+**Resolution applied.** None. The Sprint 0 scaffold's `requirements.txt`
+still includes `sentence-transformers` and `faiss-cpu`, which assumes
+local embeddings.
+
+**PO action.** Reconcile. The master handoff phrasing "로컬 모델 안 씀"
+may refer specifically to local LLMs (i.e., not running Llama locally),
+not to local embedding models. If so, no change needed; just clarify
+the master handoff wording. If MASTER_HANDOFF means no local model of
+any kind, switch to a hosted embedding API and revisit DR-008.
+
+---
+
+## C-19. MASTER_HANDOFF v2 model IDs (claude-sonnet-4-5, claude-haiku-4-5) lag the current Claude family
+
+**Conflict (small, but important for new code).** MASTER_HANDOFF §15:
+
+> 모델: claude-sonnet-4-5 (분해, 분석)
+>      claude-haiku-4-5 (Active Recall 빠른 매칭)
+
+The current Claude model family (as of 2026-05) is 4.6 / 4.7
+(Opus 4.7, Sonnet 4.6, Haiku 4.5). The master handoff lists Sonnet 4.5
+and Haiku 4.5 — Sonnet 4.5 is older.
+
+**Resolution applied.** None. Sprint 0 doesn't call any Claude API.
+The model IDs become load-bearing in Sprint 3 (Structure Engine) and
+Sprint 6B (Passive Recall).
+
+**PO action.** Confirm the master handoff's intent: pin to 4.5 for
+beta budget reasons, or upgrade to 4.6 (Sonnet) / 4.5 (Haiku)? When
+building AI integrations, the system reminder says to "default to the
+latest and most capable Claude models" — so 4.6 Sonnet is the
+recommended default unless the PO has a budget or eval reason to pin.
+
+---
+
+## C-20. MASTER_HANDOFF §6 dir tree uses `backend/app/`; existing repo uses `backend/api/`
+
+**Conflict (cosmetic, but visible).** MASTER_HANDOFF §6 dir structure:
+
+> backend/app/main.py
+> backend/app/capture/
+> backend/app/structure/
+> ...
+
+Existing repo from `feat/lucid-scaffold`:
+
+> backend/api/main.py
+> backend/core/capture/
+> backend/core/structure/
+> ...
+
+AGENTS.md §3 documents the existing layout (`backend/api/` for routes,
+`backend/core/` for the business logic). The master handoff appears to
+collapse both into a single `backend/app/` tree.
+
+**Resolution applied.** None. The Sprint 0 scaffold (existing) is kept
+as `backend/api/` + `backend/core/`; CI, pytest, and the Dockerfile
+all reference it.
+
+**PO action.** Three options:
+
+1. **Accept the existing `api/` + `core/` split** (recommended — code
+   already works, AGENTS.md §3 documents it, tests pass). Update
+   MASTER_HANDOFF §6 to match.
+2. **Migrate to `backend/app/`** — large rename across imports,
+   Dockerfile, docker-compose `command: uvicorn api.main:app ...`,
+   tests, AGENTS.md §3, etc.
+3. **Hybrid** — leave `api/` and `core/` as-is and treat `backend/app/`
+   in MASTER_HANDOFF as a typo / suggestion.
+
+Recommend option 1; defer to PO. Sprint 1A (data models) lands in
+`backend/models/` which both layouts share, so this can wait.
+
+---
+
+## C-21. MASTER_HANDOFF v2 references wireframes/ and archive/ dirs that do not exist
+
+**Conflict (housekeeping).** MASTER_HANDOFF §6 lists:
+
+```
+wireframes/                    HTML 와이어프레임 5 pack
+  pack1-onboarding.html
+  pack2-capture.html
+  pack3-queue.html
+  pack4-surface.html
+  pack5-stellar-settings.html
+
+archive/                       옛 핸드오프 (참고용)
+```
+
+Neither directory exists in the repo. MASTER_HANDOFF §0 says "옛 핸드오프
+파일들은 archive/ 폴더로 이동됨" (old handoffs moved to archive/) — but
+they haven't been moved.
+
+Untracked files at repo root that look like candidates for `archive/`:
+`CODEX_FIRST_PROMPT.md`, `CODEX_REVIEW_PROMPT.md`, `LUCID_UNIFIED.md`,
+`Lucid_Overview.html`, `LUCID_CONTEXT_PROMPT.md`.
+
+**Resolution applied.** None. Sprint 0 does not move files.
+
+**PO action.** Either (a) actually move the listed candidate files
+into `archive/` and create the directory, or (b) update MASTER_HANDOFF
+§6 to reflect the current state. The `wireframes/` directory is more
+urgent because MASTER_HANDOFF §10 and §17 ("와이어프레임이 우선")
+treat the wireframes as authoritative for UI work — Sprint 2A, 4A,
+5, 6A, 6B, 6C, 6D, and 7 will all need them.

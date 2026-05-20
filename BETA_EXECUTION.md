@@ -7,7 +7,7 @@ Update as each sprint completes.
 
 | Sprint | Title | Status | PR | Date |
 |--------|-------|--------|-----|------|
-| 0      | Foundation | Pending | - | - |
+| 0      | Foundation | In Review | (this branch: feat/lucid-sprint-0) | 2026-05-21 |
 | 1A     | Data Models + Neo4j | Pending | - | - |
 | 1B     | Auth + Space API | Pending | - | - |
 | 2A     | Chrome Extension Capture | Pending | - | - |
