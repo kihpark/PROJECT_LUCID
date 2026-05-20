@@ -62,6 +62,17 @@
 | DR-050 | Gatekeeping warns, never blocks. "Save anyway" is recorded as `override_warning: true` in metadata | User autonomy — Lucid surfaces conflicts but the user always decides. Overridden facts get a yellow border in Stellar View for post-hoc review. See surface-stage-spec.md §8 and §14 Q5. |
 | DR-051 | Staleness detection: daily background scan + dynamic trigger at Surface time | Hybrid approach — daily cron flags `is_stale=true` on facts past `valid_until`; if a stale fact is surfaced via Active/Passive Recall before the next scan, the dynamic trigger flags it immediately. See surface-stage-spec.md §9. |
 | DR-052 | Stale facts shown with label, not hidden from Surface | Honest degradation — staleness is visible (label + de-saturated star + slow flicker in Stellar View), and the user chooses re-validate / drop / keep-as-historical. Hiding would silently drop coverage. See surface-stage-spec.md §9. |
+| DR-053 | Beta is wedge discovery, not wedge validation | Honest pitch principle — earlier hypotheses about academic researchers as the primary target have been retracted; usage data determines the wedge. See beta-backlog.md §0. |
+| DR-054 | Universal recruitment + self-selection screening, NOT family/academic channels | Phase 1 expansion preservation — family/academic networks are strategic capital reserved for Phase 1 once the wedge archetype is identified. See beta-backlog.md §1.1. |
+| DR-055 | Beta target: 30-40 users, quality over quantity | Better fewer real signals — 30 retained users beat 70 names; floor is 30, not the 50 figure that appeared in earlier drafts. See beta-backlog.md §1.1 and §1.4. |
+| DR-056 | Archetype measured along 5 dimensions: consumption intensity, validation frequency, surface usage pattern, domain diversity, device environment | Multi-dim wedge discovery — segment is not asked at signup; it is inferred from behavior along these axes. See beta-backlog.md §1.2. |
+| DR-057 | Sprint-based decomposition, NOT week-based | Codex/Claude Code parallelism — sprints are dependency-ordered units of work sized to one Claude Code session = one PR. Calendar time is not the unit. See beta-backlog.md §4. |
+| DR-058 | 15 sprints total (0, 1A, 1B, 2A, 2B, 2C, 3, 4A, 4B, 5, 6A, 6B, 6C, 6D, 7) | Dependency-driven structure — sub-letters (1A/1B etc.) mark parallel-safe siblings; numeric jumps mark dependency boundaries. (NOTE: the PO's task text said "12 sprints" but the listed IDs total 15; flagged in CONFLICTS.md C-13. The 15-sprint structure here matches beta-backlog.md §4 verbatim.) |
+| DR-059 | Sprint definition level C: goal + scope + dependencies + DoD + tests + demo | Codex-autonomous execution — each sprint carries enough context for a Claude Code session to execute without follow-up clarification. See beta-backlog.md §5. |
+| DR-060 | P0 = beta launch required; P1 = continuous deployment during beta | Launch gate clarity — only P0 sprints block the beta launch gate; P1 items deploy continuously once their dependencies are satisfied. See beta-backlog.md §3. |
+| DR-061 | Beta launch criteria: 30+ users AND 60%+ retention AND NPS 40+ AND identified wedge archetype | All four required — partial achievement triggers hypothesis review, not Phase 1 entry. See beta-backlog.md §1.4. |
+| DR-062 | Phase 1 expansion uses family/academic channels matched to discovered wedge | Strategic capital preservation — the channels held back during beta deploy in Phase 1 against the wedge archetype that beta data identified. See beta-backlog.md §1.3. |
+| DR-063 | Marketing message validation is part of beta data collection | Brand message test in field — the four headline messages tracked in beta-backlog.md §8 are themselves a hypothesis tested against user response. |
 
 ## Open
 
@@ -96,3 +107,10 @@
   reference DR IDs directly, so no in-line citation updates are required.
   Cumulative renumbering history is now: task IDs Y..Z map to actual IDs
   Y+2..Z+2 across both CSVS handoffs. See CONFLICTS.md.
+- 2026-05-20: the Beta Backlog handoff specified DR-051..DR-061 for the
+  beta execution decisions, but DR-051 (Staleness daily/dynamic) and
+  DR-052 (Stale shown with label) were already taken by the CSVS Complete
+  handoff. Same +2 offset applied a third time: the beta backlog decisions
+  are now DR-053..DR-063. AGENTS.md §4.5 invariant 6 cites DR-053; no
+  other in-line citation updates needed. The +2 offset is now cumulative
+  across three handoffs.
