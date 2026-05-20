@@ -415,18 +415,52 @@ these indexes each is a full graph scan.
 
 ## 4.5 CSVS Stage Specifications
 
-Detailed beta scope for each CSVS loop stage lives in docs/:
+Complete beta scope for each CSVS loop stage lives in docs/:
 
 ```
-docs/capture-stage-spec.md       Capture (C) — input entry points
-docs/structure-stage-spec.md     Structure (S) — atomic fact decomposition
+docs/capture-stage-spec.md       Capture (C)    Input entry points
+docs/structure-stage-spec.md     Structure (S)  AtomicFact decomposition
+docs/validate-stage-spec.md      Validate (V)   HITL judgment
+docs/surface-stage-spec.md       Surface (S)    Active surfacing of facts
 ```
 
-When implementing any feature that touches these stages, read the relevant
-specification first. Do not deviate from beta scope without explicit PO approval.
+When implementing any feature touching these stages, read the relevant
+specification first. Do not deviate from beta scope without explicit
+PO approval.
 
-Validate (V) and Surface (S) specifications are pending and will be added
-to docs/ as they are finalized.
+### Cross-stage invariants
+
+These rules span multiple stages and must be enforced consistently:
+
+1. **Source provenance enforcement**
+   No FactNode exists without verifiable source_url + captured_at.
+   Untraced capture (screenshots, raw file upload, camera) is excluded
+   from beta. See capture-stage-spec.md §3.
+
+2. **Capture mode determines validation path**
+   `careful` mode → PendingFact queue → Validate UI
+   `trusted` mode → immediate FactNode + separate Auto-accepted tab
+   Set at Capture, executed at Validate. See validate-stage-spec.md §2.
+
+3. **No AI confidence at Structure stage**
+   Confidence is NOT assigned during decomposition. It is derived at
+   Validate/Surface from publisher_class, validation level (L1-L4),
+   time freshness, and consensus signals. See structure-stage-spec.md §1.
+
+4. **Surface identity protocol**
+   All Lucid responses (Active Recall, Passive Recall) must begin with
+   identity-affirming phrases:
+   - "As far as I know..."
+   - "According to your knowledge graph..."
+   - "기흥님 그래프 기준으로..."
+   And must cite fn-ID for every claim. No LLM general knowledge in answers.
+   See surface-stage-spec.md §2.
+
+5. **User on/off control**
+   Surface mode must be toggle-able per device (browser extension icon,
+   mobile main screen, desktop menu bar). OFF disables Active Recall,
+   Contradiction toasts, Staleness alerts. Capture and queue updates
+   continue in background. See surface-stage-spec.md §4.
 
 ---
 
