@@ -1,6 +1,12 @@
-# AGENTS.md — Lucid Project v2.1
+# AGENTS.md — Lucid Project v2.2
 # Cross-tool standard: OpenAI Codex · Claude Code · GitHub Copilot · Cursor
 # Read this entire file before doing anything. Do not skip sections.
+#
+# v2.2 (2026-05-20): CSVS loop complete — Capture/Structure/Validate/Surface
+# beta scope locked. Cross-stage invariants added to §4.5. Critical Rules
+# 13-16 codify the four cross-stage commitments (no confidence at Structure,
+# two capture modes, Surface identity protocol, Capture provenance). DR-025
+# through DR-052 record the new resolved decisions.
 #
 # v2.1 (2026-05-19): consolidated — merges the former AGENTS.md (v0.3) and
 # AGENTS_v2.md into this single canonical file, folds in the resolved model
@@ -636,6 +642,22 @@ GET    /api/stats                      Global (anonymized)
     queue when a contradiction is detected, the trust registration is revoked,
     or `valid_until` expires. (DR-027. See docs/structure-stage-spec.md §2.)
 
+15. **Surface identity protocol.** Every Lucid response — Active Recall hover
+    tooltips, Passive Recall ("Ask Lucid") answers, Gatekeeping warnings — must
+    begin with an identity-affirming phrase ("As far as I know...",
+    "According to your knowledge graph...", "기흥님 그래프 기준으로...",
+    or an equivalent honest-ignorance variant) and must cite `fn-ID` for every
+    factual claim. No LLM general knowledge in answers. If no validated fact
+    exists, say so honestly and offer to capture. Violating this rule is a
+    beta-blocking bug. (DR-047. See docs/surface-stage-spec.md §2 and §6.)
+
+16. **Source provenance is enforced at Capture.** Every FactNode must carry
+    a verifiable `source_url` and `captured_at`. Untraced capture inputs
+    (screenshots, raw file upload, camera, clipboard auto-detect, voice memo,
+    email forward) are excluded from beta scope — they cannot be added through
+    any code path. Phase 1 may add policy for untraced inputs after beta data
+    is collected. (DR-025, DR-026. See docs/capture-stage-spec.md §3.)
+
 ---
 
 ## 8. Code Style
@@ -825,9 +847,37 @@ Full log in [`docs/decision-log.md`](docs/decision-log.md).
 | DR-022 | Star color encodes domain (policy/science/econ/tech) |
 | DR-023 | Contradiction edges pulse red at 0.5Hz |
 | DR-024 | Constellation = emergent cluster via Louvain (not user-defined) |
+| DR-025 | Beta capture limited to 2 devices: Chrome Extension + PWA |
+| DR-026 | Untraced capture excluded from beta (no source_url) |
+| DR-027 | Two capture modes: careful (HITL) and trusted (auto-accept) |
+| DR-028 | Confidence NOT assigned at Structure stage |
+| DR-029 | 12 Object classes finalized (CASOS Meta-Network aligned) |
+| DR-030 | Object Subclass only on Entity and Knowledge in beta |
+| DR-031 | Duplicate fact increments source_count on existing FactNode |
+| DR-032 | Object matching thresholds: 0.95 auto / 0.85 semi-auto |
+| DR-033 | Knowledge nodes accept any noun-form domain in beta |
+| DR-034 | Curation: 4 ops in beta (Reclassify Object/Demote/Drop/Tag) |
+| DR-035 | Validate beta actions: Accept / Edit / Reject |
+| DR-036 | Edit preserves history as alias list (text + edited_at) |
+| DR-037 | Duplicate-fact policy user-configurable: Quick/Strict/Hybrid |
+| DR-038 | Auto-accepted facts support Edit + Demote + Drop |
+| DR-039 | No automatic source trust scoring in beta |
+| DR-040 | Validation queue grouped by source (one capture = one group) |
+| DR-041 | Visual feedback on Accept: star animation + conditional toast |
+| DR-042 | Gamification (streak/badges/score) excluded from beta |
+| DR-043 | Surface: 6 modes (On/Off + Active/Passive Recall + 3 background) |
+| DR-044 | Active Recall: inline tooltip + dotted underline (no side panel) |
+| DR-045 | Active Recall in Lucid app + all Chrome extension text fields |
+| DR-046 | Passive Recall (Ask Lucid) is the beta killer feature |
+| DR-047 | All Surface responses begin with identity phrase + cite fn-ID |
+| DR-048 | Contradiction alerts: queue + Stellar View visual only (no toast) |
+| DR-049 | Gatekeeping requires 3 conditions to warn |
+| DR-050 | Gatekeeping warns, never blocks; override is recorded in metadata |
+| DR-051 | Staleness: daily background scan + dynamic Surface-time trigger |
+| DR-052 | Stale facts shown with label, not hidden from Surface |
 
 Still open: **O-3** — contradiction-flag UI placement (inline vs dedicated view).
 
 ---
 
-*Lucid v2.1 | Three contexts, one engine | Be lucid.*
+*Lucid v2.2 | Three contexts, one engine | CSVS loop complete | Be lucid.*
