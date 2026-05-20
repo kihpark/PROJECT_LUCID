@@ -2,7 +2,7 @@
 
 > Canonical record of architecture and product decisions. AGENTS.md section 13
 > carries the summary table; this file carries the rationale.
-> Last updated: 2026-05-19.
+> Last updated: 2026-05-20.
 
 ## Resolved
 
@@ -34,6 +34,16 @@
 | DR-022 | Star color encodes domain (policy=amber, science=blue, economics=teal, technology=purple) | Visual language. Requires a domain field on the fact model (flagged in feature-spec). |
 | DR-023 | Contradiction edges pulse red at 0.5Hz | UX feedback for [:CONTRADICTS] edges. |
 | DR-024 | Constellation = emergent cluster via Louvain community detection, not user-defined | Algorithm - the cognitive fingerprint forms automatically. |
+| DR-025 | Beta capture limited to 2 devices: Chrome Extension + PWA | Provenance enforcement — every captured fact must carry a verifiable source_url; only Chrome Extension and PWA Share Target structurally guarantee this. See docs/capture-stage-spec.md. |
+| DR-026 | Untraced capture (screenshots, file upload, camera, clipboard, voice memo, email forward) excluded from beta | Source URL must exist — untraced inputs undermine validation infrastructure; Phase 1 policy options (force user input / AI inference / separate untraced queue / permanent exclusion) deferred. |
+| DR-027 | Two capture modes: careful (HITL required) and trusted (auto-accept from registered trusted sources) | User policy expression — users decide per-source whether a capture goes through HITL or straight to FactNode. Auto-accepted facts stay in a separate review tab and rejoin the main queue on contradiction, trust revocation, or valid_until expiry. |
+| DR-028 | Confidence is NOT assigned at the Structure stage | Avoid AI bias on validation — confidence is derived at Validate/Surface from publisher authority, validation tier, time freshness, and consensus signals. The Structurer never emits a confidence value. Supersedes the AtomicFact `confidence` field carried over from the pre-spec model (cleanup tracked in CONFLICTS.md). |
+| DR-029 | 12 Object classes finalized: AtomicFact, Concept, Entity, Event, Procedure, Knowledge, Task, Metric, Resource, Problem, Source (Entity parent has 5 subclasses) | CASOS Meta-Network alignment — Agent/Knowledge/Task/Resource axes all explicitly represented for academic analysis compatibility. |
+| DR-030 | Object Subclass applied only to Entity (Person/Organization/Service/Product/Place) and Knowledge (free-text domain) in beta | Minimize cognitive load — Procedure, Resource, Event, Task, Metric, Problem stay as single classes with free-text name in beta. Subclassing for those classes deferred to Phase 1+ pending real-world data. |
+| DR-031 | Duplicate fact from a different source increments source_count on the existing FactNode | Quantitative reinforcement — multi-source agreement automatically strengthens signal without creating duplicate nodes. Exact duplicates from the same source are ignored. |
+| DR-032 | Object matching thresholds: auto-merge (>0.95), semi-auto with user confirmation (0.85-0.95), keep separate (<0.85) | Hybrid approach — automation handles clear cases (case/spacing/transliteration variants) without bothering the user, ambiguous middle band asks for confirmation, low similarity stays separate and is mergeable via Curation. |
+| DR-033 | Knowledge nodes accept any noun-form domain (academic, professional, social, applied) | Free expansion in beta — no domain whitelist; Q2 matching algorithm consolidates synonyms organically; revisit in Phase 1 once distribution data is in. |
+| DR-034 | Curation operations in beta: Reclassify Object, Demote Fact, Drop Fact, Tag/Untag (4 ops only) | 4 ops only — Merge Objects, Split Object, Reclassify Fact, and Cross-space Move deferred to post-beta to keep curation surface tight. |
 
 ## Open
 
@@ -55,3 +65,8 @@
   for the stellar decisions, but those IDs were already taken (DR-017 Synergy
   Worker cadence, DR-018 C2 traversal). The stellar decisions were renumbered to
   DR-019..DR-024 to avoid overwriting them.
+- 2026-05-20: the CSVS Stage Specifications task originally specified DR-023..DR-032
+  for the Capture and Structure decisions, but DR-023 (contradiction edge pulse)
+  and DR-024 (Louvain constellation) were already resolved. Following the same
+  precedent above, the CSVS decisions were renumbered to DR-025..DR-034. AGENTS.md
+  Section 1.1 and Critical Rules 13-14 cite the renumbered IDs. See CONFLICTS.md.
