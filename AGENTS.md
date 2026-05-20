@@ -88,7 +88,12 @@ policy options: [`docs/capture-stage-spec.md`](docs/capture-stage-spec.md).
 
 ---
 
-## 2. Test Commands
+## 2. Operator Commands (test / lint / type check)
+
+All commands run from `backend/`. The CI workflow at
+`.github/workflows/ci.yml` runs the same three in order: ruff → mypy → pytest.
+
+### Tests
 
 ```bash
 cd backend
@@ -103,8 +108,33 @@ pytest tests/ --cov=. --cov-report=term-missing  # Coverage
 LUCID_MOCK_LLM=true pytest tests/ -v
 ```
 
+### Lint and type check
+
+```bash
+cd backend
+
+ruff check .                              # Lint (Sprint 0 baseline rule set)
+ruff check . --fix                        # Auto-fix safe lint issues
+ruff format .                             # Format (line length 88)
+
+mypy .                                    # Type check (lenient in Sprint 0)
+```
+
+Config for both lives in `backend/pyproject.toml`. Mypy strictness ratchets
+up sprint-by-sprint as real implementations land.
+
+### Boot the stack
+
+```bash
+docker compose up -d                      # neo4j + backend
+docker compose logs -f backend            # tail backend logs
+docker compose down                       # stop (data persists in volume)
+docker compose down -v                    # stop + wipe neo4j volume
+```
+
 Rules: Never commit code that breaks existing tests.
 Every new feature requires tests. Integration tests need live Neo4j.
+Ruff + mypy must pass before pushing (CI will block otherwise).
 
 ---
 
