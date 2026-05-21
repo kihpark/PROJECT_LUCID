@@ -1,6 +1,6 @@
 # CSVS Stage Specs — Integration Conflicts
 
-**Branch:** `feat/lucid-sprint-0` (continues `feat/lucid-beta-backlog`)
+**Branch:** `feat/lucid-sprint-1a-pr1` (continues `feat/lucid-sprint-0`)
 **Date:** 2026-05-20 (updated; original 2026-05-20)
 **Status:** Open — needs PO review
 
@@ -476,24 +476,12 @@ This directly contradicts prior decisions integrated into the repo:
 - **Cross-stage invariant 5** in §4.5: "OFF disables ... Staleness alerts"
   — reference to a feature that the master handoff removes.
 
-**Resolution applied.** None — flagged here. Sprint 0 does not touch any
-of the affected files. PO action required before Sprint 1A (data models)
-because the FactNode schema is on the critical path.
+**Resolution applied.** PO directive 2026-05-21 [변경 2] CONFIRMED option 1
+(full removal). PR-1A-2 will strip `valid_until`, `is_stale` from the
+FactNode model and add a negative test that rejects them. C-14 closed
+for implementation; doc cleanup (Critical Rule 10, surface-stage-spec.md
+Mode 5 block, DR-051/DR-052 retraction) tracked under C-22.
 
-**PO action.** Choose one:
-
-1. **Accept v2 fully:** strip `valid_from`, `valid_until`, `is_stale`
-   from the FactNode model, retire DR-015 / DR-051 / DR-052, remove
-   Mode 5 from surface-stage-spec.md, rewrite Critical Rule 10, remove
-   "Staleness alerts" from cross-stage invariant 5.
-2. **Keep v1 partial:** retain `valid_from` for legal/policy context
-   (it is still useful as descriptive metadata) but drop `valid_until`
-   and `is_stale` and Mode 5. Reword Critical Rule 10 accordingly.
-3. **Reject v2 on this point:** keep the staleness system; update
-   MASTER_HANDOFF.md §2 decision 3 to match prior decisions.
-
-The Sprint 1A "Data Models + Neo4j Schema" sprint cannot start until
-this is decided — its DoD depends on the final FactNode shape.
 
 ---
 
@@ -543,11 +531,10 @@ After removing Mode 5 (per C-14), the count becomes:
 - v1 spec: 6 modes (0, 1, 2, 3, 4, 5)
 - v2 spec: 5 modes (0, 1, 2, 3, 4)
 
-**Resolution applied.** None. DR-043 still says 6 modes; the v2 spec
-says 5.
+**Resolution applied.** PO directive 2026-05-21 [변경 4] CONFIRMED 5 modes
+(Mode 0 / 1 / 2 / 3 / 4; Mode 5 Staleness removed). DR-043 update and
+surface-stage-spec.md §3 cleanup tracked under C-22 (doc sweep PR).
 
-**PO action.** When resolving C-14, also update DR-043 to "5 modes" and
-edit the surface-stage-spec.md §3 mode list to drop Mode 5.
 
 ---
 
@@ -592,14 +579,12 @@ Affected files / decisions:
   (Accept / Edit / Reject) — MASTER_HANDOFF says 3 options
   (Accept all / Review / Discard). Same action count, different verbs.
 
-**Resolution applied.** None. Sprint 0 doesn't implement either flow.
-PO must decide before Sprint 2A (Chrome Extension Capture) and Sprint
-4A (Validate UI), because those sprints will implement whichever
-overlay design the PO confirms.
+**Resolution applied.** PO directive 2026-05-21 [변경 3] CONFIRMED the
+Save / Decide split with three options (Accept all / Review / Discard).
+Spec rewrites for capture-stage-spec.md §4-§5 and validate-stage-spec.md
+§3, §5 tracked under C-22 (doc sweep PR), recommended to land before
+Sprint 2A starts.
 
-**PO action.** Confirm that MASTER_HANDOFF §2 is authoritative for the
-UX flow. If yes, plan a doc-update PR to rewrite capture-stage-spec.md
-§4-§5 and validate-stage-spec.md §3, §5 to match.
 
 ---
 
@@ -637,15 +622,12 @@ The current Claude model family (as of 2026-05) is 4.6 / 4.7
 (Opus 4.7, Sonnet 4.6, Haiku 4.5). The master handoff lists Sonnet 4.5
 and Haiku 4.5 — Sonnet 4.5 is older.
 
-**Resolution applied.** None. Sprint 0 doesn't call any Claude API.
-The model IDs become load-bearing in Sprint 3 (Structure Engine) and
-Sprint 6B (Passive Recall).
+**Resolution applied.** PO directive 2026-05-21 [변경 5] CONFIRMED
+`claude-sonnet-4-5` as the beta default for both decomposition and
+responses. Sprint 3 will run a P0-EVAL Haiku vs Sonnet Korean
+decomposition A/B; Haiku splits off only if it reaches >=90% accuracy.
+`CLAUDE_MODEL` env var added to .env.example with the 4-5 default.
 
-**PO action.** Confirm the master handoff's intent: pin to 4.5 for
-beta budget reasons, or upgrade to 4.6 (Sonnet) / 4.5 (Haiku)? When
-building AI integrations, the system reminder says to "default to the
-latest and most capable Claude models" — so 4.6 Sonnet is the
-recommended default unless the PO has a budget or eval reason to pin.
 
 ---
 
@@ -669,23 +651,10 @@ AGENTS.md §3 documents the existing layout (`backend/api/` for routes,
 `backend/core/` for the business logic). The master handoff appears to
 collapse both into a single `backend/app/` tree.
 
-**Resolution applied.** None. The Sprint 0 scaffold (existing) is kept
-as `backend/api/` + `backend/core/`; CI, pytest, and the Dockerfile
-all reference it.
+**Resolution applied.** PO directive 2026-05-21 CONFIRMED option 1:
+`backend/api/` stays; MASTER_HANDOFF §6 will be updated to match in the
+C-22 doc sweep PR. No code rename needed.
 
-**PO action.** Three options:
-
-1. **Accept the existing `api/` + `core/` split** (recommended — code
-   already works, AGENTS.md §3 documents it, tests pass). Update
-   MASTER_HANDOFF §6 to match.
-2. **Migrate to `backend/app/`** — large rename across imports,
-   Dockerfile, docker-compose `command: uvicorn api.main:app ...`,
-   tests, AGENTS.md §3, etc.
-3. **Hybrid** — leave `api/` and `core/` as-is and treat `backend/app/`
-   in MASTER_HANDOFF as a typo / suggestion.
-
-Recommend option 1; defer to PO. Sprint 1A (data models) lands in
-`backend/models/` which both layouts share, so this can wait.
 
 ---
 
@@ -720,3 +689,73 @@ into `archive/` and create the directory, or (b) update MASTER_HANDOFF
 urgent because MASTER_HANDOFF §10 and §17 ("와이어프레임이 우선")
 treat the wireframes as authoritative for UI work — Sprint 2A, 4A,
 5, 6A, 6B, 6C, 6D, and 7 will all need them.
+
+
+---
+
+## C-22. AGENTS.md and CSVS specs still carry v1 wording (Neo4j, valid_until, FAISS) - deferred to dedicated doc-sweep PR
+
+**Conflict (housekeeping, large).** PO directives 2026-05-21 retired
+the Neo4j + FAISS stack and the staleness system, and confirmed the
+Save / Decide UX, 5 Surface modes, and `claude-sonnet-4-5` as defaults.
+PR-1A-1 made the minimum surgical changes needed to ship the v2 stack:
+
+- `docker-compose.yml` swapped Neo4j to Postgres + Elasticsearch+nori
+- `backend/requirements.txt` swapped neo4j/faiss/sentence-transformers
+  to sqlalchemy + psycopg2-binary + alembic + elasticsearch
+- `backend/api/main.py` health endpoint probes postgres + ES
+- `.env.example` swapped NEO4J_* + STALENESS_* to DATABASE_URL +
+  ELASTICSEARCH_URL
+- `AGENTS.md` sections 1, 2, 10 updated for the new stack (with a
+  v2-banner pointing here)
+
+The following v1-era content is still in the repo and will be swept in
+a dedicated `chore/lucid-v2-doc-sweep` PR (recommended scope: doc-only,
+no code changes, blocks Sprint 2A spec work):
+
+**AGENTS.md** (10+ blocks):
+- section 3 Architecture: backend/core/graph/ (Neo4j service.py),
+  embed/ (FAISS comment), tests/integration/ Neo4j line
+- section 4 Core Data Model: FactNode fields valid_from, valid_until,
+  is_stale; (:Fact) and (:Object) cypher snippets; (:Space) Neo4j
+  node; Neo4j Edge Types block, Neo4j Indexes block, Synergy State
+  (in Neo4j) block
+- section 5 Synergy Layer: "User accepts fact then Neo4j write commits"
+- section 7 Critical Rules: Rule 5 (Neo4j lists as JSON strings),
+  Rule 8 (C1 ... inside Neo4j write transaction), Rule 10 (valid_from
+  is required ... is_stale checkable by background job)
+- section 11 What Agents Must NOT Do: Run C1 inside Neo4j write
+  transaction; Add Postgres beyond Neo4j and FAISS (inverted now);
+  Store Python lists directly in Neo4j properties
+- section 13 Stellar Visual Language: is_stale flickering star
+- section 14 Decision Log table: DR-005, DR-006, DR-008, DR-015,
+  DR-016, DR-051, DR-052
+
+**CSVS specs**:
+- docs/capture-stage-spec.md sections 4-5: old branch superseded by
+  Save / Decide overlay (C-17)
+- docs/validate-stage-spec.md sections 3, 5: 3-action card (Accept /
+  Edit / Reject) should match overlay (Accept all / Review / Discard)
+- docs/surface-stage-spec.md section 9: Mode 5 Staleness retracted
+- docs/structure-stage-spec.md section 5: Link Types still reference
+  Neo4j-flavored cypher; should be ES adjacency-list mapping
+
+**decision-log.md DR retractions**:
+- DR-005 (Synergy state in Neo4j) - retract or rewrite for ES
+- DR-006 (FAISS for vector search) - retract; ES handles kNN
+- DR-008 (LOCAL embedding model) - reopened by stack change; embedding
+  source TBD in PR-1A-3 (see C-18)
+- DR-015 (valid_from required for policy/legal facts) - retract
+- DR-016 (space_id ... Neo4j indexed) - rewrite for ES
+  knowledge_space_id keyword field
+- DR-051 (Staleness detection) - retract
+- DR-052 (Stale facts shown with label) - retract
+
+**Resolution applied.** None in PR-1A-1 beyond the surgical updates
+listed above. PR-1A-1 compiles, lints, type-checks, and tests cleanly
+on the new stack; the doc sweep is a follow-up, not a blocker.
+
+**PO action.** Approve the scope above for the
+`chore/lucid-v2-doc-sweep` branch. Recommended to merge before Sprint
+2A starts so capture-stage-spec.md and validate-stage-spec.md describe
+the Save / Decide flow that Sprint 2A will implement.

@@ -42,19 +42,25 @@ subsumed here. O-1 is resolved: build on the WisdomDB chassis (Approach B).
 
 ## 1. Setup
 
+> **v2 stack (Sprint 1A PR-1A-1, 2026-05-21):** beta runs on
+> Postgres + Elasticsearch (with nori). Neo4j and FAISS are retired.
+> Other sections of this file still carry v1 wording (Neo4j edge
+> blocks, `valid_until`, `is_stale`, FactNode schema details); those
+> are tracked in `docs/CONFLICTS.md` C-14, C-22 and will sweep in a
+> follow-up doc PR.
+
 ```bash
 # Requirements: Docker Desktop, Python 3.11+, Node.js 18+
 cp .env.example .env              # Add ANTHROPIC_API_KEY
-docker-compose up -d              # Neo4j + Backend
+docker compose up -d              # Postgres + Elasticsearch + Backend
 cd backend && pip install -r requirements.txt
 uvicorn api.main:app --reload     # http://localhost:8000
-open frontend/index.html          # No build step needed
 ```
 
 Verify:
 ```bash
 curl http://localhost:8000/api/health
-# {"status":"ok","neo4j":"connected","version":"0.3.0"}
+# {"status":"ok","postgres":"connected","elasticsearch":"connected","version":"0.4.0"}
 ```
 
 Mock-first rule: The full Capture → Structure → Validate → Surface loop
@@ -100,7 +106,7 @@ cd backend
 
 pytest tests/ -v                          # All (run before every commit)
 pytest tests/unit/ -v                     # Fast, no external deps (<10s)
-pytest tests/integration/ -v              # Requires running Neo4j + Docker
+pytest tests/integration/ -v              # Requires Postgres + Elasticsearch + Docker
 pytest tests/unit/test_structurer.py -v   # Specific module
 pytest tests/ --cov=. --cov-report=term-missing  # Coverage
 
@@ -126,15 +132,17 @@ up sprint-by-sprint as real implementations land.
 ### Boot the stack
 
 ```bash
-docker compose up -d                      # neo4j + backend
+docker compose up -d                      # postgres + elasticsearch + backend
 docker compose logs -f backend            # tail backend logs
-docker compose down                       # stop (data persists in volume)
-docker compose down -v                    # stop + wipe neo4j volume
+docker compose down                       # stop (data persists in volumes)
+docker compose down -v                    # stop + wipe postgres + es volumes
 ```
 
 Rules: Never commit code that breaks existing tests.
 Every new feature requires tests. Integration tests need live Neo4j.
 Ruff + mypy must pass before pushing (CI will block otherwise).
+Integration tests are skipped automatically when Postgres / Elasticsearch
+are unreachable, so unit-only `pytest tests/unit` works on any laptop.
 
 ---
 
@@ -742,24 +750,29 @@ pytest tests/unit/ -v    # must pass
 ## 10. Environment Variables
 
 ```bash
-# Required
+# Required (v2 stack — Sprint 1A PR-1A-1)
 ANTHROPIC_API_KEY=sk-ant-...
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=lucid2026
+DATABASE_URL=postgresql://lucid:lucid@postgres:5432/lucid
+POSTGRES_USER=lucid
+POSTGRES_PASSWORD=lucid
+POSTGRES_DB=lucid
+ELASTICSEARCH_URL=http://elasticsearch:9200
 
 # Development
 LUCID_MOCK_LLM=false           # true = use tests/mock_llm.py, no API calls
 LUCID_ENV=development          # development | staging | production
 
-# Embeddings — local model only, no hosted embedding API (DR-008)
-EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2  # ko+en, runs locally
+# Claude model (beta default per PO 2026-05-21; revisited in Sprint 3 A/B)
+CLAUDE_MODEL=claude-sonnet-4-5
 
 # Optional
 YOUTUBE_TRANSCRIPT_LANG=ko,en  # Preferred transcript languages
 MAX_FACTS_PER_CAPTURE=10       # Limit atomic facts per single capture
-STALENESS_CHECK_INTERVAL=86400 # Seconds between staleness scans
 ```
+
+> The retired `NEO4J_*`, `EMBEDDING_MODEL`, and `STALENESS_CHECK_INTERVAL`
+> variables are gone. Embedding source for kNN in ES is open (CONFLICTS.md
+> C-18, pending Sprint 1A PR-1A-3 PO decision).
 
 ---
 
