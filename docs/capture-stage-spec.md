@@ -7,6 +7,31 @@
 
 ---
 
+> ## v2 supersession notice (2026-05-21)
+>
+> This specification was authored before the MASTER_HANDOFF v2 stack
+> + UX consolidation (PO directives 2026-05-21). Where this document
+> conflicts with MASTER_HANDOFF.md or with the wireframes
+> (`frontend/stellar-graph/pack5-stellar-settings.html` for Stellar +
+> Settings; other packs TBD), the wireframes win, MASTER_HANDOFF wins
+> second, and this spec is reference-only third (per the truth
+> priority directive [변경 9]).
+>
+> Specific v2 changes that affect this document:
+> - The "지금 검증 / 나중에" branch at capture time is RETIRED. Save
+>   triggers analysis; the Decide overlay (Accept all / Review /
+>   Discard) is a separate step (PO directive [변경 3]).
+> - Trusted / Careful per-source policy lives in Settings SET-2, NOT
+>   asked at capture time.
+> - Personal notes at capture are removed; only tags are captured at
+>   Save time. Notes appear in Review mode V-2.
+>
+> The body below is preserved for historical context; pointers to the
+> v2-correct shape are inline where the conflict is sharp.
+
+---
+
+
 ## 0. 본 문서의 범위
 
 CSVS 루프 중 **Capture 단계**의 베타 범위, 디바이스, 사용자 여정,

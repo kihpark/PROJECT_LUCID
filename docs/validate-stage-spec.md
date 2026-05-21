@@ -7,6 +7,36 @@
 
 ---
 
+> ## v2 supersession notice (2026-05-21)
+>
+> This specification was authored before the MASTER_HANDOFF v2 stack
+> + UX consolidation (PO directives 2026-05-21). Where this document
+> conflicts with MASTER_HANDOFF.md or with the wireframes
+> (`frontend/stellar-graph/pack5-stellar-settings.html` for Stellar +
+> Settings; other packs TBD), the wireframes win, MASTER_HANDOFF wins
+> second, and this spec is reference-only third (per the truth
+> priority directive [변경 9]).
+>
+> Specific v2 changes that affect this document:
+> - "지금 검증 / 나중에" wording at capture time is RETIRED (see
+>   `docs/capture-stage-spec.md` banner). The Validate UI is reached
+>   via the Decide overlay or the Pending queue, never via a capture-
+>   time branch.
+> - 3-action card (Accept / Edit / Reject) is the in-card action set
+>   for the Review mode (V-2). The Decide overlay itself offers
+>   Accept all / Review / Discard at the group level.
+> - The staleness system (`valid_until`, `is_stale`, Mode 5) is
+>   RETIRED (DR-053 / C-14). The card no longer displays
+>   `valid_until` or stale state; `valid_from` is context-only.
+> - Personal notes are only available in Review mode (V-2), not on
+>   the in-overlay card.
+>
+> The body below is preserved for historical context; pointers to the
+> v2-correct shape are inline where the conflict is sharp.
+
+---
+
+
 ## 0. 본 문서의 범위
 
 CSVS 루프 중 **Validate 단계**의 베타 설계.
@@ -113,7 +143,7 @@ trusted 모드:
 │                                                            │
 │ ── Time validity ───────────────────────────────           │
 │ valid_from: 2024-08-01                                     │
-│ valid_until: (none — structural fact)                      │
+│ # valid_until — RETRACTED v2 (no card display)             │
 │                                                            │
 │ Personal note (optional):                                  │
 │ ┌──────────────────────────────────────────────────┐     │
@@ -270,7 +300,7 @@ Subject + Type (proposition / procedure)
   → 사용자가 모순 여부 즉석 확인 가능
 
 시간 메타데이터
-  valid_from / valid_until
+  valid_from (only; valid_until retired in v2)
   AI가 텍스트에서 추출했거나 추정한 값
 
 Personal note 입력란
@@ -324,9 +354,8 @@ Lucid 메인 → "Auto-accepted" 탭
    사용자가 출처의 trusted 등록을 해제하면
    해당 출처에서 자동 수락된 사실들 메인 큐로 이동
 
-3. 시간 만료
-   valid_until 도래 시
-   → "Time-expired — please review" 표시
+3. ~~시간 만료~~ **RETRACTED (DR-053 / C-14)**: 만료 트리거 없음.
+   재검토 트리거는 모순 감지 + 신뢰 해제 두 가지로만 발동.
 ```
 
 ---

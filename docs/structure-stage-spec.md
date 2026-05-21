@@ -7,6 +7,31 @@
 
 ---
 
+> ## v2 supersession notice (2026-05-21)
+>
+> This specification was authored before the MASTER_HANDOFF v2 stack
+> + UX consolidation (PO directives 2026-05-21). Where this document
+> conflicts with MASTER_HANDOFF.md or with the wireframes
+> (`frontend/stellar-graph/pack5-stellar-settings.html` for Stellar +
+> Settings; other packs TBD), the wireframes win, MASTER_HANDOFF wins
+> second, and this spec is reference-only third (per the truth
+> priority directive [변경 9]).
+>
+> Specific v2 changes that affect this document:
+> - The staleness system (`valid_until`, `is_stale`, Mode 5
+>   Staleness) is RETIRED (DR-053 / C-14). `valid_from` is kept as
+>   context-only metadata; it never triggers expiry or re-validation.
+> - `confidence` is NOT assigned at the Structure stage (DR-028 /
+>   Critical Rule 13). When it surfaces at Validate/Surface, it is
+>   derived at read time from publisher_class + validation_method +
+>   freshness + consensus.
+>
+> The body below is preserved for historical context; pointers to the
+> v2-correct shape are inline where the conflict is sharp.
+
+---
+
+
 ## 0. 본 문서의 범위
 
 CSVS 루프 중 **Structure 단계**의 베타 설계.
@@ -51,7 +76,7 @@ Capture가 만들어낸 merged_text를 받아 검증 가능한 AtomicFact로
 신뢰 모드 사실도 다음 경우엔 자동으로 재검토 큐로:
 - 기존 사실과 모순이 감지되었을 때
 - 출처의 신뢰 등록이 해제되었을 때
-- 시간 만료(valid_until) 도래했을 때
+- ~~시간 만료(valid_until) 도래했을 때~~ **RETRACTED (DR-053 / C-14)**: 만료 트리거 없음.
 
 ---
 
@@ -201,7 +226,7 @@ Fact ↔ Source
      - 절차형: claim 문장 + 관련 Object 연결
   4. AtomicFact ↔ Object 관계 추출
   5. AtomicFact ↔ AtomicFact 관계 추출
-  6. 시간 메타데이터 추출 (valid_from, valid_until 추정)
+  6. 시간 메타데이터 추출 (valid_from만; valid_until은 v2에서 retired)
   7. 분해 불가 시 빈 배열 반환
 
 출력 (JSON):
@@ -264,7 +289,7 @@ Structure 단계 처리:
   
   단, 시간 메타데이터는 사실별로 다를 수 있음:
   facts[i].valid_from = AI가 텍스트에서 추출 (예: "2024-01-01")
-  facts[i].valid_until = AI가 추정 (예: "정책 발효 5년 후")
+  # facts[i].valid_until — RETRACTED (DR-053): AI가 만료를 추정하지 않음
 ```
 
 같은 출처에서 여러 사실이 나와도, 각 사실은 독립적으로 검증·관리됨.
