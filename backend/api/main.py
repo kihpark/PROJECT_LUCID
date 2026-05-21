@@ -1,12 +1,13 @@
-"""Lucid API — FastAPI application entry point.
+"""Lucid API - FastAPI application entry point.
 
 Validation infrastructure for the post-AI internet.
-Scaffold (TASK-001). Route logic lands in later tasks; see AGENTS.md.
+Sprint 1A PR-1A-1: v2 stack (Postgres + Elasticsearch) replaces Neo4j + FAISS.
+Route logic lands in later sprints; see AGENTS.md.
 """
 import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import (
@@ -22,7 +23,7 @@ from api.routes import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lucid")
 
-API_VERSION = "0.3.0"
+API_VERSION = "0.4.0"
 
 app = FastAPI(title="Lucid API", version=API_VERSION)
 
@@ -35,31 +36,60 @@ app.add_middleware(
 )
 
 
-def _neo4j_status() -> str:
-    """Best-effort Neo4j connectivity probe. Never raises."""
+def _postgres_status() -> str:
+    """Best-effort Postgres connectivity probe. Never raises."""
+    url = os.getenv("DATABASE_URL", "postgresql://lucid:lucid@localhost:5432/lucid")
     try:
-        from neo4j import GraphDatabase
+        from sqlalchemy import create_engine, text
 
-        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        user = os.getenv("NEO4J_USER", "neo4j")
-        password = os.getenv("NEO4J_PASSWORD", "")
-        driver = GraphDatabase.driver(
-            uri, auth=(user, password), connection_timeout=3
-        )
+        engine = create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 3})
         try:
-            driver.verify_connectivity()
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
             return "connected"
         finally:
-            driver.close()
+            engine.dispose()
     except Exception as exc:  # noqa: BLE001 - health probe must never raise
-        logger.warning("Neo4j health probe failed: %s", exc)
+        logger.warning("Postgres health probe failed: %s", exc)
+        return "disconnected"
+
+
+def _elasticsearch_status() -> str:
+    """Best-effort Elasticsearch connectivity probe. Never raises."""
+    url = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
+    try:
+        from elasticsearch import Elasticsearch
+
+        client = Elasticsearch(url, request_timeout=3, verify_certs=False)
+        try:
+            if client.ping():
+                return "connected"
+            return "disconnected"
+        finally:
+            client.close()
+    except Exception as exc:  # noqa: BLE001 - health probe must never raise
+        logger.warning("Elasticsearch health probe failed: %s", exc)
         return "disconnected"
 
 
 @app.get("/api/health")
-async def health() -> dict:
-    """Liveness plus Neo4j connectivity. TASK-001 exit criterion."""
-    return {"status": "ok", "neo4j": _neo4j_status(), "version": API_VERSION}
+async def health(response: Response) -> dict:
+    """Liveness plus Postgres and Elasticsearch connectivity.
+
+    Returns 200 when both backends are connected, 503 when either is not.
+    The body shape stays uniform either way so clients can branch on the
+    individual `postgres` / `elasticsearch` fields.
+    """
+    postgres = _postgres_status()
+    elasticsearch = _elasticsearch_status()
+    if postgres != "connected" or elasticsearch != "connected":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return {
+        "status": "ok" if postgres == "connected" and elasticsearch == "connected" else "degraded",
+        "postgres": postgres,
+        "elasticsearch": elasticsearch,
+        "version": API_VERSION,
+    }
 
 
 # Routers - namespaced under /api/spaces/{sid}/ per AGENTS.md section 6.
