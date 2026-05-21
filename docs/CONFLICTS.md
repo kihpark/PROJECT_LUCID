@@ -1,8 +1,8 @@
 # CSVS Stage Specs — Integration Conflicts
 
-**Branch:** `feat/lucid-sprint-1a-pr1` (continues `feat/lucid-sprint-0`)
+**Branch:** `chore/lucid-v2-doc-sweep` (independent; doc-only PR)
 **Date:** 2026-05-20 (updated; original 2026-05-20)
-**Status:** Open — needs PO review
+**Status:** C-14..C-22 RESOLVED in this PR (`chore/lucid-v2-doc-sweep`). C-1..C-13 prior. C-23+ remain open if any.
 
 This file records conflicts surfaced while integrating the four CSVS
 stage specifications into AGENTS.md and the decision log:
@@ -482,6 +482,8 @@ FactNode model and add a negative test that rejects them. C-14 closed
 for implementation; doc cleanup (Critical Rule 10, surface-stage-spec.md
 Mode 5 block, DR-051/DR-052 retraction) tracked under C-22.
 
+**[RESOLVED in chore/lucid-v2-doc-sweep]** Staleness retired in v2 (DR-053). AGENTS.md §4 / §7 Rule 10 / §11 / §13 swept; Pydantic FactNode/AtomicFact reject valid_until/is_stale/stale_at via extra='forbid' (6 negative tests pass in PR-1A-2). Spec banners added to all 4 CSVS specs.
+
 
 ---
 
@@ -516,6 +518,8 @@ user-toggleable. If yes, no edit needed. If the intent is that
 *everything* Lucid says (including, e.g., logs or push notifications)
 must carry the identity phrase, expand Critical Rule 15.
 
+**[RESOLVED in chore/lucid-v2-doc-sweep]** Cross-stage invariant 5 wording retained (mode toggle vs identity protocol co-exist; identity is enforced by Critical Rule 15 on any emitted response). Staleness alerts reference dropped via the §4.5 sweep.
+
 ---
 
 ## C-16. MASTER_HANDOFF v2 says "5 modes", surface-stage-spec.md says 6
@@ -535,6 +539,8 @@ After removing Mode 5 (per C-14), the count becomes:
 (Mode 0 / 1 / 2 / 3 / 4; Mode 5 Staleness removed). DR-043 update and
 surface-stage-spec.md §3 cleanup tracked under C-22 (doc sweep PR).
 
+
+**[RESOLVED in chore/lucid-v2-doc-sweep]** 5 modes confirmed in §4.5 invariants and surface-stage-spec.md §3/§9. DR-043 entry left in decision-log.md as historical context; doc-sweep PR adds a Retracted section pointing to v2 mode count.
 
 ---
 
@@ -586,6 +592,8 @@ Spec rewrites for capture-stage-spec.md §4-§5 and validate-stage-spec.md
 Sprint 2A starts.
 
 
+**[RESOLVED in chore/lucid-v2-doc-sweep]** Save / Decide overlay direction confirmed. capture-stage-spec.md and validate-stage-spec.md got v2 banners explaining the supersession. Capture-stage §4-§5 prose retained as historical reference; wireframes (pack2/pack4 once authored) are the authoritative source for Sprint 2A/4A.
+
 ---
 
 ## C-18. MASTER_HANDOFF v2 says no local LLM; AGENTS.md DR-008 says local embeddings
@@ -609,6 +617,8 @@ not to local embedding models. If so, no change needed; just clarify
 the master handoff wording. If MASTER_HANDOFF means no local model of
 any kind, switch to a hosted embedding API and revisit DR-008.
 
+**[RESOLVED in chore/lucid-v2-doc-sweep]** Embedding source decision moved to PR-1A-3 with three options on the table (Voyage AI multilingual-2 recommended). DR-008 marked Retracted in decision-log.md and reopened for PR-1A-3.
+
 ---
 
 ## C-19. MASTER_HANDOFF v2 model IDs (claude-sonnet-4-5, claude-haiku-4-5) lag the current Claude family
@@ -628,6 +638,8 @@ responses. Sprint 3 will run a P0-EVAL Haiku vs Sonnet Korean
 decomposition A/B; Haiku splits off only if it reaches >=90% accuracy.
 `CLAUDE_MODEL` env var added to .env.example with the 4-5 default.
 
+
+**[RESOLVED in chore/lucid-v2-doc-sweep]** claude-sonnet-4-5 confirmed as beta default in .env.example and AGENTS.md §10. Sprint 3 P0-EVAL Haiku vs Sonnet A/B for decomposition is in the backlog.
 
 ---
 
@@ -655,6 +667,8 @@ collapse both into a single `backend/app/` tree.
 `backend/api/` stays; MASTER_HANDOFF §6 will be updated to match in the
 C-22 doc sweep PR. No code rename needed.
 
+
+**[RESOLVED in chore/lucid-v2-doc-sweep]** backend/api/ canonical (not backend/app/). MASTER_HANDOFF §6 dir tree kept as PO-authored; the actual code lives at backend/api/ per the PR-1A-1 / PR-1A-2 reality.
 
 ---
 
@@ -690,6 +704,8 @@ urgent because MASTER_HANDOFF §10 and §17 ("와이어프레임이 우선")
 treat the wireframes as authoritative for UI work — Sprint 2A, 4A,
 5, 6A, 6B, 6C, 6D, and 7 will all need them.
 
+
+**[RESOLVED in chore/lucid-v2-doc-sweep]** PO's pack5-stellar-settings.html lives at frontend/stellar-graph/ (not wireframes/). docs/wireframes-index.md (new in this PR) maps all 23 screen IDs incl. SV-4 to their actual or planned locations.
 
 ---
 
@@ -759,3 +775,32 @@ on the new stack; the doc sweep is a follow-up, not a blocker.
 `chore/lucid-v2-doc-sweep` branch. Recommended to merge before Sprint
 2A starts so capture-stage-spec.md and validate-stage-spec.md describe
 the Save / Decide flow that Sprint 2A will implement.
+
+
+**[RESOLVED in chore/lucid-v2-doc-sweep]** This IS the doc-sweep PR. AGENTS.md §3 / §4 / §5 / §7 (Rules 5, 8, 10) / §11 / §13 / §14 all swept; 4 CSVS specs got v2 banners + surgical patches on the most visible v1 leftovers; 7 DR retractions logged in decision-log.md; beta-backlog.md Sprint 5 Stellar updated to v2 (4-level zoom + faceted search, +3 days). Self-resolving.
+
+---
+
+## Summary of resolutions (chore/lucid-v2-doc-sweep)
+
+| Tag  | Status this PR |
+|------|----------------|
+| C-1  | resolved earlier (renumbering) |
+| C-2  | superseded by C-10 / C-22 confidence cleanup |
+| C-3  | resolved earlier (ontology) |
+| C-4  | superseded by C-8 (edge vocabulary) |
+| C-5  | resolved earlier (§14 table refresh) |
+| C-6  | resolved earlier (Validate / Surface integration) |
+| C-7  | resolved earlier (renumbering) |
+| C-8  | partial — Pydantic LinkRecord shipped in PR-1A-2; ES adjacency lands in PR-1A-3 |
+| C-9  | open — minor wording |
+| C-10 | resolved — confidence stub gone from AtomicFact/FactNode v2 models |
+| **C-14** | **RESOLVED this PR** — staleness fully retired |
+| **C-15** | **RESOLVED this PR** — wording acknowledged co-exist |
+| **C-16** | **RESOLVED this PR** — 5 modes locked in |
+| **C-17** | **RESOLVED this PR** — Save/Decide direction set |
+| **C-18** | **RESOLVED this PR** — embedding moved to PR-1A-3 |
+| **C-19** | **RESOLVED this PR** — claude-sonnet-4-5 default |
+| **C-20** | **RESOLVED this PR** — backend/api/ canonical |
+| **C-21** | **RESOLVED this PR** — wireframes-index.md added |
+| **C-22** | **RESOLVED this PR** — self-resolved by the doc sweep |
