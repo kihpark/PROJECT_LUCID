@@ -1,6 +1,9 @@
 # Lucid backend dependencies.
-# Beta storage = Neo4j + FAISS only (DR-005, DR-006). No Qdrant, no Postgres.
-# No instaloader (DR-013 - Meta ToS). Embeddings run on a local model (DR-008).
+#
+# Beta storage = Postgres + Elasticsearch (v2, 2026-05-21).
+# Neo4j and FAISS retired in Sprint 1A PR-1A-1. apscheduler retired with
+# the staleness system (see CONFLICTS.md C-14).
+# No instaloader (DR-013 - Meta ToS).
 
 # --- Web framework ---
 fastapi>=0.110
@@ -8,11 +11,15 @@ uvicorn[standard]>=0.27
 
 # --- Data models ---
 pydantic>=2.6
+pydantic-settings>=2.2
 
-# --- Graph + vector storage ---
-neo4j>=5.18
-faiss-cpu>=1.8
-sentence-transformers>=2.6
+# --- Relational storage + migrations ---
+sqlalchemy[asyncio]>=2.0
+psycopg2-binary>=2.9
+alembic>=1.13
+
+# --- Search + graph adjacency (kNN + nori) ---
+elasticsearch>=8.11,<9.0
 
 # --- LLM ---
 anthropic>=0.25
@@ -26,9 +33,6 @@ readability-lxml>=0.8
 beautifulsoup4>=4.12
 pdfplumber>=0.11
 pillow>=10.0
-
-# --- Scheduling (staleness checker) ---
-apscheduler>=3.10
 
 # --- Utilities ---
 python-dotenv>=1.0

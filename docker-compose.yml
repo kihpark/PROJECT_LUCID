@@ -1,21 +1,44 @@
-# Lucid - local development stack.
-# Beta runs on Neo4j only (DR-005: synergy state in Neo4j, no Postgres).
+# Lucid - local development stack (v2).
+#
+# Beta runs on Postgres + Elasticsearch (with nori plugin for Korean).
+# Neo4j and FAISS were retired in Sprint 1A PR-1A-1 (see CONFLICTS.md C-14
+# and the PO directives that landed on 2026-05-21).
 services:
-  neo4j:
-    image: neo4j:5-community
+  postgres:
+    image: postgres:16-alpine
     ports:
-      - "7474:7474"   # HTTP browser
-      - "7687:7687"   # Bolt
+      - "5432:5432"
     environment:
-      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-lucid2026}"
-      NEO4J_PLUGINS: '["apoc"]'
+      POSTGRES_USER: ${POSTGRES_USER:-lucid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lucid}
+      POSTGRES_DB: ${POSTGRES_DB:-lucid}
     volumes:
-      - neo4j_data:/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lucid} -d $${POSTGRES_DB:-lucid}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  elasticsearch:
+    build:
+      context: ./docker/elasticsearch
+      dockerfile: Dockerfile
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-changeme}
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -E 'yellow|green' >/dev/null"]
       interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 18
+      start_period: 30s
 
   backend:
     build: ./backend
@@ -24,13 +47,17 @@ services:
     env_file:
       - .env
     environment:
-      NEO4J_URI: "bolt://neo4j:7687"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-lucid}:${POSTGRES_PASSWORD:-lucid}@postgres:5432/${POSTGRES_DB:-lucid}"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
     depends_on:
-      neo4j:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     volumes:
       - ./backend:/app
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
-  neo4j_data:
+  postgres_data:
+  es_data:
