@@ -14,18 +14,18 @@
 | DR-002 | Source node with credibility_tier cached at capture | Avoid repeated lookups on a hot path. |
 | DR-003 | C1 runs post-commit, not inside the write transaction | Holding a graph transaction across an LLM call risks lock contention and timeout. |
 | DR-004 | Contradiction flags auto-clear on HITL resolution | Reduce manual overhead. |
-| DR-005 | Synergy state in Neo4j for beta (not Postgres) | One database for the beta. |
-| DR-006 | FAISS for vector search in beta (not Qdrant) | Operational simplicity. |
+| DR-005 | ~~Synergy state in Neo4j~~ **RETRACTED (chore/lucid-v2-doc-sweep, 2026-05-21)** | v2 stack uses Postgres + Elasticsearch (see DR-064). |
+| DR-006 | ~~FAISS for vector search~~ **RETRACTED** | v2 stack uses ES dense_vector kNN. |
 | DR-007 | Subject resolution: exact match then 0.88 vector threshold | Prevent cross-topic false positives. |
-| DR-008 | Embed once at validation, with a LOCAL embedding model | C3 embeds drafting passages on a debounce; a hosted embedding API on that hot path is an unbounded recurring cost. Use a local multilingual model (Korean + English ICP). |
+| DR-008 | ~~Embed with LOCAL multilingual model~~ **REOPENED** | Stack swap to ES dense_vector retired FAISS; embedding source TBD in PR-1A-3 (Voyage AI multilingual-2 recommended; see CONFLICTS.md C-18). |
 | DR-009 | Cheap pre-filter (numeric/unit/date) before the LLM contradiction check | Cost control. |
 | DR-010 | LLM calls use prompt caching | Cost control. |
 | DR-011 | kind field (fact/opinion/definition) deferred | Classification risk outweighs value at this stage. |
 | DR-012 | DNA meta-network deferred to M12+ | Needs data density first. |
 | DR-013 | Instagram capture via browser extension only (no instaloader) | instaloader violates Meta ToS. |
 | DR-014 | KnowledgeSpace is the core organizational unit (not the user) | One abstraction serves the personal, team, and policy contexts. |
-| DR-015 | valid_from required for policy/legal facts | Policy and legal facts expire; staleness must be checkable by a background job. |
-| DR-016 | space_id on every fact and API operation; Neo4j indexed | Every query is space-scoped; without an index each query is a full graph scan. |
+| DR-015 | ~~valid_from required for policy/legal facts~~ **RETRACTED** | Superseded by DR-053 (no staleness system). valid_from kept as context-only metadata. |
+| DR-016 | space_id on every fact and API operation (ES `knowledge_space_id` keyword field, was Neo4j-indexed in v1) | Every query is space-scoped; ES keyword field replaces the Neo4j index from v1. |
 | DR-017 | Synergy Worker cadence: event-driven with a debounce | A fact-commit enqueues a job keyed by space_id; a ~10 min debounce coalesces capture bursts into one scan; the worker scans incrementally from SynergyJob.cursor and no-ops below the C4 density floor. Beats nightly cron (stale, wastes scans on idle users) and on-idle detection (unreliable for a server-side job). Worker is S3 scope; S0 only reserves the SynergyJob.cursor field. |
 | DR-018 | C2 may traverse EXAMPLE_OF/SUPPORTS edges, weighted and labeled | These edges are human-confirmed but not source-derived. C2 uses them to expand the candidate set at their lower edge weight, clearly labeled; every pattern claim must still cite at least one DERIVED_FROM-grounded fact, and a synthetic edge may never be a pattern's sole support. C2 is S2 scope. |
 | DR-019 | Stellar metaphor: KnowledgeSpace=Universe, FactNode=Star, cluster=Constellation | Founder visual-language decision, 2026-05-19. See docs/visual-design.md. |
@@ -60,8 +60,8 @@
 | DR-048 | Contradiction alerts: queue + Stellar View visual only, no toast | Protect user workflow — toast alerts are too disruptive for the contradiction firehose; user discovers contradictions via main-screen badge and red tension lines in Stellar View. See surface-stage-spec.md §7 and §14 Q4. |
 | DR-049 | Gatekeeping requires 3 conditions: contradicting facts + stronger authority + more recent verification | Conservative blocking — all three conditions must hold before Lucid warns; normal fact evolution (e.g., updated statistics from the same source) does NOT trigger a warning. See surface-stage-spec.md §8. |
 | DR-050 | Gatekeeping warns, never blocks. "Save anyway" is recorded as `override_warning: true` in metadata | User autonomy — Lucid surfaces conflicts but the user always decides. Overridden facts get a yellow border in Stellar View for post-hoc review. See surface-stage-spec.md §8 and §14 Q5. |
-| DR-051 | Staleness detection: daily background scan + dynamic trigger at Surface time | Hybrid approach — daily cron flags `is_stale=true` on facts past `valid_until`; if a stale fact is surfaced via Active/Passive Recall before the next scan, the dynamic trigger flags it immediately. See surface-stage-spec.md §9. |
-| DR-052 | Stale facts shown with label, not hidden from Surface | Honest degradation — staleness is visible (label + de-saturated star + slow flicker in Stellar View), and the user chooses re-validate / drop / keep-as-historical. Hiding would silently drop coverage. See surface-stage-spec.md §9. |
+| DR-051 | ~~Staleness daily/dynamic~~ **RETRACTED** | Superseded by DR-053; no staleness system in v2. |
+| DR-052 | ~~Stale facts shown with label~~ **RETRACTED** | Superseded by DR-053; time-bound facts are permanently true (context only). |
 | DR-053 | Beta is wedge discovery, not wedge validation | Honest pitch principle — earlier hypotheses about academic researchers as the primary target have been retracted; usage data determines the wedge. See beta-backlog.md §0. |
 | DR-054 | Universal recruitment + self-selection screening, NOT family/academic channels | Phase 1 expansion preservation — family/academic networks are strategic capital reserved for Phase 1 once the wedge archetype is identified. See beta-backlog.md §1.1. |
 | DR-055 | Beta target: 30-40 users, quality over quantity | Better fewer real signals — 30 retained users beat 70 names; floor is 30, not the 50 figure that appeared in earlier drafts. See beta-backlog.md §1.1 and §1.4. |
@@ -73,6 +73,35 @@
 | DR-061 | Beta launch criteria: 30+ users AND 60%+ retention AND NPS 40+ AND identified wedge archetype | All four required — partial achievement triggers hypothesis review, not Phase 1 entry. See beta-backlog.md §1.4. |
 | DR-062 | Phase 1 expansion uses family/academic channels matched to discovered wedge | Strategic capital preservation — the channels held back during beta deploy in Phase 1 against the wedge archetype that beta data identified. See beta-backlog.md §1.3. |
 | DR-063 | Marketing message validation is part of beta data collection | Brand message test in field — the four headline messages tracked in beta-backlog.md §8 are themselves a hypothesis tested against user response. |
+
+
+## Retracted
+
+The following decisions were retracted in v2 (Sprint 1A
+chore/lucid-v2-doc-sweep, 2026-05-21). See docs/CONFLICTS.md C-14
+and C-22 for full context.
+
+| ID | Original | Retracted reason |
+|----|----------|------------------|
+| DR-005 | Synergy state in Neo4j for beta | v2 stack: Postgres + Elasticsearch (DR-064) |
+| DR-006 | FAISS for vector search in beta | v2 stack: ES dense_vector kNN |
+| DR-008 | Embed with LOCAL multilingual model | REOPENED — embedding source TBD in PR-1A-3 |
+| DR-015 | valid_from required for policy/legal facts | Superseded by DR-053 (no staleness) |
+| DR-051 | Staleness: daily scan + dynamic trigger | Superseded by DR-053 |
+| DR-052 | Stale facts shown with label | Superseded by DR-053 |
+| DR-027 | Two capture modes (careful + trusted) selected per capture | Reframed: per-source policy in Settings SET-2, not per-capture |
+| DR-043 | Surface: 6 modes | Reframed: 5 modes; Mode 5 Staleness retired |
+
+DR-016 was not retracted but **rewritten**: the requirement is still
+that every fact carry `knowledge_space_id`; the Neo4j-index part of
+the original rationale is replaced by an ES `keyword` field index.
+
+New active DRs that supersede the above:
+
+| ID | Decision |
+|----|----------|
+| DR-053 | Beta is wedge discovery, not validation (PO 2026-05-21) |
+| DR-064 | v2 stack: Postgres + Elasticsearch (with nori); Neo4j + FAISS retired (Sprint 1A PR-1A-1, 2026-05-21) |
 
 ## Open
 
