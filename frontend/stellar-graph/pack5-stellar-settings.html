@@ -1,0 +1,2194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lucid Wireframes — Pack 5: Stellar View + Settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Pretendard:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-base: #0a0a0a; --bg-elevated: #141414; --bg-card: #1a1a1a; --bg-hover: #242424;
+    --border-subtle: #2a2a2a; --border-medium: #3a3a3a;
+    --text-primary: #f5f5f5; --text-secondary: #a0a0a0; --text-tertiary: #707070;
+    --accent-warm: #ffd966; --accent-cool: #6db4f5;
+    --success: #4ecdc4; --warning: #ffd966; --danger: #ff6b6b;
+    --font-sans: 'Inter', 'Pretendard', sans-serif;
+    --font-kr: 'Pretendard', 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+    
+    --c-fact: #ffd966;
+    --c-concept: #b794f6;
+    --c-person: #f6a5c0;
+    --c-org: #6db4f5;
+    --c-service: #4ecdc4;
+    --c-product: #4ecdc4;
+    --c-place: #95e1a3;
+    --c-knowledge: #95e1a3;
+    --c-event: #e8b8d4;
+    --c-procedure: #ffa07a;
+    --c-task: #a8dadc;
+    --c-metric: #ffe66d;
+    --c-resource: #c9b48a;
+    --c-problem: #ff6b6b;
+    --c-source: #888888;
+  }
+  body { font-family: var(--font-sans); background: var(--bg-base); color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased; line-height: 1.5; }
+  body.lang-kr { font-family: var(--font-kr); }
+  
+  .top-bar { position: fixed; top: 0; left: 0; right: 0; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+  .brand { font-weight: 600; font-size: 16px; color: var(--accent-warm); }
+  .brand-tag { font-size: 11px; color: var(--text-tertiary); margin-left: 8px; font-family: var(--font-mono); }
+  .controls { display: flex; align-items: center; gap: 16px; }
+  .lang-toggle { display: flex; background: var(--bg-card); border-radius: 4px; padding: 2px; border: 1px solid var(--border-subtle); }
+  .lang-toggle button { background: transparent; border: none; color: var(--text-secondary); padding: 4px 10px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); border-radius: 3px; }
+  .lang-toggle button.active { background: var(--accent-warm); color: var(--bg-base); }
+  .screen-nav { display: flex; gap: 4px; }
+  .screen-nav button { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 6px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); }
+  .screen-nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .screen-nav button.active { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  
+  .main { margin-top: 60px; padding: 32px; min-height: calc(100vh - 60px); }
+  .screen { display: none; max-width: 1200px; margin: 0 auto; }
+  .screen.active { display: block; }
+  .screen-header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
+  .screen-id { font-family: var(--font-mono); font-size: 11px; color: var(--accent-warm); letter-spacing: 0.1em; text-transform: uppercase; }
+  .screen-title { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .screen-desc { color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+  
+  .screen-doc { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 20px; margin-top: 32px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .screen-doc h4 { color: var(--text-primary); font-size: 14px; margin-bottom: 8px; margin-top: 12px; }
+  .screen-doc h4:first-child { margin-top: 0; }
+  .screen-doc ul { padding-left: 20px; margin-bottom: 8px; }
+  .screen-doc code { font-family: var(--font-mono); background: var(--bg-card); padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--accent-warm); }
+  
+  /* App frame (shared with Pack 3) */
+  .app-frame { background: var(--bg-elevated); border-radius: 12px; border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); display: flex; min-height: 720px; }
+  .app-sidebar { width: 220px; background: var(--bg-base); border-right: 1px solid var(--border-subtle); padding: 20px 0; flex-shrink: 0; }
+  .sidebar-brand { padding: 0 20px 20px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .sidebar-logo { color: var(--accent-warm); font-weight: 600; font-size: 18px; }
+  .sidebar-section { padding: 0 12px; margin-bottom: 16px; }
+  .sidebar-section-title { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-mono); padding: 0 8px 8px; }
+  .sidebar-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 4px; cursor: pointer; color: var(--text-secondary); font-size: 13px; margin-bottom: 2px; }
+  .sidebar-item:hover { background: var(--bg-card); color: var(--text-primary); }
+  .sidebar-item.active { background: rgba(255, 217, 102, 0.1); color: var(--accent-warm); }
+  .sidebar-item-icon { width: 16px; text-align: center; font-size: 14px; }
+  .sidebar-item-text { flex: 1; }
+  .sidebar-item-badge { background: var(--accent-warm); color: var(--bg-base); font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 5px; font-family: var(--font-mono); }
+  .sidebar-item-badge.danger { background: var(--danger); color: white; }
+  
+  .app-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  
+  /* ====================
+     STELLAR VIEW
+  ==================== */
+  
+  .stellar-toolbar { padding: 14px 20px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .stellar-tools-left { display: flex; align-items: center; gap: 12px; }
+  .stellar-search { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 12px; font-size: 12px; color: var(--text-primary); font-family: inherit; width: 240px; }
+  .stellar-search:focus { outline: none; border-color: var(--accent-warm); }
+  
+  .filter-bar-stellar { display: flex; align-items: center; gap: 8px; }
+  .filter-label-stellar { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
+  .filter-chip { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 4px 10px; border-radius: 12px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); display: inline-flex; align-items: center; gap: 4px; }
+  .filter-chip:hover { color: var(--text-primary); border-color: var(--border-medium); }
+  .filter-chip.active { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  .filter-chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+  
+  .stellar-tools-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .tool-btn { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); }
+  .tool-btn:hover { color: var(--text-primary); border-color: var(--accent-warm); }
+  
+  .stellar-canvas { flex: 1; background: radial-gradient(ellipse at center, #0d0d12 0%, #050507 100%); position: relative; min-height: 580px; overflow: hidden; }
+  
+  /* Faceted Search Panel (left of canvas) */
+  .stellar-layout { display: flex; flex: 1; min-height: 600px; }
+  .facet-panel { width: 220px; background: var(--bg-base); border-right: 1px solid var(--border-subtle); padding: 16px 14px; overflow-y: auto; flex-shrink: 0; }
+  .facet-search { width: 100%; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 7px 10px; font-size: 12px; color: var(--text-primary); font-family: inherit; margin-bottom: 16px; }
+  .facet-search:focus { outline: none; border-color: var(--accent-warm); }
+  
+  .facet-section { margin-bottom: 18px; }
+  .facet-title { font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 6px; display: flex; align-items: center; gap: 4px; }
+  .facet-title-collapse { margin-left: auto; cursor: pointer; color: var(--text-tertiary); font-size: 10px; }
+  
+  .facet-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+  .facet-row:hover { color: var(--text-primary); }
+  .facet-row.active { color: var(--text-primary); }
+  .facet-check { width: 12px; height: 12px; border: 1.5px solid var(--border-medium); border-radius: 2px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .facet-check.checked { background: var(--accent-warm); border-color: var(--accent-warm); color: var(--bg-base); font-size: 9px; font-weight: 700; }
+  .facet-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .facet-label { flex: 1; }
+  .facet-count { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); }
+  
+  .facet-show-all { font-size: 10px; color: var(--accent-cool); cursor: pointer; padding: 4px 0; font-family: var(--font-mono); }
+  .facet-show-all:hover { color: #8cc4ff; }
+  
+  .facet-footer { padding-top: 12px; border-top: 1px solid var(--border-subtle); margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .facet-indicator { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); }
+  .facet-indicator .num { color: var(--accent-warm); }
+  .facet-clear { font-size: 11px; color: var(--text-tertiary); cursor: pointer; font-family: var(--font-mono); }
+  .facet-clear:hover { color: var(--danger); }
+  
+  /* Zoom level indicator (top-right of toolbar area) */
+  .zoom-level-pill { display: inline-flex; align-items: center; gap: 6px; background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 4px 10px; border-radius: 12px; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
+  .zoom-level-pill .lvl { color: var(--accent-warm); font-weight: 600; }
+  
+  /* Star System View (L2) - side panel */
+  .star-sidepanel { position: absolute; top: 0; right: 0; bottom: 0; width: 320px; background: var(--bg-card); border-left: 1px solid var(--border-subtle); padding: 18px 16px; overflow-y: auto; backdrop-filter: blur(8px); background: rgba(20,20,20,0.92); }
+  .sp-header { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 12px; }
+  .sp-class-pill { font-family: var(--font-mono); font-size: 10px; padding: 2px 8px; border-radius: 10px; }
+  .sp-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+  .sp-close { margin-left: auto; background: transparent; border: none; color: var(--text-tertiary); cursor: pointer; font-size: 18px; }
+  .sp-section { margin-bottom: 14px; }
+  .sp-section-title { font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .sp-stats { display: flex; gap: 12px; }
+  .sp-stat { display: flex; flex-direction: column; gap: 1px; }
+  .sp-stat-num { font-family: var(--font-mono); font-weight: 600; font-size: 16px; color: var(--text-primary); }
+  .sp-stat-lbl { font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary); text-transform: uppercase; }
+  .sp-fact { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px; margin-bottom: 6px; }
+  .sp-fact-claim { font-size: 12px; color: var(--text-primary); line-height: 1.5; margin-bottom: 4px; }
+  .sp-fact-meta { display: flex; gap: 6px; font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary); }
+  .sp-fact-meta .src { color: var(--text-secondary); }
+  .sp-fact-meta .fnid { color: var(--accent-cool); }
+  .sp-actions { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+  .sp-action-btn { background: transparent; border: 1px solid var(--border-medium); color: var(--text-secondary); padding: 5px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: var(--font-sans); }
+  .sp-action-btn:hover { color: var(--accent-warm); border-color: var(--accent-warm); }
+  .sp-action-btn.pinned { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  
+  .star-svg { width: 100%; height: 100%; display: block; }
+  
+  /* Star nodes — circles with glow */
+  .star { cursor: pointer; transition: transform 0.2s; }
+  .star:hover { transform: scale(1.15); }
+  .star-label { font-family: var(--font-mono); font-size: 9px; fill: var(--text-secondary); text-anchor: middle; pointer-events: none; }
+  .star-label.bright { fill: var(--text-primary); font-size: 10px; font-weight: 500; }
+  
+  /* Cluster label */
+  .cluster-label { font-family: var(--font-mono); font-size: 10px; fill: var(--text-tertiary); text-anchor: middle; letter-spacing: 0.08em; text-transform: uppercase; }
+  
+  /* Connection lines */
+  .link { stroke: rgba(255,255,255,0.15); stroke-width: 1; fill: none; }
+  .link.strong { stroke: rgba(255,255,255,0.3); stroke-width: 1.5; }
+  .link.weak { stroke: rgba(255,255,255,0.08); stroke-dasharray: 2,3; }
+  .link.contradiction { stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 4,2; opacity: 0.7; animation: pulse-line 2s ease-in-out infinite; }
+  
+  @keyframes pulse-line {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 0.3; }
+  }
+  
+  /* Filtered (receded) state */
+  .star.faded { opacity: 0.08; transition: opacity 0.4s; }
+  .link.faded { opacity: 0.04; transition: opacity 0.4s; }
+  .star-label.faded { opacity: 0.1; transition: opacity 0.4s; }
+  .cluster-label.faded { opacity: 0.15; transition: opacity 0.4s; }
+  
+  /* Hover preview card */
+  .star-preview { position: absolute; top: 60px; right: 20px; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; width: 280px; padding: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+  .star-preview-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-subtle); }
+  .star-preview-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .star-preview-name { font-size: 13px; font-weight: 500; color: var(--text-primary); flex: 1; }
+  .star-preview-class { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; }
+  .star-preview-stats { display: flex; gap: 14px; margin-bottom: 10px; font-size: 11px; }
+  .star-preview-stat { display: flex; flex-direction: column; gap: 2px; }
+  .star-preview-stat-value { color: var(--text-primary); font-family: var(--font-mono); font-weight: 500; font-size: 14px; }
+  .star-preview-stat-label { color: var(--text-tertiary); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .star-preview-facts { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+  .star-preview-facts-label { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); margin-bottom: 6px; }
+  .star-preview-fact { padding: 4px 0; border-bottom: 1px dotted var(--border-subtle); }
+  .star-preview-fact:last-child { border-bottom: none; }
+  
+  /* Legend overlay (bottom-left of canvas) */
+  .canvas-legend { position: absolute; bottom: 20px; left: 20px; background: rgba(20,20,20,0.85); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px; backdrop-filter: blur(8px); }
+  .legend-title { font-size: 9px; color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .legend-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); padding: 2px 0; font-family: var(--font-mono); }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+  
+  /* Stats overlay (top-right of canvas) */
+  .canvas-stats { position: absolute; top: 20px; left: 20px; background: rgba(20,20,20,0.85); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px; backdrop-filter: blur(8px); display: flex; gap: 14px; }
+  .canvas-stat-block { display: flex; flex-direction: column; gap: 1px; }
+  .canvas-stat-num { color: var(--text-primary); font-family: var(--font-mono); font-weight: 500; font-size: 14px; }
+  .canvas-stat-lbl { color: var(--text-tertiary); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
+  
+  /* ====================
+     SETTINGS
+  ==================== */
+  
+  .settings-layout { display: flex; flex: 1; }
+  .settings-side { width: 200px; background: var(--bg-base); border-right: 1px solid var(--border-subtle); padding: 20px 0; flex-shrink: 0; }
+  .settings-side-title { padding: 0 20px 12px; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
+  .settings-section-item { padding: 8px 20px; font-size: 13px; color: var(--text-secondary); cursor: pointer; border-left: 2px solid transparent; }
+  .settings-section-item:hover { background: var(--bg-card); color: var(--text-primary); }
+  .settings-section-item.active { background: var(--bg-card); color: var(--accent-warm); border-left-color: var(--accent-warm); }
+  
+  .settings-main { flex: 1; padding: 28px 32px; overflow-y: auto; }
+  .settings-block { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 22px 24px; margin-bottom: 18px; }
+  .settings-block-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+  .settings-block-desc { font-size: 12px; color: var(--text-secondary); margin-bottom: 18px; }
+  
+  .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--border-subtle); }
+  .settings-row:first-of-type { border-top: none; padding-top: 0; }
+  .settings-row-info { flex: 1; padding-right: 16px; }
+  .settings-row-label { font-size: 13px; color: var(--text-primary); margin-bottom: 2px; }
+  .settings-row-help { font-size: 11px; color: var(--text-tertiary); }
+  
+  .toggle { position: relative; width: 36px; height: 20px; background: var(--border-medium); border-radius: 10px; cursor: pointer; flex-shrink: 0; }
+  .toggle.on { background: var(--accent-warm); }
+  .toggle::after { content: ''; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: white; top: 2px; left: 2px; transition: left 0.2s; }
+  .toggle.on::after { left: 18px; }
+  
+  .seg-control { display: flex; background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 2px; flex-shrink: 0; }
+  .seg-btn { background: transparent; border: none; color: var(--text-secondary); padding: 5px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); }
+  .seg-btn:hover { color: var(--text-primary); }
+  .seg-btn.active { background: var(--accent-warm); color: var(--bg-base); font-weight: 500; }
+  
+  .select-mini { background: var(--bg-base); border: 1px solid var(--border-subtle); color: var(--text-primary); padding: 5px 10px; border-radius: 4px; font-size: 12px; font-family: inherit; }
+  
+  .plan-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: rgba(255, 217, 102, 0.1); border: 1px solid rgba(255, 217, 102, 0.3); border-radius: 12px; font-size: 11px; color: var(--accent-warm); font-family: var(--font-mono); }
+  
+  .danger-btn { background: transparent; border: 1px solid rgba(255, 107, 107, 0.3); color: var(--danger); padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; font-family: var(--font-sans); }
+  .danger-btn:hover { background: rgba(255, 107, 107, 0.08); border-color: var(--danger); }
+  
+  .primary-btn { background: var(--accent-warm); color: var(--bg-base); border: none; padding: 7px 14px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: var(--font-sans); }
+  .ghost-btn { background: transparent; border: 1px solid var(--border-medium); color: var(--text-primary); padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; font-family: var(--font-sans); }
+  .ghost-btn:hover { border-color: var(--accent-warm); color: var(--accent-warm); }
+  
+  /* Trusted sources list (SET-2) */
+  .source-row { background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+  .source-row.trusted { border-left: 3px solid var(--accent-warm); }
+  .source-row-icon { width: 32px; height: 32px; background: var(--bg-card); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; border: 1px solid var(--border-subtle); }
+  .source-row-info { flex: 1; min-width: 0; }
+  .source-row-name { font-size: 13px; color: var(--text-primary); margin-bottom: 3px; font-family: var(--font-mono); }
+  .source-row-meta { font-size: 11px; color: var(--text-tertiary); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-family: var(--font-mono); }
+  .source-row-meta .src-type { color: var(--text-secondary); }
+  .warn-pill { color: var(--danger); font-weight: 500; }
+  .policy-selector { display: flex; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 2px; flex-shrink: 0; }
+  .policy-btn { background: transparent; border: none; color: var(--text-secondary); padding: 5px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--font-sans); }
+  .policy-btn:hover { color: var(--text-primary); }
+  .policy-btn.active { background: var(--accent-warm); color: var(--bg-base); font-weight: 500; }
+  
+  [data-lang] { display: none; }
+  body.lang-en [data-lang="en"] { display: inline; }
+  body.lang-en [data-lang-block="en"] { display: block; }
+  body.lang-en li[data-lang="en"] { display: list-item; }
+  body.lang-kr [data-lang="kr"] { display: inline; }
+  body.lang-kr [data-lang-block="kr"] { display: block; }
+  body.lang-kr li[data-lang="kr"] { display: list-item; }
+</style>
+</head>
+<body class="lang-en">
+
+<div class="top-bar">
+  <div>
+    <span class="brand">Lucid</span>
+    <span class="brand-tag">WIREFRAMES // PACK 5: STELLAR VIEW + SETTINGS</span>
+  </div>
+  <div class="controls">
+    <div class="screen-nav">
+      <button class="active" data-screen="sv1">SV-1</button>
+      <button data-screen="sv2">SV-2</button>
+      <button data-screen="sv3">SV-3</button>
+      <button data-screen="sv4">SV-4</button>
+      <button data-screen="set1">SET-1</button>
+      <button data-screen="set2">SET-2</button>
+    </div>
+    <div class="lang-toggle">
+      <button class="active" data-lang-btn="en">EN</button>
+      <button data-lang-btn="kr">KR</button>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- SV-1: Stellar Overview -->
+<div class="screen active" id="screen-sv1">
+  <div class="screen-header">
+    <div class="screen-id">SV-1</div>
+    <div class="screen-title">
+      <span data-lang="en">Stellar View — Overview</span>
+      <span data-lang="kr">Stellar View — 전체 보기</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Your validated knowledge as a star field. Each star is an object node (color = class). Lines connect facts and objects. Brightness reflects how anchored the node is in your graph. Hover for preview, click to explore.</span>
+      <span data-lang="kr">검증된 지식이 별자리로. 각 별은 객체 노드 (색 = class). 선은 사실과 객체 연결. 밝기는 그래프 내 정착도. 호버하면 미리보기, 클릭하면 탐색.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand"><span class="sidebar-logo">Lucid</span></div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⏳</span>
+          <span class="sidebar-item-text" data-lang="en">Pending</span>
+          <span class="sidebar-item-text" data-lang="kr">대기</span>
+          <span class="sidebar-item-badge">7</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">✓</span>
+          <span class="sidebar-item-text" data-lang="en">Auto-accepted</span>
+          <span class="sidebar-item-text" data-lang="kr">자동 수락</span>
+          <span class="sidebar-item-badge">142</span>
+        </div>
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">💬</span>
+          <span class="sidebar-item-text" data-lang="en">Ask Lucid</span>
+          <span class="sidebar-item-text" data-lang="kr">Lucid에게 묻기</span>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title" data-lang="en">Insights</div>
+        <div class="sidebar-section-title" data-lang="kr">인사이트</div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⚠</span>
+          <span class="sidebar-item-text" data-lang="en">Contradictions</span>
+          <span class="sidebar-item-text" data-lang="kr">모순</span>
+          <span class="sidebar-item-badge danger">2</span>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⚙</span>
+          <span class="sidebar-item-text" data-lang="en">Settings</span>
+          <span class="sidebar-item-text" data-lang="kr">설정</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="app-content">
+      <div class="stellar-toolbar">
+        <div class="stellar-tools-left">
+          <span class="zoom-level-pill">
+            <span data-lang="en">Zoom</span>
+            <span data-lang="kr">줌</span>
+            <span class="lvl">L0 GALAXY</span>
+          </span>
+        </div>
+        <div class="stellar-tools-right">
+          <button class="tool-btn" data-lang="en">⊕ Zoom in</button>
+          <button class="tool-btn" data-lang="kr">⊕ 확대</button>
+          <button class="tool-btn" data-lang="en">⊖ Zoom out</button>
+          <button class="tool-btn" data-lang="kr">⊖ 축소</button>
+          <button class="tool-btn" data-lang="en">G — Galaxy</button>
+          <button class="tool-btn" data-lang="kr">G — 전체</button>
+        </div>
+      </div>
+      
+      <div class="stellar-layout">
+      <aside class="facet-panel">
+        <input type="text" class="facet-search" placeholder="🔍 Search nodes, facts, sources…" data-lang-en-placeholder="🔍 Search nodes, facts, sources…" data-lang-kr-placeholder="🔍 노드·사실·출처 검색…" />
+        
+        <div class="facet-section">
+          <div class="facet-title">
+            <span data-lang="en">Classes</span>
+            <span data-lang="kr">Class</span>
+            <span class="facet-title-collapse">▾</span>
+          </div>
+          <div class="facet-row active">
+            <span class="facet-check checked">✓</span>
+            <span class="facet-dot" style="background:#e8b8d4"></span>
+            <span class="facet-label">Event</span>
+            <span class="facet-count">23</span>
+          </div>
+          <div class="facet-row active">
+            <span class="facet-check checked">✓</span>
+            <span class="facet-dot" style="background:#95e1a3"></span>
+            <span class="facet-label">Knowledge</span>
+            <span class="facet-count">8</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-dot" style="background:#4ecdc4"></span>
+            <span class="facet-label">Service</span>
+            <span class="facet-count">12</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-dot" style="background:#6db4f5"></span>
+            <span class="facet-label">Organization</span>
+            <span class="facet-count">9</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-dot" style="background:#b794f6"></span>
+            <span class="facet-label">Concept</span>
+            <span class="facet-count">7</span>
+          </div>
+          <div class="facet-show-all" data-lang="en">+ Show 7 more</div>
+          <div class="facet-show-all" data-lang="kr">+ 7개 더 보기</div>
+        </div>
+        
+        <div class="facet-section">
+          <div class="facet-title">
+            <span data-lang="en">Tags</span>
+            <span data-lang="kr">태그</span>
+            <span class="facet-title-collapse">▾</span>
+          </div>
+          <div class="facet-row active">
+            <span class="facet-check checked">✓</span>
+            <span class="facet-label">ai-governance</span>
+            <span class="facet-count">18</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-label">eu</span>
+            <span class="facet-count">12</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-label">2024</span>
+            <span class="facet-count">9</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-label">korea</span>
+            <span class="facet-count">7</span>
+          </div>
+          <div class="facet-show-all" data-lang="en">+ Show 12 more</div>
+          <div class="facet-show-all" data-lang="kr">+ 12개 더 보기</div>
+        </div>
+        
+        <div class="facet-section">
+          <div class="facet-title">
+            <span data-lang="en">Sources</span>
+            <span data-lang="kr">출처</span>
+            <span class="facet-title-collapse">▾</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-label">wsj.com</span>
+            <span class="facet-count">47</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-label">europa.eu</span>
+            <span class="facet-count">24</span>
+          </div>
+          <div class="facet-row">
+            <span class="facet-check"></span>
+            <span class="facet-label">nature.com</span>
+            <span class="facet-count">16</span>
+          </div>
+          <div class="facet-show-all" data-lang="en">+ Show 4 more</div>
+          <div class="facet-show-all" data-lang="kr">+ 4개 더 보기</div>
+        </div>
+        
+        <div class="facet-section">
+          <div class="facet-title">
+            <span data-lang="en">More filters</span>
+            <span data-lang="kr">추가 필터</span>
+            <span class="facet-title-collapse">▸</span>
+          </div>
+          <div class="facet-show-all" data-lang="en">▸ Time range (P1)</div>
+          <div class="facet-show-all" data-lang="kr">▸ 시간 범위 (P1)</div>
+          <div class="facet-show-all" data-lang="en">▸ Validation method (P1)</div>
+          <div class="facet-show-all" data-lang="kr">▸ 검증 방법 (P1)</div>
+          <div class="facet-show-all" data-lang="en">▸ Connection count (P1)</div>
+          <div class="facet-show-all" data-lang="kr">▸ 연결 수 (P1)</div>
+        </div>
+        
+        <div class="facet-footer">
+          <div class="facet-indicator">
+            <span data-lang="en"><span class="num">31</span> of 247 visible</span>
+            <span data-lang="kr"><span class="num">31</span> / 247 표시 중</span>
+          </div>
+          <div class="facet-clear">
+            <span data-lang="en">Clear all filters</span>
+            <span data-lang="kr">모든 필터 해제</span>
+          </div>
+        </div>
+      </aside>
+      
+      <div class="stellar-canvas">
+        <svg class="star-svg" viewBox="0 0 900 600" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="glow-fact"><stop offset="0%" stop-color="#ffd966" stop-opacity="0.9"/><stop offset="100%" stop-color="#ffd966" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-event"><stop offset="0%" stop-color="#e8b8d4" stop-opacity="0.9"/><stop offset="100%" stop-color="#e8b8d4" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-org"><stop offset="0%" stop-color="#6db4f5" stop-opacity="0.9"/><stop offset="100%" stop-color="#6db4f5" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-knowledge"><stop offset="0%" stop-color="#95e1a3" stop-opacity="0.9"/><stop offset="100%" stop-color="#95e1a3" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-service"><stop offset="0%" stop-color="#4ecdc4" stop-opacity="0.9"/><stop offset="100%" stop-color="#4ecdc4" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-concept"><stop offset="0%" stop-color="#b794f6" stop-opacity="0.9"/><stop offset="100%" stop-color="#b794f6" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-procedure"><stop offset="0%" stop-color="#ffa07a" stop-opacity="0.9"/><stop offset="100%" stop-color="#ffa07a" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-metric"><stop offset="0%" stop-color="#ffe66d" stop-opacity="0.9"/><stop offset="100%" stop-color="#ffe66d" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-person"><stop offset="0%" stop-color="#f6a5c0" stop-opacity="0.9"/><stop offset="100%" stop-color="#f6a5c0" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-place"><stop offset="0%" stop-color="#95e1a3" stop-opacity="0.9"/><stop offset="100%" stop-color="#95e1a3" stop-opacity="0"/></radialGradient>
+          </defs>
+          
+          <!-- Background scattered tiny stars (decorative) -->
+          <g opacity="0.3">
+            <circle cx="80" cy="50" r="0.8" fill="#ffffff"/>
+            <circle cx="220" cy="90" r="0.6" fill="#ffffff"/>
+            <circle cx="450" cy="40" r="0.7" fill="#ffffff"/>
+            <circle cx="680" cy="80" r="0.5" fill="#ffffff"/>
+            <circle cx="820" cy="30" r="0.6" fill="#ffffff"/>
+            <circle cx="120" cy="540" r="0.5" fill="#ffffff"/>
+            <circle cx="380" cy="570" r="0.7" fill="#ffffff"/>
+            <circle cx="600" cy="550" r="0.6" fill="#ffffff"/>
+            <circle cx="750" cy="520" r="0.5" fill="#ffffff"/>
+            <circle cx="850" cy="480" r="0.6" fill="#ffffff"/>
+            <circle cx="40" cy="280" r="0.7" fill="#ffffff"/>
+            <circle cx="870" cy="290" r="0.6" fill="#ffffff"/>
+          </g>
+          
+          <!-- ============================
+               CLUSTER 1 (upper-left): AI Governance
+               EU AI Act, European Commission, Korean AI Act, GDPR, etc.
+          ============================ -->
+          
+          <!-- Links within cluster 1 -->
+          <line class="link strong" x1="190" y1="180" x2="290" y2="160"/>
+          <line class="link" x1="190" y1="180" x2="240" y2="240"/>
+          <line class="link" x1="290" y1="160" x2="340" y2="220"/>
+          <line class="link strong" x1="240" y1="240" x2="340" y2="220"/>
+          <line class="link" x1="290" y1="160" x2="180" y2="110"/>
+          <line class="link weak" x1="340" y1="220" x2="420" y2="260"/>
+          <line class="link" x1="190" y1="180" x2="130" y2="250"/>
+          <line class="link weak" x1="240" y1="240" x2="170" y2="320"/>
+          
+          <!-- Big hub: EU AI Act (Event) -->
+          <circle cx="290" cy="160" r="22" fill="url(#glow-event)"/>
+          <circle class="star" cx="290" cy="160" r="11" fill="#e8b8d4" stroke="#ffffff" stroke-width="0.8"/>
+          <text class="star-label bright" x="290" y="190">EU AI Act</text>
+          
+          <!-- European Commission (Org) -->
+          <circle cx="180" cy="110" r="15" fill="url(#glow-org)"/>
+          <circle class="star" cx="180" cy="110" r="7" fill="#6db4f5"/>
+          <text class="star-label" x="180" y="135">European Commission</text>
+          
+          <!-- Korean AI Basic Act (Event) -->
+          <circle cx="190" cy="180" r="17" fill="url(#glow-event)"/>
+          <circle class="star" cx="190" cy="180" r="8" fill="#e8b8d4"/>
+          <text class="star-label" x="190" y="205">Korean AI Basic Act</text>
+          
+          <!-- AI Governance (Knowledge) -->
+          <circle cx="340" cy="220" r="20" fill="url(#glow-knowledge)"/>
+          <circle class="star" cx="340" cy="220" r="10" fill="#95e1a3"/>
+          <text class="star-label bright" x="340" y="248">AI Governance</text>
+          
+          <!-- GDPR (Event) -->
+          <circle cx="240" cy="240" r="12" fill="url(#glow-event)"/>
+          <circle class="star" cx="240" cy="240" r="6" fill="#e8b8d4"/>
+          <text class="star-label" x="240" y="262">GDPR</text>
+          
+          <!-- Risk-based framework (Knowledge) -->
+          <circle cx="130" cy="250" r="11" fill="url(#glow-knowledge)"/>
+          <circle class="star" cx="130" cy="250" r="5.5" fill="#95e1a3"/>
+          <text class="star-label" x="130" y="270">risk-framework</text>
+          
+          <!-- Facial recognition (Procedure) -->
+          <circle cx="170" cy="320" r="10" fill="url(#glow-procedure)"/>
+          <circle class="star" cx="170" cy="320" r="5" fill="#ffa07a"/>
+          <text class="star-label" x="170" y="340">facial recognition</text>
+          
+          <text class="cluster-label" x="240" y="80">AI Governance</text>
+          
+          <!-- ============================
+               CLUSTER 2 (right): AI Products & Services
+               ChatGPT, Claude, OpenAI, etc.
+          ============================ -->
+          
+          <line class="link strong" x1="640" y1="180" x2="720" y2="220"/>
+          <line class="link" x1="640" y1="180" x2="580" y2="240"/>
+          <line class="link" x1="720" y1="220" x2="780" y2="170"/>
+          <line class="link" x1="580" y1="240" x2="660" y2="290"/>
+          <line class="link weak" x1="660" y1="290" x2="720" y2="220"/>
+          <line class="link" x1="780" y1="170" x2="820" y2="240"/>
+          <line class="link weak" x1="420" y1="260" x2="580" y2="240"/>
+          
+          <!-- ChatGPT (Service) — big hub with contradiction -->
+          <circle cx="640" cy="180" r="20" fill="url(#glow-service)"/>
+          <circle class="star" cx="640" cy="180" r="10" fill="#4ecdc4" stroke="#ffffff" stroke-width="0.6"/>
+          <text class="star-label bright" x="640" y="208">ChatGPT</text>
+          
+          <!-- OpenAI (Org) -->
+          <circle cx="720" cy="220" r="14" fill="url(#glow-org)"/>
+          <circle class="star" cx="720" cy="220" r="7" fill="#6db4f5"/>
+          <text class="star-label" x="720" y="243">OpenAI</text>
+          
+          <!-- Claude (Service) -->
+          <circle cx="780" cy="170" r="13" fill="url(#glow-service)"/>
+          <circle class="star" cx="780" cy="170" r="6.5" fill="#4ecdc4"/>
+          <text class="star-label" x="780" y="192">Claude</text>
+          
+          <!-- Anthropic (Org) -->
+          <circle cx="820" cy="240" r="11" fill="url(#glow-org)"/>
+          <circle class="star" cx="820" cy="240" r="5.5" fill="#6db4f5"/>
+          <text class="star-label" x="820" y="260">Anthropic</text>
+          
+          <!-- weekly active users (Metric) -->
+          <circle cx="580" cy="240" r="12" fill="url(#glow-metric)"/>
+          <circle class="star" cx="580" cy="240" r="6" fill="#ffe66d"/>
+          <text class="star-label" x="580" y="262">weekly users</text>
+          
+          <!-- General-purpose AI model (Product/Concept) -->
+          <circle cx="660" cy="290" r="13" fill="url(#glow-service)"/>
+          <circle class="star" cx="660" cy="290" r="6.5" fill="#4ecdc4"/>
+          <text class="star-label" x="660" y="313">general-purpose AI</text>
+          
+          <text class="cluster-label" x="700" y="80">AI Products</text>
+          
+          <!-- ============================
+               CLUSTER 3 (bottom-left): Personal Health
+               protein, fasted cardio, muscle, etc.
+          ============================ -->
+          
+          <line class="link strong" x1="170" y1="430" x2="260" y2="450"/>
+          <line class="link" x1="170" y1="430" x2="120" y2="380"/>
+          <line class="link" x1="260" y1="450" x2="330" y2="420"/>
+          <line class="link strong" x1="260" y1="450" x2="220" y2="510"/>
+          <line class="link" x1="330" y1="420" x2="380" y2="490"/>
+          <line class="link weak" x1="120" y1="380" x2="220" y2="510"/>
+          
+          <!-- muscle protein synthesis (Concept) -->
+          <circle cx="260" cy="450" r="17" fill="url(#glow-concept)"/>
+          <circle class="star" cx="260" cy="450" r="8.5" fill="#b794f6" stroke="#ffffff" stroke-width="0.6"/>
+          <text class="star-label bright" x="260" y="478">muscle protein synthesis</text>
+          
+          <!-- protein intake (Concept) -->
+          <circle cx="170" cy="430" r="14" fill="url(#glow-concept)"/>
+          <circle class="star" cx="170" cy="430" r="7" fill="#b794f6"/>
+          <text class="star-label" x="170" y="453">protein intake</text>
+          
+          <!-- fasted cardio (Procedure) -->
+          <circle cx="120" cy="380" r="11" fill="url(#glow-procedure)"/>
+          <circle class="star" cx="120" cy="380" r="5.5" fill="#ffa07a"/>
+          <text class="star-label" x="120" y="400">fasted cardio</text>
+          
+          <!-- anabolic window (Event) -->
+          <circle cx="330" cy="420" r="11" fill="url(#glow-event)"/>
+          <circle class="star" cx="330" cy="420" r="5.5" fill="#e8b8d4"/>
+          <text class="star-label" x="330" y="440">anabolic window</text>
+          
+          <!-- recommended protein (Metric) -->
+          <circle cx="380" cy="490" r="10" fill="url(#glow-metric)"/>
+          <circle class="star" cx="380" cy="490" r="5" fill="#ffe66d"/>
+          <text class="star-label" x="380" y="510">daily protein g/kg</text>
+          
+          <!-- muscle loss risk (Problem) -->
+          <circle cx="220" cy="510" r="9" fill="#ff6b6b" opacity="0.3"/>
+          <circle class="star" cx="220" cy="510" r="4.5" fill="#ff6b6b"/>
+          <text class="star-label" x="220" y="528">muscle loss</text>
+          
+          <text class="cluster-label" x="240" y="540">Personal Health</text>
+          
+          <!-- ============================
+               CLUSTER 4 (bottom-right): Policy & Geopolitics
+          ============================ -->
+          
+          <line class="link" x1="600" y1="420" x2="680" y2="450"/>
+          <line class="link strong" x1="680" y1="450" x2="760" y2="410"/>
+          <line class="link" x1="680" y1="450" x2="720" y2="510"/>
+          <line class="link weak" x1="600" y1="420" x2="660" y2="290"/>
+          
+          <!-- semiconductor exports (Resource) -->
+          <circle cx="680" cy="450" r="14" fill="#c9b48a" opacity="0.3"/>
+          <circle class="star" cx="680" cy="450" r="7" fill="#c9b48a"/>
+          <text class="star-label bright" x="680" y="475">semiconductor exports</text>
+          
+          <!-- US-China trade (Knowledge) -->
+          <circle cx="760" cy="410" r="11" fill="url(#glow-knowledge)"/>
+          <circle class="star" cx="760" cy="410" r="5.5" fill="#95e1a3"/>
+          <text class="star-label" x="760" y="430">US-China trade</text>
+          
+          <!-- chip categories (Metric) -->
+          <circle cx="600" cy="420" r="9" fill="url(#glow-metric)"/>
+          <circle class="star" cx="600" cy="420" r="4.5" fill="#ffe66d"/>
+          <text class="star-label" x="600" y="438">chip categories</text>
+          
+          <!-- TSMC (Org) -->
+          <circle cx="720" cy="510" r="10" fill="url(#glow-org)"/>
+          <circle class="star" cx="720" cy="510" r="5" fill="#6db4f5"/>
+          <text class="star-label" x="720" y="528">TSMC</text>
+          
+          <text class="cluster-label" x="700" y="380">Geopolitics</text>
+          
+          <!-- ============================
+               CENTER BRIDGE: Kahneman, behavioral econ
+          ============================ -->
+          
+          <line class="link weak" x1="420" y1="260" x2="340" y2="220"/>
+          <line class="link" x1="420" y1="260" x2="470" y2="320"/>
+          <line class="link weak" x1="470" y1="320" x2="260" y2="450"/>
+          
+          <!-- Kahneman (Person) -->
+          <circle cx="420" cy="260" r="11" fill="url(#glow-person)"/>
+          <circle class="star" cx="420" cy="260" r="5.5" fill="#f6a5c0"/>
+          <text class="star-label" x="420" y="280">Kahneman</text>
+          
+          <!-- loss aversion (Concept) -->
+          <circle cx="470" cy="320" r="9" fill="url(#glow-concept)"/>
+          <circle class="star" cx="470" cy="320" r="4.5" fill="#b794f6"/>
+          <text class="star-label" x="470" y="338">loss aversion</text>
+        </svg>
+        
+        <!-- Stats overlay -->
+        <div class="canvas-stats">
+          <div class="canvas-stat-block">
+            <div class="canvas-stat-num">247</div>
+            <div class="canvas-stat-lbl" data-lang="en">Facts</div>
+            <div class="canvas-stat-lbl" data-lang="kr">사실</div>
+          </div>
+          <div class="canvas-stat-block">
+            <div class="canvas-stat-num">89</div>
+            <div class="canvas-stat-lbl" data-lang="en">Objects</div>
+            <div class="canvas-stat-lbl" data-lang="kr">객체</div>
+          </div>
+          <div class="canvas-stat-block">
+            <div class="canvas-stat-num">412</div>
+            <div class="canvas-stat-lbl" data-lang="en">Links</div>
+            <div class="canvas-stat-lbl" data-lang="kr">연결</div>
+          </div>
+        </div>
+        
+        <!-- Legend overlay -->
+        <div class="canvas-legend">
+          <div class="legend-title" data-lang="en">Object classes</div>
+          <div class="legend-title" data-lang="kr">Object class</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#e8b8d4"></div>Event</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#6db4f5"></div>Organization</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#4ecdc4"></div>Service / Product</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#95e1a3"></div>Knowledge</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#b794f6"></div>Concept</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#ffa07a"></div>Procedure</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#ffe66d"></div>Metric</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#f6a5c0"></div>Person</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#c9b48a"></div>Resource</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#ff6b6b"></div>Problem</div>
+        </div>
+        
+        <!-- Hover preview (positioned over ChatGPT star) -->
+        <div class="star-preview">
+          <div class="star-preview-header">
+            <div class="star-preview-dot" style="background:#4ecdc4"></div>
+            <div class="star-preview-name">ChatGPT</div>
+            <div class="star-preview-class">SERVICE</div>
+          </div>
+          <div class="star-preview-stats">
+            <div class="star-preview-stat">
+              <div class="star-preview-stat-value">8</div>
+              <div class="star-preview-stat-label" data-lang="en">Facts</div>
+              <div class="star-preview-stat-label" data-lang="kr">사실</div>
+            </div>
+            <div class="star-preview-stat">
+              <div class="star-preview-stat-value">5</div>
+              <div class="star-preview-stat-label" data-lang="en">Links</div>
+              <div class="star-preview-stat-label" data-lang="kr">연결</div>
+            </div>
+            <div class="star-preview-stat">
+              <div class="star-preview-stat-value" style="color:var(--danger)">1</div>
+              <div class="star-preview-stat-label" data-lang="en">Conflict</div>
+              <div class="star-preview-stat-label" data-lang="kr">충돌</div>
+            </div>
+          </div>
+          <div class="star-preview-facts-label" data-lang="en">Recent facts</div>
+          <div class="star-preview-facts-label" data-lang="kr">최근 사실</div>
+          <div class="star-preview-facts">
+            <div class="star-preview-fact" data-lang="en">ChatGPT had 200M weekly users in May 2026.</div>
+            <div class="star-preview-fact" data-lang="kr">ChatGPT 2026년 5월 주간 사용자 2억.</div>
+            <div class="star-preview-fact" data-lang="en">GPT-5 released April 2026.</div>
+            <div class="star-preview-fact" data-lang="kr">GPT-5 2026년 4월 출시.</div>
+          </div>
+        </div>
+      </div>
+      </div><!-- /.stellar-layout -->
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">How to read the field</h4>
+    <h4 data-lang-block="kr">별자리 읽는 법</h4>
+    <ul data-lang-block="en">
+      <li><strong>Color</strong> = Object class (Event, Organization, Service, Knowledge, etc.) — same scheme as entity highlights elsewhere</li>
+      <li><strong>Size</strong> = Number of facts attached to this node (more facts = bigger star)</li>
+      <li><strong>Brightness</strong> = Aggregate validation level. Brighter = more well-anchored in your graph</li>
+      <li><strong>Lines</strong> = Links between nodes. Solid = direct relation, dotted = weak or derived</li>
+      <li><strong>Clusters</strong> emerge naturally from connection density — your topic territories</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><strong>색</strong> = Object class (이벤트, 조직, 서비스, 지식 등) — 다른 화면의 entity 하이라이트와 동일 스키마</li>
+      <li><strong>크기</strong> = 이 노드에 연결된 사실 수 (사실이 많을수록 큰 별)</li>
+      <li><strong>밝기</strong> = 종합 검증 레벨. 밝을수록 그래프에 잘 정착</li>
+      <li><strong>선</strong> = 노드 간 연결. 실선 = 직접 관계, 점선 = 약한 또는 파생 관계</li>
+      <li><strong>군집</strong>은 연결 밀도로 자연 형성 — 사용자의 주제 영역</li>
+    </ul>
+    
+    <h4 data-lang-block="en">4 zoom levels — information density</h4>
+    <h4 data-lang-block="kr">4 줌 레벨 — 정보 밀도 변화</h4>
+    <ul data-lang-block="en">
+      <li><code>L0 Galaxy</code> — Full graph. Cluster labels only. (current view)</li>
+      <li><code>L1 Constellation</code> — Zoomed to a cluster. Hub labels visible.</li>
+      <li><code>L2 Star System</code> — One star + 1-hop neighbors + side panel. (see SV-4)</li>
+      <li><code>L3 Fact View</code> — Single fact body + edit (P1)</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>L0 Galaxy</code> — 전체 그래프. 군집 라벨만. (현재 뷰)</li>
+      <li><code>L1 Constellation</code> — 군집 줌 인. 허브 라벨 표시.</li>
+      <li><code>L2 Star System</code> — 한 별 + 1-hop 이웃 + 사이드패널. (SV-4 참조)</li>
+      <li><code>L3 Fact View</code> — 단일 사실 본문 + 편집 (P1)</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Faceted search — 6 dimensions</h4>
+    <h4 data-lang-block="kr">Faceted Search — 6 차원</h4>
+    <p data-lang-block="en">Left panel combines multiple filters. Each option shows live count (e.g., "Event 23"). Filters AND across facets, OR within. Filtered-out nodes fade to 8% opacity (don't disappear).</p>
+    <p data-lang-block="kr">좌측 패널이 여러 필터를 결합. 각 옵션에 실시간 카운트 표시 ("Event 23"). facet 간 AND, facet 내 OR. 필터 제외 노드는 8% 불투명도로 후퇴 (사라지지 않음).</p>
+    <ul data-lang-block="en">
+      <li><code>Classes</code> — 12 Object classes</li>
+      <li><code>Tags</code> — user-defined tags</li>
+      <li><code>Sources</code> — domain</li>
+      <li><code>Time, Validation, Connections</code> — P1</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>Class</code> — 12 Object class</li>
+      <li><code>태그</code> — 사용자 정의 태그</li>
+      <li><code>출처</code> — 도메인</li>
+      <li><code>시간, 검증, 연결</code> — P1</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Keyboard shortcuts</h4>
+    <h4 data-lang-block="kr">키보드 단축키</h4>
+    <ul data-lang-block="en">
+      <li><code>F</code> focus search · <code>G</code> Galaxy view · <code>ESC</code> zoom out · <code>/</code> toggle filters</li>
+      <li><code>1-6</code> quick-toggle facets · <code>Enter</code> zoom into selected · <code>Cmd+F</code> add facet</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>F</code> 검색 포커스 · <code>G</code> Galaxy 복귀 · <code>ESC</code> 줌 아웃 · <code>/</code> 필터 토글</li>
+      <li><code>1-6</code> facet 빠른 토글 · <code>Enter</code> 선택 노드 줌 인 · <code>Cmd+F</code> facet 추가</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Why a star field, not a tree or matrix</h4>
+    <h4 data-lang-block="kr">왜 별자리인가 — 트리도 행렬도 아닌</h4>
+    <p data-lang-block="en">Knowledge isn't hierarchical (tree) or grid-like (matrix). It's relational and uneven — some nodes are dense hubs, others sit at the edge connected to one or two things. Force-directed graph layout reflects this naturally. Star metaphor adds emotional weight: each validated fact is light you added to your own sky.</p>
+    <p data-lang-block="kr">지식은 위계적(트리)이지도 격자형(행렬)도 아닙니다. 관계적이고 비대칭 — 어떤 노드는 밀집된 허브, 어떤 노드는 한두 개에만 연결된 변두리. Force-directed 그래프가 이를 자연스럽게 표현. 별 메타포는 정서적 무게 추가: 검증한 사실 하나하나가 자기 하늘에 더한 빛.</p>
+  </div>
+</div>
+
+<!-- SV-2: Filtered View -->
+<div class="screen" id="screen-sv2">
+  <div class="screen-header">
+    <div class="screen-id">SV-2</div>
+    <div class="screen-title">
+      <span data-lang="en">Stellar View — Filtered (Single Class)</span>
+      <span data-lang="kr">Stellar View — 필터 적용 (한 class만)</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User filtered to "Knowledge" class. Other nodes recede (8% opacity). Knowledge stars stay bright. Their direct connections also dim slightly so the user sees the chosen class in isolation.</span>
+      <span data-lang="kr">사용자가 "Knowledge" class 필터 적용. 다른 노드는 후퇴 (8% 불투명도). Knowledge 별은 밝게 유지. 직접 연결도 살짝 어두워짐 — 선택 class만 고립시켜 보기.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand"><span class="sidebar-logo">Lucid</span></div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⏳</span>
+          <span class="sidebar-item-text" data-lang="en">Pending</span>
+          <span class="sidebar-item-text" data-lang="kr">대기</span>
+          <span class="sidebar-item-badge">7</span>
+        </div>
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">💬</span>
+          <span class="sidebar-item-text" data-lang="en">Ask Lucid</span>
+          <span class="sidebar-item-text" data-lang="kr">Lucid에게 묻기</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="app-content">
+      <div class="stellar-toolbar">
+        <div class="stellar-tools-left">
+          <input type="text" class="stellar-search" placeholder="Search nodes…" />
+        </div>
+        <div class="filter-bar-stellar">
+          <span class="filter-label-stellar" data-lang="en">Class:</span>
+          <span class="filter-label-stellar" data-lang="kr">Class:</span>
+          <div class="filter-chip active"><div class="dot" style="background:#95e1a3"></div>Knowledge</div>
+        </div>
+        <div class="stellar-tools-right">
+          <button class="tool-btn" data-lang="en">Clear filter</button>
+          <button class="tool-btn" data-lang="kr">필터 해제</button>
+        </div>
+      </div>
+      
+      <div class="stellar-canvas">
+        <svg class="star-svg" viewBox="0 0 900 600" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="glow-knowledge-2"><stop offset="0%" stop-color="#95e1a3" stop-opacity="0.9"/><stop offset="100%" stop-color="#95e1a3" stop-opacity="0"/></radialGradient>
+          </defs>
+          
+          <!-- All links faded -->
+          <g>
+            <line class="link faded" x1="190" y1="180" x2="290" y2="160"/>
+            <line class="link faded" x1="190" y1="180" x2="240" y2="240"/>
+            <line class="link faded" x1="290" y1="160" x2="340" y2="220"/>
+            <line class="link faded" x1="240" y1="240" x2="340" y2="220"/>
+            <line class="link faded" x1="290" y1="160" x2="180" y2="110"/>
+            <line class="link faded" x1="340" y1="220" x2="420" y2="260"/>
+            <line class="link faded" x1="190" y1="180" x2="130" y2="250"/>
+            <line class="link faded" x1="240" y1="240" x2="170" y2="320"/>
+            <line class="link faded" x1="640" y1="180" x2="720" y2="220"/>
+            <line class="link faded" x1="640" y1="180" x2="580" y2="240"/>
+            <line class="link faded" x1="720" y1="220" x2="780" y2="170"/>
+            <line class="link faded" x1="580" y1="240" x2="660" y2="290"/>
+            <line class="link faded" x1="660" y1="290" x2="720" y2="220"/>
+            <line class="link faded" x1="780" y1="170" x2="820" y2="240"/>
+            <line class="link faded" x1="420" y1="260" x2="580" y2="240"/>
+            <line class="link faded" x1="170" y1="430" x2="260" y2="450"/>
+            <line class="link faded" x1="170" y1="430" x2="120" y2="380"/>
+            <line class="link faded" x1="260" y1="450" x2="330" y2="420"/>
+            <line class="link faded" x1="260" y1="450" x2="220" y2="510"/>
+            <line class="link faded" x1="330" y1="420" x2="380" y2="490"/>
+            <line class="link faded" x1="120" y1="380" x2="220" y2="510"/>
+            <line class="link faded" x1="600" y1="420" x2="680" y2="450"/>
+            <line class="link faded" x1="680" y1="450" x2="760" y2="410"/>
+            <line class="link faded" x1="680" y1="450" x2="720" y2="510"/>
+            <line class="link faded" x1="420" y1="260" x2="340" y2="220"/>
+            <line class="link faded" x1="420" y1="260" x2="470" y2="320"/>
+            <line class="link faded" x1="470" y1="320" x2="260" y2="450"/>
+          </g>
+          
+          <!-- Faded stars: not Knowledge -->
+          <g>
+            <circle class="star faded" cx="290" cy="160" r="11" fill="#e8b8d4"/>
+            <text class="star-label faded" x="290" y="190">EU AI Act</text>
+            <circle class="star faded" cx="180" cy="110" r="7" fill="#6db4f5"/>
+            <text class="star-label faded" x="180" y="135">European Commission</text>
+            <circle class="star faded" cx="190" cy="180" r="8" fill="#e8b8d4"/>
+            <text class="star-label faded" x="190" y="205">Korean AI Basic Act</text>
+            <circle class="star faded" cx="240" cy="240" r="6" fill="#e8b8d4"/>
+            <text class="star-label faded" x="240" y="262">GDPR</text>
+            <circle class="star faded" cx="170" cy="320" r="5" fill="#ffa07a"/>
+            <text class="star-label faded" x="170" y="340">facial recognition</text>
+            
+            <circle class="star faded" cx="640" cy="180" r="10" fill="#4ecdc4"/>
+            <text class="star-label faded" x="640" y="208">ChatGPT</text>
+            <circle class="star faded" cx="720" cy="220" r="7" fill="#6db4f5"/>
+            <text class="star-label faded" x="720" y="243">OpenAI</text>
+            <circle class="star faded" cx="780" cy="170" r="6.5" fill="#4ecdc4"/>
+            <text class="star-label faded" x="780" y="192">Claude</text>
+            <circle class="star faded" cx="820" cy="240" r="5.5" fill="#6db4f5"/>
+            <text class="star-label faded" x="820" y="260">Anthropic</text>
+            <circle class="star faded" cx="580" cy="240" r="6" fill="#ffe66d"/>
+            <text class="star-label faded" x="580" y="262">weekly users</text>
+            <circle class="star faded" cx="660" cy="290" r="6.5" fill="#4ecdc4"/>
+            <text class="star-label faded" x="660" y="313">general-purpose AI</text>
+            
+            <circle class="star faded" cx="260" cy="450" r="8.5" fill="#b794f6"/>
+            <text class="star-label faded" x="260" y="478">muscle protein synthesis</text>
+            <circle class="star faded" cx="170" cy="430" r="7" fill="#b794f6"/>
+            <text class="star-label faded" x="170" y="453">protein intake</text>
+            <circle class="star faded" cx="120" cy="380" r="5.5" fill="#ffa07a"/>
+            <text class="star-label faded" x="120" y="400">fasted cardio</text>
+            <circle class="star faded" cx="330" cy="420" r="5.5" fill="#e8b8d4"/>
+            <text class="star-label faded" x="330" y="440">anabolic window</text>
+            <circle class="star faded" cx="380" cy="490" r="5" fill="#ffe66d"/>
+            <text class="star-label faded" x="380" y="510">daily protein g/kg</text>
+            <circle class="star faded" cx="220" cy="510" r="4.5" fill="#ff6b6b"/>
+            <text class="star-label faded" x="220" y="528">muscle loss</text>
+            
+            <circle class="star faded" cx="680" cy="450" r="7" fill="#c9b48a"/>
+            <text class="star-label faded" x="680" y="475">semiconductor exports</text>
+            <circle class="star faded" cx="600" cy="420" r="4.5" fill="#ffe66d"/>
+            <text class="star-label faded" x="600" y="438">chip categories</text>
+            <circle class="star faded" cx="720" cy="510" r="5" fill="#6db4f5"/>
+            <text class="star-label faded" x="720" y="528">TSMC</text>
+            
+            <circle class="star faded" cx="420" cy="260" r="5.5" fill="#f6a5c0"/>
+            <text class="star-label faded" x="420" y="280">Kahneman</text>
+            <circle class="star faded" cx="470" cy="320" r="4.5" fill="#b794f6"/>
+            <text class="star-label faded" x="470" y="338">loss aversion</text>
+          </g>
+          
+          <!-- Bright Knowledge stars -->
+          <circle cx="340" cy="220" r="22" fill="url(#glow-knowledge-2)"/>
+          <circle class="star" cx="340" cy="220" r="11" fill="#95e1a3" stroke="#ffffff" stroke-width="0.8"/>
+          <text class="star-label bright" x="340" y="250">AI Governance</text>
+          
+          <circle cx="130" cy="250" r="15" fill="url(#glow-knowledge-2)"/>
+          <circle class="star" cx="130" cy="250" r="7" fill="#95e1a3"/>
+          <text class="star-label bright" x="130" y="272">risk-framework</text>
+          
+          <circle cx="760" cy="410" r="14" fill="url(#glow-knowledge-2)"/>
+          <circle class="star" cx="760" cy="410" r="7" fill="#95e1a3"/>
+          <text class="star-label bright" x="760" y="432">US-China trade</text>
+          
+          <!-- Show one more knowledge node to give the filter texture -->
+          <circle cx="490" cy="380" r="11" fill="url(#glow-knowledge-2)"/>
+          <circle class="star" cx="490" cy="380" r="5.5" fill="#95e1a3"/>
+          <text class="star-label bright" x="490" y="400">behavioral economics</text>
+          
+          <circle cx="540" cy="160" r="11" fill="url(#glow-knowledge-2)"/>
+          <circle class="star" cx="540" cy="160" r="5.5" fill="#95e1a3"/>
+          <text class="star-label bright" x="540" y="180">algorithmic accountability</text>
+          
+          <text class="cluster-label" x="450" y="80">Knowledge — 5 nodes</text>
+        </svg>
+        
+        <div class="canvas-stats">
+          <div class="canvas-stat-block">
+            <div class="canvas-stat-num" style="color:#95e1a3">5</div>
+            <div class="canvas-stat-lbl" data-lang="en">Knowledge</div>
+            <div class="canvas-stat-lbl" data-lang="kr">Knowledge</div>
+          </div>
+          <div class="canvas-stat-block">
+            <div class="canvas-stat-num">42</div>
+            <div class="canvas-stat-lbl" data-lang="en">Facts</div>
+            <div class="canvas-stat-lbl" data-lang="kr">사실</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Elastic recede — keep context, focus attention</h4>
+    <h4 data-lang-block="kr">탄력적 후퇴 — 맥락은 유지, 주의는 집중</h4>
+    <p data-lang-block="en">Filtered-out nodes don't disappear — they fade to 8% opacity. This lets the user keep spatial memory of their full graph while focusing on a slice. Snap back to full view with "Clear filter" or by toggling the chip off.</p>
+    <p data-lang-block="kr">필터 제외된 노드는 사라지지 않고 8% 불투명도로 후퇴. 전체 그래프의 공간 기억을 유지하면서 슬라이스에 집중. "필터 해제" 또는 chip 토글로 즉시 복귀.</p>
+    
+    <h4 data-lang-block="en">Filter combinations</h4>
+    <h4 data-lang-block="kr">필터 조합</h4>
+    <ul data-lang-block="en">
+      <li><strong>Single class</strong> — Knowledge, Procedure, etc. (shown here)</li>
+      <li><strong>Multiple classes</strong> — Service + Product combined</li>
+      <li><strong>Tags</strong> — All facts tagged "ai-governance"</li>
+      <li><strong>Source</strong> — Everything from wsj.com</li>
+      <li><strong>Time</strong> — Saved in the last 7 days</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><strong>한 class</strong> — Knowledge, Procedure 등 (여기 예시)</li>
+      <li><strong>여러 class</strong> — Service + Product 조합</li>
+      <li><strong>태그</strong> — "ai-governance" 태그된 모든 사실</li>
+      <li><strong>출처</strong> — wsj.com 모든 것</li>
+      <li><strong>시간</strong> — 최근 7일 저장된 것</li>
+    </ul>
+  </div>
+</div>
+
+<!-- SV-3: Contradiction Visualization -->
+<div class="screen" id="screen-sv3">
+  <div class="screen-header">
+    <div class="screen-id">SV-3</div>
+    <div class="screen-title">
+      <span data-lang="en">Stellar View — Contradiction Visualization</span>
+      <span data-lang="kr">Stellar View — 모순 시각화</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Filter applied: show only contradictions. Pulsing red dashed lines connect the conflicting fact pairs. Hub stars (ChatGPT, EU AI Act) show the contested subjects. Clicking a contradiction line opens the resolution dialog (Pack 4 S-4).</span>
+      <span data-lang="kr">필터 적용: 모순만 표시. 충돌하는 사실 쌍을 점멸하는 붉은 점선으로 연결. 허브 별 (ChatGPT, EU AI Act)이 논쟁 대상. 모순 선 클릭하면 해소 다이얼로그 (Pack 4 S-4) 열림.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand"><span class="sidebar-logo">Lucid</span></div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title" data-lang="en">Insights</div>
+        <div class="sidebar-section-title" data-lang="kr">인사이트</div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⚠</span>
+          <span class="sidebar-item-text" data-lang="en">Contradictions</span>
+          <span class="sidebar-item-text" data-lang="kr">모순</span>
+          <span class="sidebar-item-badge danger">2</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="app-content">
+      <div class="stellar-toolbar">
+        <div class="stellar-tools-left">
+          <input type="text" class="stellar-search" placeholder="Search nodes…" />
+        </div>
+        <div class="filter-bar-stellar">
+          <span class="filter-label-stellar" data-lang="en">Show:</span>
+          <span class="filter-label-stellar" data-lang="kr">표시:</span>
+          <div class="filter-chip active" style="background:rgba(255,107,107,0.15); color:#ff6b6b; border-color:rgba(255,107,107,0.4)"><div class="dot" style="background:#ff6b6b"></div>
+            <span data-lang="en">Contradictions only</span>
+            <span data-lang="kr">모순만</span>
+          </div>
+        </div>
+        <div class="stellar-tools-right">
+          <button class="tool-btn" data-lang="en">Open resolution queue →</button>
+          <button class="tool-btn" data-lang="kr">해소 큐로 →</button>
+        </div>
+      </div>
+      
+      <div class="stellar-canvas">
+        <svg class="star-svg" viewBox="0 0 900 600" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="glow-event-3"><stop offset="0%" stop-color="#e8b8d4" stop-opacity="0.9"/><stop offset="100%" stop-color="#e8b8d4" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-service-3"><stop offset="0%" stop-color="#4ecdc4" stop-opacity="0.9"/><stop offset="100%" stop-color="#4ecdc4" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-fact-pos"><stop offset="0%" stop-color="#ffd966" stop-opacity="0.8"/><stop offset="100%" stop-color="#ffd966" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-fact-conflict"><stop offset="0%" stop-color="#ff6b6b" stop-opacity="0.6"/><stop offset="100%" stop-color="#ff6b6b" stop-opacity="0"/></radialGradient>
+          </defs>
+          
+          <!-- Faded everything in the background -->
+          <g>
+            <line class="link faded" x1="190" y1="180" x2="290" y2="160"/>
+            <line class="link faded" x1="190" y1="180" x2="240" y2="240"/>
+            <line class="link faded" x1="240" y1="240" x2="340" y2="220"/>
+            <line class="link faded" x1="170" y1="430" x2="260" y2="450"/>
+            <line class="link faded" x1="170" y1="430" x2="120" y2="380"/>
+            
+            <circle class="star faded" cx="180" cy="110" r="7" fill="#6db4f5"/>
+            <text class="star-label faded" x="180" y="135">European Commission</text>
+            <circle class="star faded" cx="190" cy="180" r="8" fill="#e8b8d4"/>
+            <text class="star-label faded" x="190" y="205">Korean AI Basic Act</text>
+            <circle class="star faded" cx="240" cy="240" r="6" fill="#e8b8d4"/>
+            <text class="star-label faded" x="240" y="262">GDPR</text>
+            <circle class="star faded" cx="340" cy="220" r="10" fill="#95e1a3"/>
+            <text class="star-label faded" x="340" y="248">AI Governance</text>
+            
+            <circle class="star faded" cx="720" cy="220" r="7" fill="#6db4f5"/>
+            <text class="star-label faded" x="720" y="243">OpenAI</text>
+            <circle class="star faded" cx="780" cy="170" r="6.5" fill="#4ecdc4"/>
+            <text class="star-label faded" x="780" y="192">Claude</text>
+            <circle class="star faded" cx="820" cy="240" r="5.5" fill="#6db4f5"/>
+            <text class="star-label faded" x="820" y="260">Anthropic</text>
+            <circle class="star faded" cx="660" cy="290" r="6.5" fill="#4ecdc4"/>
+            <text class="star-label faded" x="660" y="313">general-purpose AI</text>
+            
+            <circle class="star faded" cx="260" cy="450" r="8.5" fill="#b794f6"/>
+            <text class="star-label faded" x="260" y="478">muscle protein synthesis</text>
+            <circle class="star faded" cx="170" cy="430" r="7" fill="#b794f6"/>
+            <text class="star-label faded" x="170" y="453">protein intake</text>
+            <circle class="star faded" cx="120" cy="380" r="5.5" fill="#ffa07a"/>
+            <text class="star-label faded" x="120" y="400">fasted cardio</text>
+          </g>
+          
+          <!-- CONTRADICTION 1: EU AI Act + facial recognition (fn-187 vs fn-225) -->
+          <!-- The Event hub, brightly displayed -->
+          <circle cx="290" cy="160" r="26" fill="url(#glow-event-3)"/>
+          <circle class="star" cx="290" cy="160" r="13" fill="#e8b8d4" stroke="#ff6b6b" stroke-width="2"/>
+          <text class="star-label bright" x="290" y="192">EU AI Act</text>
+          
+          <!-- Conflicting facts (orbiting the Event) -->
+          <!-- fact fn-187 (left side) -->
+          <circle cx="200" cy="240" r="14" fill="url(#glow-fact-conflict)"/>
+          <circle class="star" cx="200" cy="240" r="6" fill="#ff6b6b" stroke="#ffffff" stroke-width="0.6"/>
+          <text class="star-label bright" x="200" y="262">fn-187</text>
+          <text class="star-label" x="200" y="276" style="font-size: 8.5px; fill: var(--text-tertiary)">all facial recog prohibited</text>
+          
+          <!-- fact fn-225 (right side) -->
+          <circle cx="380" cy="240" r="14" fill="url(#glow-fact-pos)"/>
+          <circle class="star" cx="380" cy="240" r="6" fill="#ffd966" stroke="#ffffff" stroke-width="0.6"/>
+          <text class="star-label bright" x="380" y="262">fn-225</text>
+          <text class="star-label" x="380" y="276" style="font-size: 8.5px; fill: var(--text-tertiary)">real-time only, w/ exceptions</text>
+          
+          <!-- Connecting fact-to-subject (normal links) -->
+          <line class="link strong" x1="200" y1="240" x2="290" y2="160" stroke="#ff6b6b" opacity="0.5"/>
+          <line class="link strong" x1="380" y1="240" x2="290" y2="160" stroke="#ffd966" opacity="0.5"/>
+          
+          <!-- THE CONTRADICTION LINE (red pulsing curve between facts) -->
+          <path class="link contradiction" d="M 200 240 Q 290 310 380 240" stroke-width="2"/>
+          
+          <text class="cluster-label" x="290" y="100" style="fill: #ff6b6b">⚠ Contradiction</text>
+          
+          <!-- CONTRADICTION 2: ChatGPT + weekly users (fn-301 vs fn-318) -->
+          <circle cx="640" cy="380" r="24" fill="url(#glow-service-3)"/>
+          <circle class="star" cx="640" cy="380" r="12" fill="#4ecdc4" stroke="#ff6b6b" stroke-width="2"/>
+          <text class="star-label bright" x="640" y="410">ChatGPT</text>
+          
+          <!-- Conflicting facts -->
+          <circle cx="540" cy="460" r="13" fill="url(#glow-fact-conflict)"/>
+          <circle class="star" cx="540" cy="460" r="6" fill="#ff6b6b" stroke="#ffffff" stroke-width="0.6"/>
+          <text class="star-label bright" x="540" y="482">fn-301</text>
+          <text class="star-label" x="540" y="496" style="font-size: 8.5px; fill: var(--text-tertiary)">200M weekly users</text>
+          
+          <circle cx="740" cy="460" r="13" fill="url(#glow-fact-pos)"/>
+          <circle class="star" cx="740" cy="460" r="6" fill="#ffd966" stroke="#ffffff" stroke-width="0.6"/>
+          <text class="star-label bright" x="740" y="482">fn-318</text>
+          <text class="star-label" x="740" y="496" style="font-size: 8.5px; fill: var(--text-tertiary)">500M weekly users</text>
+          
+          <line class="link strong" x1="540" y1="460" x2="640" y2="380" stroke="#ff6b6b" opacity="0.5"/>
+          <line class="link strong" x1="740" y1="460" x2="640" y2="380" stroke="#ffd966" opacity="0.5"/>
+          
+          <path class="link contradiction" d="M 540 460 Q 640 530 740 460" stroke-width="2"/>
+          
+          <text class="cluster-label" x="640" y="330" style="fill: #ff6b6b">⚠ Contradiction</text>
+          
+        </svg>
+        
+        <div class="canvas-stats">
+          <div class="canvas-stat-block">
+            <div class="canvas-stat-num" style="color:#ff6b6b">2</div>
+            <div class="canvas-stat-lbl" data-lang="en">Contradictions</div>
+            <div class="canvas-stat-lbl" data-lang="kr">모순</div>
+          </div>
+          <div class="canvas-stat-block">
+            <div class="canvas-stat-num">4</div>
+            <div class="canvas-stat-lbl" data-lang="en">Facts involved</div>
+            <div class="canvas-stat-lbl" data-lang="kr">관련 사실</div>
+          </div>
+        </div>
+        
+        <div class="canvas-legend" style="bottom: 20px; right: 20px; left: auto;">
+          <div class="legend-title" data-lang="en">Reading the conflict</div>
+          <div class="legend-title" data-lang="kr">충돌 읽기</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#ff6b6b"></div>
+            <span data-lang="en">Contested fact</span>
+            <span data-lang="kr">충돌 사실</span>
+          </div>
+          <div class="legend-row"><div class="legend-dot" style="background:#ffd966"></div>
+            <span data-lang="en">Counter fact</span>
+            <span data-lang="kr">반대 사실</span>
+          </div>
+          <div class="legend-row">
+            <svg width="20" height="2" style="margin-right:4px"><line x1="0" y1="1" x2="20" y2="1" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,2"/></svg>
+            <span data-lang="en">Tension line</span>
+            <span data-lang="kr">긴장선</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Why visualize contradictions spatially</h4>
+    <h4 data-lang-block="kr">왜 모순을 공간으로 시각화하나</h4>
+    <p data-lang-block="en">A list of contradictions tells you what conflicts. A graph view tells you where in your knowledge the conflicts live. Two contested ChatGPT facts in the AI Products cluster feels different from a contested EU AI Act fact in the AI Governance cluster — the location informs which area of your understanding may need attention.</p>
+    <p data-lang-block="kr">모순 목록은 무엇이 충돌하는지 알려줍니다. 그래프 뷰는 충돌이 사용자 지식의 어디에 있는지 알려줍니다. AI Products 군집에서 ChatGPT 사실 2건 충돌은 AI Governance 군집에서 EU AI Act 사실 충돌과 다르게 느껴집니다 — 위치가 어느 이해 영역에 주의가 필요한지 알려줌.</p>
+    
+    <h4 data-lang-block="en">Pulsing animation — subtle alarm</h4>
+    <h4 data-lang-block="kr">맥동 애니메이션 — 은은한 경보</h4>
+    <p data-lang-block="en">The red dashed line slowly pulses (2-second cycle). Not aggressive, not blinking. Just enough that your eye catches it when scanning the field. Click the line → opens the resolution dialog (Contradiction Queue, Pack 4 S-4).</p>
+    <p data-lang-block="kr">붉은 점선이 천천히 맥동 (2초 주기). 공격적이지 않고, 점멸하지 않음. 사용자가 그래프를 훑을 때 눈에 띌 정도. 선 클릭하면 해소 다이얼로그 (Contradiction Queue, Pack 4 S-4)로.</p>
+  </div>
+</div>
+
+<!-- SV-4: Star System View (L2) -->
+<div class="screen" id="screen-sv4">
+  <div class="screen-header">
+    <div class="screen-id">SV-4</div>
+    <div class="screen-title">
+      <span data-lang="en">Stellar View — Star System (L2 Zoom)</span>
+      <span data-lang="kr">Stellar View — Star System (L2 줌)</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User double-clicked the EU AI Act star. Zoomed to L2: that star + 1-hop neighbors. Side panel auto-opens with facts, stats, actions. Other graph faded. ESC returns to L1.</span>
+      <span data-lang="kr">사용자가 EU AI Act 별 더블 클릭. L2 로 줌 인: 그 별 + 1-hop 이웃. 사이드패널이 자동으로 열려 사실, 통계, 액션 표시. 나머지 그래프는 후퇴. ESC 로 L1 복귀.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand"><span class="sidebar-logo">Lucid</span></div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="app-content">
+      <div class="stellar-toolbar">
+        <div class="stellar-tools-left">
+          <span class="zoom-level-pill">
+            <span data-lang="en">Zoom</span>
+            <span data-lang="kr">줌</span>
+            <span class="lvl">L2 STAR SYSTEM</span>
+          </span>
+        </div>
+        <div class="stellar-tools-right">
+          <button class="tool-btn">
+            <span data-lang="en">← ESC zoom out</span>
+            <span data-lang="kr">← ESC 줌 아웃</span>
+          </button>
+          <button class="tool-btn">
+            <span data-lang="en">G — Galaxy</span>
+            <span data-lang="kr">G — 전체</span>
+          </button>
+        </div>
+      </div>
+      
+      <div class="stellar-canvas">
+        <svg class="star-svg" viewBox="0 0 900 600" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="glow-event-4"><stop offset="0%" stop-color="#e8b8d4" stop-opacity="0.9"/><stop offset="100%" stop-color="#e8b8d4" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-org-4"><stop offset="0%" stop-color="#6db4f5" stop-opacity="0.9"/><stop offset="100%" stop-color="#6db4f5" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-knowledge-4"><stop offset="0%" stop-color="#95e1a3" stop-opacity="0.9"/><stop offset="100%" stop-color="#95e1a3" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-procedure-4"><stop offset="0%" stop-color="#ffa07a" stop-opacity="0.9"/><stop offset="100%" stop-color="#ffa07a" stop-opacity="0"/></radialGradient>
+            <radialGradient id="glow-metric-4"><stop offset="0%" stop-color="#ffe66d" stop-opacity="0.9"/><stop offset="100%" stop-color="#ffe66d" stop-opacity="0"/></radialGradient>
+          </defs>
+          
+          <!-- Background faded stars (other parts of graph) -->
+          <g opacity="0.08">
+            <circle cx="60" cy="80" r="5" fill="#4ecdc4"/>
+            <circle cx="120" cy="50" r="3" fill="#6db4f5"/>
+            <circle cx="80" cy="500" r="6" fill="#b794f6"/>
+            <circle cx="160" cy="540" r="4" fill="#ffa07a"/>
+            <circle cx="60" cy="320" r="3" fill="#95e1a3"/>
+            <line x1="60" y1="80" x2="120" y2="50" stroke="#ffffff" stroke-width="1"/>
+            <line x1="80" y1="500" x2="160" y2="540" stroke="#ffffff" stroke-width="1"/>
+          </g>
+          
+          <!-- Central focused star: EU AI Act (Event) -->
+          <circle cx="280" cy="290" r="38" fill="url(#glow-event-4)"/>
+          <circle cx="280" cy="290" r="20" fill="#e8b8d4" stroke="#ffffff" stroke-width="1.5"/>
+          <text x="280" y="335" text-anchor="middle" fill="#f5f5f5" font-family="IBM Plex Mono" font-size="13" font-weight="500">EU AI Act</text>
+          <text x="280" y="350" text-anchor="middle" fill="#a0a0a0" font-family="IBM Plex Mono" font-size="9">Event · 7 facts</text>
+          
+          <!-- 1-hop neighbors -->
+          
+          <!-- Top: European Commission -->
+          <line x1="280" y1="290" x2="160" y2="140" stroke="rgba(255,255,255,0.3)" stroke-width="1.2"/>
+          <text x="220" y="200" fill="#707070" font-family="IBM Plex Mono" font-size="8" text-anchor="middle">INVOLVES</text>
+          <circle cx="160" cy="140" r="22" fill="url(#glow-org-4)"/>
+          <circle cx="160" cy="140" r="11" fill="#6db4f5"/>
+          <text x="160" y="170" text-anchor="middle" fill="#f5f5f5" font-family="IBM Plex Mono" font-size="11">European Commission</text>
+          <text x="160" y="183" text-anchor="middle" fill="#a0a0a0" font-family="IBM Plex Mono" font-size="9">Org · 5 facts</text>
+          
+          <!-- Right top: AI Governance (Knowledge) -->
+          <line x1="280" y1="290" x2="450" y2="170" stroke="rgba(255,255,255,0.3)" stroke-width="1.2"/>
+          <text x="380" y="225" fill="#707070" font-family="IBM Plex Mono" font-size="8" text-anchor="middle">DESCRIBES_STATE</text>
+          <circle cx="450" cy="170" r="24" fill="url(#glow-knowledge-4)"/>
+          <circle cx="450" cy="170" r="13" fill="#95e1a3"/>
+          <text x="450" y="202" text-anchor="middle" fill="#f5f5f5" font-family="IBM Plex Mono" font-size="11">AI Governance</text>
+          <text x="450" y="215" text-anchor="middle" fill="#a0a0a0" font-family="IBM Plex Mono" font-size="9">Knowledge · 12 facts</text>
+          
+          <!-- Right middle: risk-based framework (Knowledge) -->
+          <line x1="280" y1="290" x2="490" y2="310" stroke="rgba(255,255,255,0.2)" stroke-width="1" stroke-dasharray="3,2"/>
+          <text x="390" y="295" fill="#707070" font-family="IBM Plex Mono" font-size="8" text-anchor="middle">PART_OF</text>
+          <circle cx="490" cy="310" r="16" fill="url(#glow-knowledge-4)"/>
+          <circle cx="490" cy="310" r="7" fill="#95e1a3"/>
+          <text x="490" y="332" text-anchor="middle" fill="#f5f5f5" font-family="IBM Plex Mono" font-size="10">risk-based framework</text>
+          
+          <!-- Right bottom: facial recognition (Procedure) -->
+          <line x1="280" y1="290" x2="450" y2="430" stroke="rgba(255,107,107,0.5)" stroke-width="1.5" stroke-dasharray="4,2"/>
+          <text x="380" y="375" fill="#ff6b6b" font-family="IBM Plex Mono" font-size="8" text-anchor="middle">⚠ ADDRESSES (contradiction)</text>
+          <circle cx="450" cy="430" r="18" fill="url(#glow-procedure-4)"/>
+          <circle cx="450" cy="430" r="8" fill="#ffa07a" stroke="#ff6b6b" stroke-width="1.5"/>
+          <text x="450" y="455" text-anchor="middle" fill="#f5f5f5" font-family="IBM Plex Mono" font-size="11">facial recognition</text>
+          <text x="450" y="468" text-anchor="middle" fill="#a0a0a0" font-family="IBM Plex Mono" font-size="9">Procedure · 2 facts</text>
+          
+          <!-- Bottom: €35M fines (Metric) -->
+          <line x1="280" y1="290" x2="260" y2="450" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+          <text x="270" y="375" fill="#707070" font-family="IBM Plex Mono" font-size="8" text-anchor="middle">ASSERTS_PROPERTY</text>
+          <circle cx="260" cy="450" r="14" fill="url(#glow-metric-4)"/>
+          <circle cx="260" cy="450" r="6" fill="#ffe66d"/>
+          <text x="260" y="475" text-anchor="middle" fill="#f5f5f5" font-family="IBM Plex Mono" font-size="10">€35M max fines</text>
+          
+          <!-- Left bottom: GDPR (Event, related) -->
+          <line x1="280" y1="290" x2="130" y2="400" stroke="rgba(255,255,255,0.2)" stroke-width="1" stroke-dasharray="3,2"/>
+          <text x="200" y="350" fill="#707070" font-family="IBM Plex Mono" font-size="8" text-anchor="middle">DERIVED_FROM</text>
+          <circle cx="130" cy="400" r="16" fill="url(#glow-event-4)"/>
+          <circle cx="130" cy="400" r="7" fill="#e8b8d4"/>
+          <text x="130" y="425" text-anchor="middle" fill="#f5f5f5" font-family="IBM Plex Mono" font-size="10">GDPR</text>
+        </svg>
+        
+        <!-- Side panel auto-opens with star details -->
+        <div class="star-sidepanel">
+          <div class="sp-header">
+            <span class="sp-class-pill" style="background:rgba(232,184,212,0.15); color:#e8b8d4; border:1px solid rgba(232,184,212,0.3)">Event</span>
+            <div class="sp-title">EU AI Act</div>
+            <button class="sp-close">×</button>
+          </div>
+          
+          <div class="sp-section">
+            <div class="sp-stats">
+              <div class="sp-stat">
+                <div class="sp-stat-num">7</div>
+                <div class="sp-stat-lbl" data-lang="en">Facts</div>
+                <div class="sp-stat-lbl" data-lang="kr">사실</div>
+              </div>
+              <div class="sp-stat">
+                <div class="sp-stat-num">6</div>
+                <div class="sp-stat-lbl" data-lang="en">Links</div>
+                <div class="sp-stat-lbl" data-lang="kr">연결</div>
+              </div>
+              <div class="sp-stat">
+                <div class="sp-stat-num" style="color:#ff6b6b">1</div>
+                <div class="sp-stat-lbl" data-lang="en">Conflict</div>
+                <div class="sp-stat-lbl" data-lang="kr">충돌</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="sp-section">
+            <div class="sp-section-title" data-lang="en">Top facts</div>
+            <div class="sp-section-title" data-lang="kr">주요 사실</div>
+            <div class="sp-fact">
+              <div class="sp-fact-claim" data-lang="en">EU AI Act took effect August 1, 2024, after a 36-month legislative process.</div>
+              <div class="sp-fact-claim" data-lang="kr">EU AI Act는 36개월 입법 과정을 거쳐 2024년 8월 1일 발효됐다.</div>
+              <div class="sp-fact-meta">
+                <span class="fnid">fn-220</span>
+                <span>·</span>
+                <span class="src">wsj.com</span>
+              </div>
+            </div>
+            <div class="sp-fact">
+              <div class="sp-fact-claim" data-lang="en">EU AI Act establishes a risk-based framework with four risk tiers.</div>
+              <div class="sp-fact-claim" data-lang="kr">EU AI Act는 4단계 위험 분류 기반 프레임워크를 수립한다.</div>
+              <div class="sp-fact-meta">
+                <span class="fnid">fn-221</span>
+                <span>·</span>
+                <span class="src">europa.eu</span>
+              </div>
+            </div>
+            <div class="sp-fact">
+              <div class="sp-fact-claim" data-lang="en">⚠ EU AI Act prohibits all forms of facial recognition by 2026. (conflicts with fn-225)</div>
+              <div class="sp-fact-claim" data-lang="kr">⚠ EU AI Act는 2026년까지 모든 형태의 얼굴 인식을 금지한다. (fn-225와 충돌)</div>
+              <div class="sp-fact-meta">
+                <span class="fnid">fn-187</span>
+                <span>·</span>
+                <span class="src">wsj.com</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="sp-section">
+            <div class="sp-section-title" data-lang="en">Connected to</div>
+            <div class="sp-section-title" data-lang="kr">연결된 객체</div>
+            <div style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono); line-height:1.7;">
+              <span data-lang-block="en">
+                European Commission (Org)<br>
+                AI Governance (Knowledge)<br>
+                risk-based framework (Knowledge)<br>
+                facial recognition (Procedure)<br>
+                €35M max fines (Metric)<br>
+                GDPR (Event)
+              </span>
+              <span data-lang-block="kr">
+                European Commission (Org)<br>
+                AI Governance (Knowledge)<br>
+                risk-based framework (Knowledge)<br>
+                facial recognition (Procedure)<br>
+                €35M max fines (Metric)<br>
+                GDPR (Event)
+              </span>
+            </div>
+          </div>
+          
+          <div class="sp-actions">
+            <button class="sp-action-btn pinned" data-lang="en">📌 Pinned</button>
+            <button class="sp-action-btn pinned" data-lang="kr">📌 핀</button>
+            <button class="sp-action-btn" data-lang="en">Filter to this</button>
+            <button class="sp-action-btn" data-lang="kr">이것으로 필터</button>
+            <button class="sp-action-btn" data-lang="en">Open detail</button>
+            <button class="sp-action-btn" data-lang="kr">상세 보기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">L2 — focused exploration</h4>
+    <h4 data-lang-block="kr">L2 — 집중 탐색</h4>
+    <p data-lang-block="en">When the user double-clicks any star, the view zooms to L2 — that single object plus its 1-hop neighbors. Other parts of the graph fade to 8% opacity (visible as context, not interactive). Side panel opens with facts, stats, and quick actions.</p>
+    <p data-lang-block="kr">사용자가 어떤 별이든 더블 클릭하면 L2 로 줌. 그 객체 + 1-hop 이웃만 보임. 다른 그래프 부분은 8% 불투명도로 후퇴 (맥락으로만 보임, 인터랙션 불가). 사이드패널이 사실, 통계, 빠른 액션을 표시.</p>
+    
+    <h4 data-lang-block="en">Side panel — three sections</h4>
+    <h4 data-lang-block="kr">사이드패널 — 3 섹션</h4>
+    <ul data-lang-block="en">
+      <li><code>Stats</code> — facts, links, conflicts count</li>
+      <li><code>Top facts</code> — sorted by validation recency. Conflicts surface with ⚠</li>
+      <li><code>Connected to</code> — 1-hop object list (clickable to navigate)</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>통계</code> — 사실 / 연결 / 충돌 수</li>
+      <li><code>주요 사실</code> — 검증 최근 순. 충돌은 ⚠ 로 강조</li>
+      <li><code>연결된 객체</code> — 1-hop 객체 목록 (클릭으로 이동)</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Quick actions</h4>
+    <h4 data-lang-block="kr">빠른 액션</h4>
+    <ul data-lang-block="en">
+      <li><code>📌 Pin</code> — keep this node visible even when filters change (max 10)</li>
+      <li><code>Filter to this</code> — narrow Galaxy view to this neighborhood</li>
+      <li><code>Open detail</code> — go to L3 Fact view (P1)</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>📌 핀</code> — 필터가 바뀌어도 이 노드는 계속 표시 (최대 10개)</li>
+      <li><code>이것으로 필터</code> — Galaxy view 를 이 이웃으로 좁힘</li>
+      <li><code>상세 보기</code> — L3 Fact view 로 이동 (P1)</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Navigation patterns</h4>
+    <h4 data-lang-block="kr">항해 패턴</h4>
+    <ul data-lang-block="en">
+      <li>Double-click another star in this view → that becomes the new L2 focus</li>
+      <li>ESC → return to L1 Constellation view</li>
+      <li>G → return to L0 Galaxy view immediately</li>
+      <li>Right-click any star → context menu (Show 1-hop, Hide, Pin, etc.)</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>이 뷰에서 다른 별을 더블 클릭 → 그 별이 새 L2 포커스</li>
+      <li>ESC → L1 Constellation 뷰 복귀</li>
+      <li>G → L0 Galaxy 뷰 즉시 복귀</li>
+      <li>어느 별이든 우클릭 → 컨텍스트 메뉴 (1-hop 보기, 숨기기, 핀 등)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- SET-1: Main Settings -->
+<div class="screen" id="screen-set1">
+  <div class="screen-header">
+    <div class="screen-id">SET-1</div>
+    <div class="screen-title">
+      <span data-lang="en">Settings — Main</span>
+      <span data-lang="kr">설정 — 메인</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">All Lucid preferences in one place. Sectioned by domain: profile, surface behavior, notifications, data, billing. Trusted sources lives in its own page (SET-2) due to size.</span>
+      <span data-lang="kr">모든 Lucid 환경설정 한 곳에. 도메인별 섹션: 프로필, surface 동작, 알림, 데이터, 결제. 신뢰 출처는 양이 많아 별도 페이지(SET-2)에.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand"><span class="sidebar-logo">Lucid</span></div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">💬</span>
+          <span class="sidebar-item-text" data-lang="en">Ask Lucid</span>
+          <span class="sidebar-item-text" data-lang="kr">Lucid에게 묻기</span>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">⚙</span>
+          <span class="sidebar-item-text" data-lang="en">Settings</span>
+          <span class="sidebar-item-text" data-lang="kr">설정</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="settings-layout">
+      <div class="settings-side">
+        <div class="settings-side-title" data-lang="en">Settings</div>
+        <div class="settings-side-title" data-lang="kr">설정</div>
+        <div class="settings-section-item active" data-lang="en">Profile</div>
+        <div class="settings-section-item active" data-lang="kr">프로필</div>
+        <div class="settings-section-item" data-lang="en">Surface</div>
+        <div class="settings-section-item" data-lang="kr">Surface</div>
+        <div class="settings-section-item" data-lang="en">Notifications</div>
+        <div class="settings-section-item" data-lang="kr">알림</div>
+        <div class="settings-section-item" data-lang="en">Trusted sources</div>
+        <div class="settings-section-item" data-lang="kr">신뢰 출처</div>
+        <div class="settings-section-item" data-lang="en">Data</div>
+        <div class="settings-section-item" data-lang="kr">데이터</div>
+        <div class="settings-section-item" data-lang="en">Billing</div>
+        <div class="settings-section-item" data-lang="kr">결제</div>
+      </div>
+      
+      <div class="settings-main">
+        
+        <div class="settings-block">
+          <div class="settings-block-title">
+            <span data-lang="en">Profile</span>
+            <span data-lang="kr">프로필</span>
+          </div>
+          <div class="settings-block-desc">
+            <span data-lang="en">Your account and Knowledge Space.</span>
+            <span data-lang="kr">계정과 지식 공간.</span>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Name</span>
+                <span data-lang="kr">이름</span>
+              </div>
+              <div class="settings-row-help">Kiheung Park</div>
+            </div>
+            <button class="ghost-btn" data-lang="en">Edit</button>
+            <button class="ghost-btn" data-lang="kr">편집</button>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Email</span>
+                <span data-lang="kr">이메일</span>
+              </div>
+              <div class="settings-row-help">kiheung@lucid.example</div>
+            </div>
+            <button class="ghost-btn" data-lang="en">Change</button>
+            <button class="ghost-btn" data-lang="kr">변경</button>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Knowledge Space</span>
+                <span data-lang="kr">지식 공간</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">Personal · created Mar 2026 · 247 facts</span>
+                <span data-lang="kr">Personal · 2026-03 생성 · 사실 247개</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="settings-block">
+          <div class="settings-block-title">
+            <span data-lang="en">Surface behavior</span>
+            <span data-lang="kr">Surface 동작</span>
+          </div>
+          <div class="settings-block-desc">
+            <span data-lang="en">How Lucid surfaces facts during your work.</span>
+            <span data-lang="kr">작업 중 Lucid가 사실을 표시하는 방식.</span>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Lucid on this device</span>
+                <span data-lang="kr">이 기기에서 Lucid</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">Master toggle. When off, Active Recall, Contradictions, and Gatekeeping pause. Save still works.</span>
+                <span data-lang="kr">마스터 토글. 끄면 Active Recall, 모순, Gatekeeping 일시 정지. 저장은 계속 작동.</span>
+              </div>
+            </div>
+            <div class="toggle on"></div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Active Recall sensitivity</span>
+                <span data-lang="kr">Active Recall 민감도</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">Delay before dotted underlines appear. Lower = faster, may interrupt.</span>
+                <span data-lang="kr">점선 밑줄 표시까지의 지연. 낮을수록 빠름, 방해 가능성.</span>
+              </div>
+            </div>
+            <div class="seg-control">
+              <button class="seg-btn">300ms</button>
+              <button class="seg-btn active">500ms</button>
+              <button class="seg-btn">700ms</button>
+              <button class="seg-btn">Off</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Ask Lucid shortcut</span>
+                <span data-lang="kr">Ask Lucid 단축키</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">Keyboard shortcut to open the Ask Lucid prompt.</span>
+                <span data-lang="kr">Ask Lucid 프롬프트 호출 단축키.</span>
+              </div>
+            </div>
+            <button class="ghost-btn" style="font-family: var(--font-mono); font-size: 11px">⌘ ⇧ L</button>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Response style</span>
+                <span data-lang="kr">응답 스타일</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">How verbose Ask Lucid's answers should be.</span>
+                <span data-lang="kr">Ask Lucid 응답의 상세 정도.</span>
+              </div>
+            </div>
+            <div class="seg-control">
+              <button class="seg-btn active">
+                <span data-lang="en">Concise</span>
+                <span data-lang="kr">간결</span>
+              </button>
+              <button class="seg-btn">
+                <span data-lang="en">Standard</span>
+                <span data-lang="kr">표준</span>
+              </button>
+              <button class="seg-btn">
+                <span data-lang="en">Detailed</span>
+                <span data-lang="kr">상세</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="settings-block">
+          <div class="settings-block-title">
+            <span data-lang="en">Notifications</span>
+            <span data-lang="kr">알림</span>
+          </div>
+          <div class="settings-block-desc">
+            <span data-lang="en">When Lucid should signal you.</span>
+            <span data-lang="kr">Lucid가 알릴 시점.</span>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Analysis complete toast</span>
+                <span data-lang="kr">분석 완료 toast</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">Show the small bottom-right notification when a save finishes analyzing.</span>
+                <span data-lang="kr">저장 분석 완료 시 우측 하단 작은 알림 표시.</span>
+              </div>
+            </div>
+            <div class="toggle on"></div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Pending decision reminders</span>
+                <span data-lang="kr">결정 대기 알림</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">Periodic reminder when pending decisions pile up.</span>
+                <span data-lang="kr">결정 대기 누적 시 주기적 알림.</span>
+              </div>
+            </div>
+            <div class="seg-control">
+              <button class="seg-btn">
+                <span data-lang="en">Off</span>
+                <span data-lang="kr">끔</span>
+              </button>
+              <button class="seg-btn active">
+                <span data-lang="en">Daily</span>
+                <span data-lang="kr">매일</span>
+              </button>
+              <button class="seg-btn">
+                <span data-lang="en">Weekly</span>
+                <span data-lang="kr">매주</span>
+              </button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Gatekeeping strictness</span>
+                <span data-lang="kr">Gatekeeping 엄격도</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">How aggressive to be about warning before saves that conflict with stronger evidence.</span>
+                <span data-lang="kr">더 강한 증거와 충돌하는 저장에 대한 경고 강도.</span>
+              </div>
+            </div>
+            <div class="seg-control">
+              <button class="seg-btn">
+                <span data-lang="en">Lenient</span>
+                <span data-lang="kr">관대</span>
+              </button>
+              <button class="seg-btn active">
+                <span data-lang="en">Balanced</span>
+                <span data-lang="kr">균형</span>
+              </button>
+              <button class="seg-btn">
+                <span data-lang="en">Strict</span>
+                <span data-lang="kr">엄격</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="settings-block">
+          <div class="settings-block-title">
+            <span data-lang="en">Data</span>
+            <span data-lang="kr">데이터</span>
+          </div>
+          <div class="settings-block-desc">
+            <span data-lang="en">Your knowledge belongs to you. Export anytime.</span>
+            <span data-lang="kr">지식은 사용자의 것. 언제든 내보내기 가능.</span>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Export graph</span>
+                <span data-lang="kr">그래프 내보내기</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">Download all facts, objects, and links. Formats: JSON, Cypher, Markdown.</span>
+                <span data-lang="kr">사실, 객체, 연결 모두 다운로드. 형식: JSON, Cypher, Markdown.</span>
+              </div>
+            </div>
+            <button class="primary-btn" data-lang="en">Export</button>
+            <button class="primary-btn" data-lang="kr">내보내기</button>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Delete all data</span>
+                <span data-lang="kr">모든 데이터 삭제</span>
+              </div>
+              <div class="settings-row-help">
+                <span data-lang="en">Permanently remove your graph, account, and all stored content. Cannot be undone.</span>
+                <span data-lang="kr">그래프, 계정, 저장된 모든 콘텐츠 영구 삭제. 되돌릴 수 없음.</span>
+              </div>
+            </div>
+            <button class="danger-btn" data-lang="en">Delete</button>
+            <button class="danger-btn" data-lang="kr">삭제</button>
+          </div>
+        </div>
+        
+        <div class="settings-block">
+          <div class="settings-block-title">
+            <span data-lang="en">Billing</span>
+            <span data-lang="kr">결제</span>
+          </div>
+          <div class="settings-block-desc">
+            <span data-lang="en">Current plan and payment.</span>
+            <span data-lang="kr">현재 플랜과 결제.</span>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">
+                <span data-lang="en">Plan</span>
+                <span data-lang="kr">플랜</span>
+              </div>
+              <div class="settings-row-help">
+                <span class="plan-pill">Beta · Free</span>
+                <span style="margin-left: 10px; font-size: 11px; color: var(--text-tertiary)">
+                  <span data-lang="en">Pro launches after beta ($19/mo)</span>
+                  <span data-lang="kr">베타 종료 후 Pro 출시 ($19/월)</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SET-2: Trusted Sources -->
+<div class="screen" id="screen-set2">
+  <div class="screen-header">
+    <div class="screen-id">SET-2</div>
+    <div class="screen-title">
+      <span data-lang="en">Settings — Trusted Sources</span>
+      <span data-lang="kr">설정 — 신뢰 출처</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Set save policy per source. Trusted sources auto-accept into the graph. Careful sources go to the queue for review. Default for unknown sources is careful.</span>
+      <span data-lang="kr">출처별 저장 정책 설정. 신뢰 출처는 자동으로 그래프 진입. 신중 출처는 검토 큐로. 알 수 없는 출처는 신중이 기본값.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand"><span class="sidebar-logo">Lucid</span></div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">⚙</span>
+          <span class="sidebar-item-text" data-lang="en">Settings</span>
+          <span class="sidebar-item-text" data-lang="kr">설정</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="settings-layout">
+      <div class="settings-side">
+        <div class="settings-side-title" data-lang="en">Settings</div>
+        <div class="settings-side-title" data-lang="kr">설정</div>
+        <div class="settings-section-item" data-lang="en">Profile</div>
+        <div class="settings-section-item" data-lang="kr">프로필</div>
+        <div class="settings-section-item" data-lang="en">Surface</div>
+        <div class="settings-section-item" data-lang="kr">Surface</div>
+        <div class="settings-section-item" data-lang="en">Notifications</div>
+        <div class="settings-section-item" data-lang="kr">알림</div>
+        <div class="settings-section-item active" data-lang="en">Trusted sources</div>
+        <div class="settings-section-item active" data-lang="kr">신뢰 출처</div>
+        <div class="settings-section-item" data-lang="en">Data</div>
+        <div class="settings-section-item" data-lang="kr">데이터</div>
+        <div class="settings-section-item" data-lang="en">Billing</div>
+        <div class="settings-section-item" data-lang="kr">결제</div>
+      </div>
+      
+      <div class="settings-main">
+        
+        <div class="settings-block">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px;">
+            <div>
+              <div class="settings-block-title">
+                <span data-lang="en">Source policies</span>
+                <span data-lang="kr">출처 정책</span>
+              </div>
+              <div class="settings-block-desc" style="margin-bottom: 0">
+                <span data-lang="en">Trusted sources auto-accept facts into your graph. Careful sources queue for review.</span>
+                <span data-lang="kr">신뢰 출처는 자동으로 사실을 그래프에 추가. 신중 출처는 검토 큐로.</span>
+              </div>
+            </div>
+            <button class="primary-btn" data-lang="en">+ Add source</button>
+            <button class="primary-btn" data-lang="kr">+ 출처 추가</button>
+          </div>
+          
+          <div class="source-row trusted">
+            <div class="source-row-icon">📰</div>
+            <div class="source-row-info">
+              <div class="source-row-name">wsj.com</div>
+              <div class="source-row-meta">
+                <span class="src-type">peer_reviewed_press</span>
+                <span>·</span>
+                <span data-lang="en">142 facts</span>
+                <span data-lang="kr">사실 142개</span>
+                <span>·</span>
+                <span data-lang="en">registered Apr 1, 2026</span>
+                <span data-lang="kr">2026-04-01 등록</span>
+              </div>
+            </div>
+            <div class="policy-selector">
+              <button class="policy-btn"><span data-lang="en">Careful</span><span data-lang="kr">신중</span></button>
+              <button class="policy-btn active"><span data-lang="en">Trusted</span><span data-lang="kr">신뢰</span></button>
+            </div>
+          </div>
+          
+          <div class="source-row trusted">
+            <div class="source-row-icon">🏛</div>
+            <div class="source-row-info">
+              <div class="source-row-name">law.go.kr</div>
+              <div class="source-row-meta">
+                <span class="src-type">government_primary</span>
+                <span>·</span>
+                <span data-lang="en">38 facts</span>
+                <span data-lang="kr">사실 38개</span>
+                <span>·</span>
+                <span data-lang="en">registered Mar 15, 2026</span>
+                <span data-lang="kr">2026-03-15 등록</span>
+              </div>
+            </div>
+            <div class="policy-selector">
+              <button class="policy-btn"><span data-lang="en">Careful</span><span data-lang="kr">신중</span></button>
+              <button class="policy-btn active"><span data-lang="en">Trusted</span><span data-lang="kr">신뢰</span></button>
+            </div>
+          </div>
+          
+          <div class="source-row trusted">
+            <div class="source-row-icon">📚</div>
+            <div class="source-row-info">
+              <div class="source-row-name">nature.com</div>
+              <div class="source-row-meta">
+                <span class="src-type">peer_reviewed</span>
+                <span>·</span>
+                <span data-lang="en">16 facts</span>
+                <span data-lang="kr">사실 16개</span>
+                <span>·</span>
+                <span data-lang="en">registered Feb 28, 2026</span>
+                <span data-lang="kr">2026-02-28 등록</span>
+              </div>
+            </div>
+            <div class="policy-selector">
+              <button class="policy-btn"><span data-lang="en">Careful</span><span data-lang="kr">신중</span></button>
+              <button class="policy-btn active"><span data-lang="en">Trusted</span><span data-lang="kr">신뢰</span></button>
+            </div>
+          </div>
+          
+          <div class="source-row trusted">
+            <div class="source-row-icon">🏛</div>
+            <div class="source-row-info">
+              <div class="source-row-name">europa.eu</div>
+              <div class="source-row-meta">
+                <span class="src-type">government_primary</span>
+                <span>·</span>
+                <span data-lang="en">24 facts</span>
+                <span data-lang="kr">사실 24개</span>
+              </div>
+            </div>
+            <div class="policy-selector">
+              <button class="policy-btn"><span data-lang="en">Careful</span><span data-lang="kr">신중</span></button>
+              <button class="policy-btn active"><span data-lang="en">Trusted</span><span data-lang="kr">신뢰</span></button>
+            </div>
+          </div>
+          
+          <div class="source-row">
+            <div class="source-row-icon">📰</div>
+            <div class="source-row-info">
+              <div class="source-row-name">techcrunch.com</div>
+              <div class="source-row-meta">
+                <span class="src-type">secondary_press</span>
+                <span>·</span>
+                <span data-lang="en">8 facts</span>
+                <span data-lang="kr">사실 8개</span>
+              </div>
+            </div>
+            <div class="policy-selector">
+              <button class="policy-btn active"><span data-lang="en">Careful</span><span data-lang="kr">신중</span></button>
+              <button class="policy-btn"><span data-lang="en">Trusted</span><span data-lang="kr">신뢰</span></button>
+            </div>
+          </div>
+          
+          <div class="source-row">
+            <div class="source-row-icon">📹</div>
+            <div class="source-row-info">
+              <div class="source-row-name">youtube.com/@hubermanlab</div>
+              <div class="source-row-meta">
+                <span class="src-type">expert_individual</span>
+                <span>·</span>
+                <span data-lang="en">23 facts</span>
+                <span data-lang="kr">사실 23개</span>
+                <span>·</span>
+                <span class="warn-pill" data-lang="en">⚠ 2 contradictions in graph</span>
+                <span class="warn-pill" data-lang="kr">⚠ 그래프 내 모순 2건</span>
+              </div>
+            </div>
+            <div class="policy-selector">
+              <button class="policy-btn active"><span data-lang="en">Careful</span><span data-lang="kr">신중</span></button>
+              <button class="policy-btn"><span data-lang="en">Trusted</span><span data-lang="kr">신뢰</span></button>
+            </div>
+          </div>
+          
+          <div class="source-row">
+            <div class="source-row-icon">🔬</div>
+            <div class="source-row-info">
+              <div class="source-row-name">arxiv.org</div>
+              <div class="source-row-meta">
+                <span class="src-type">preprint</span>
+                <span>·</span>
+                <span data-lang="en">12 facts</span>
+                <span data-lang="kr">사실 12개</span>
+              </div>
+            </div>
+            <div class="policy-selector">
+              <button class="policy-btn active"><span data-lang="en">Careful</span><span data-lang="kr">신중</span></button>
+              <button class="policy-btn"><span data-lang="en">Trusted</span><span data-lang="kr">신뢰</span></button>
+            </div>
+          </div>
+          
+          <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <div style="font-size: 13px; color: var(--text-primary); font-weight: 500; margin-bottom: 2px">
+                <span data-lang="en">Default for new sources</span>
+                <span data-lang="kr">새 출처 기본값</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-tertiary)">
+                <span data-lang="en">First-time sources start here. Promote to trusted after vetting.</span>
+                <span data-lang="kr">처음 보는 출처는 여기서 시작. 검증 후 신뢰로 승격.</span>
+              </div>
+            </div>
+            <div class="policy-selector">
+              <button class="policy-btn active"><span data-lang="en">Careful</span><span data-lang="kr">신중</span></button>
+              <button class="policy-btn"><span data-lang="en">Trusted</span><span data-lang="kr">신뢰</span></button>
+            </div>
+          </div>
+        </div>
+        
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">The trust contract</h4>
+    <h4 data-lang-block="kr">신뢰 계약</h4>
+    <p data-lang-block="en">Trusting a source means you've verified its editorial standards once, and you accept that facts from it will enter your graph without per-save review. It doesn't mean infallibility — trusted facts remain reviewable in the Auto-accepted tab, and re-enter the queue if contradictions are detected.</p>
+    <p data-lang-block="kr">출처를 신뢰한다는 건 그 편집 기준을 한 번 확인했고, 매번 검토 없이 그래프 진입을 받아들인다는 뜻. 무오류라는 뜻이 아닙니다 — 신뢰 사실은 자동 수락 탭에서 검토 가능하고, 모순 감지 시 큐로 돌아옵니다.</p>
+    
+    <h4 data-lang-block="en">Warnings on trusted sources</h4>
+    <h4 data-lang-block="kr">신뢰 출처 경고</h4>
+    <p data-lang-block="en">When a source accumulates contradictions with the rest of your graph (see Huberman row above), Lucid flags it. You may want to demote it back to careful — or keep it trusted but be aware. The judgment stays yours.</p>
+    <p data-lang-block="kr">한 출처에서 그래프 내 다른 사실들과 모순이 누적되면 (위 Huberman 행 참고) Lucid가 플래그합니다. 신중으로 강등하거나, 신뢰 유지하되 인지하고 사용. 판단은 사용자가.</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+  document.querySelectorAll('.screen-nav button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const screenId = btn.dataset.screen;
+      document.querySelectorAll('.screen-nav button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById('screen-' + screenId).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+  
+  document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lang = btn.dataset.langBtn;
+      document.querySelectorAll('[data-lang-btn]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.body.classList.remove('lang-en', 'lang-kr');
+      document.body.classList.add('lang-' + lang);
+    });
+  });
+  
+  document.querySelectorAll('.toggle').forEach(t => {
+    t.addEventListener('click', () => t.classList.toggle('on'));
+  });
+  
+  document.querySelectorAll('.seg-control').forEach(seg => {
+    seg.querySelectorAll('.seg-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        seg.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  });
+  
+  document.querySelectorAll('.policy-selector').forEach(sel => {
+    sel.querySelectorAll('.policy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        sel.querySelectorAll('.policy-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const row = sel.closest('.source-row');
+        if (row) {
+          const isTrusted = btn.textContent.trim().includes('Trusted') || btn.textContent.trim().includes('신뢰');
+          row.classList.toggle('trusted', isTrusted);
+        }
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
