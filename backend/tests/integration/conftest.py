@@ -66,3 +66,59 @@ def pg_session(pg_engine, alembic_upgrade):
         session.close()
         transaction.rollback()
         connection.close()
+
+
+# --- ES fixtures (added by PR-1A-3) ----------------------------------
+
+@pytest.fixture(scope="session")
+def es_client():
+    """Session-scoped ES client. Skips the session if ES is unreachable."""
+    try:
+        from elasticsearch import Elasticsearch
+    except ImportError:
+        pytest.skip("elasticsearch not installed")
+
+    import os
+
+    url = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
+    try:
+        c = Elasticsearch(url, request_timeout=5, verify_certs=False)
+        if not c.ping():
+            pytest.skip(f"Elasticsearch not reachable at {url}")
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Elasticsearch not reachable: {exc}")
+
+    yield c
+    c.close()
+
+
+@pytest.fixture(scope="session")
+def es_indexes(es_client):
+    """Recreate the three ES indexes once per session."""
+    from api.storage.elasticsearch import indexes
+    from api.storage.elasticsearch.client import reset_client
+
+    reset_client()
+    indexes.delete_indexes()
+    indexes.create_indexes()
+    yield
+    indexes.delete_indexes()
+
+
+@pytest.fixture()
+def fake_embedding(monkeypatch):
+    """Replace get_embedding with a deterministic fake (1536-dim 0.5 vec).
+
+    Use this in any test that creates a Fact or Object so the OpenAI
+    call is mocked. Returns a tuple (hashable for the LRU cache).
+    """
+    from api.storage.elasticsearch import embeddings
+
+    fake = tuple([0.5] * 1536)
+    monkeypatch.setattr(embeddings, "get_embedding", lambda text: fake if text and text.strip() else None)
+    # Also patch the symbol where each module imported it:
+    from api.storage.elasticsearch import facts as facts_mod
+    from api.storage.elasticsearch import objects as objects_mod
+    monkeypatch.setattr(facts_mod, "get_embedding", lambda text: fake if text and text.strip() else None)
+    monkeypatch.setattr(objects_mod, "get_embedding", lambda text: fake if text and text.strip() else None)
+    return fake
