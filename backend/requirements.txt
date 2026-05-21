@@ -23,6 +23,7 @@ elasticsearch>=8.11,<9.0
 
 # --- LLM ---
 anthropic>=0.25
+openai>=1.30  # text-embedding-3-small for ES kNN (PR-1A-3)
 
 # --- Capture / extraction ---
 youtube-transcript-api>=0.6

@@ -201,7 +201,15 @@ Lucid/
 │   │   ├── orm.py                 6 SQLAlchemy 2.x mapped classes
 │   │   ├── session.py             Sync engine + sessionmaker
 │   │   └── migrations/            Alembic (4 versions: 0001..0004)
-│   ├── api/storage/elasticsearch/ Graph adjacency + kNN — Sprint 1A PR-1A-3 (planned)
+│   ├── api/storage/elasticsearch/ Graph adjacency + kNN — Sprint 1A PR-1A-3
+│   │   ├── client.py              ES sync client singleton
+│   │   ├── mappings.py            3 index mappings (nori + dense_vector hnsw)
+│   │   ├── indexes.py             create / delete / reindex (idempotent)
+│   │   ├── embeddings.py          OpenAI text-embedding-3-small + LRU cache
+│   │   ├── facts.py               Fact CRUD + alias history
+│   │   ├── queries.py             kNN / nori text / faceted search
+│   │   ├── objects.py             Object CRUD + symmetric link + 1-hop
+│   │   └── sources.py             create_or_update_source (capture_count)
 │   ├── alembic.ini                Migration config (run from backend/)
 │   ├── tests/
 │   │   ├── mock_llm.py            Deterministic fake Claude responses
