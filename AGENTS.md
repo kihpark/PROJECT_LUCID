@@ -188,17 +188,26 @@ Lucid/
 │   │       ├── contradiction.py   C1 detection (post-commit)
 │   │       ├── pattern.py         C2 synthesis (density-gated)
 │   │       └── suggestion.py      C4 cross-cluster links
-│   ├── models/                    Pydantic models (source of truth)
-│   │   ├── space.py               KnowledgeSpace, SpaceMember, SpaceRole
-│   │   ├── fact.py                AtomicFact, PendingFact, FactNode
-│   │   ├── validation.py          ValidationRecord, ValidationMark
-│   │   ├── source.py              Source, ExtractionResult, SourceType
-│   │   └── graph.py               GraphData, ObjectNode, Relation
+│   ├── api/models/                Pydantic models (source of truth) — Sprint 1A PR-1A-2
+│   │   ├── base.py                LucidBaseModel + UID + utc_now
+│   │   ├── objects.py             ObjectClass + 13 concrete classes
+│   │   ├── facts.py               AtomicFact + FactNode + EditRecord
+│   │   ├── links.py               5+4+6=15 Link Types + LinkRecord
+│   │   ├── validation.py          ValidationRecord
+│   │   ├── contradiction.py       ContradictionPair (A/B/C) + GatekeepingWarning
+│   │   └── source.py              Source + SourcePolicy + SourceType
+│   ├── api/storage/postgres/      Relational store — Sprint 1A PR-1A-2
+│   │   ├── orm.py                 6 SQLAlchemy 2.x mapped classes
+│   │   ├── session.py             Sync engine + sessionmaker
+│   │   └── migrations/            Alembic (4 versions: 0001..0004)
+│   ├── api/storage/elasticsearch/ Graph adjacency + kNN — Sprint 1A PR-1A-3 (planned)
+│   ├── alembic.ini                Migration config (run from backend/)
 │   ├── tests/
 │   │   ├── mock_llm.py            Deterministic fake Claude responses
 │   │   ├── unit/                  No external dependencies
-│   │   └── integration/           Requires running Neo4j
+│   │   └── integration/           Requires Postgres + Elasticsearch + Docker
 │   ├── Dockerfile
+│   ├── pyproject.toml             Sprint 0: ruff + mypy + pytest config
 │   ├── pytest.ini
 │   └── requirements.txt
 ├── extension/                     Chrome Extension (Manifest V3) — from WisdomDB
