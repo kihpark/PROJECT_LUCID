@@ -143,8 +143,9 @@ Mode 4  Gatekeeping        가짜 정보 입구 경고
 ## 5. 베타 스택 — 확정
 
 ```
-백엔드:        FastAPI + Neo4j + FAISS + Anthropic Claude API
-              + faster-whisper
+백엔드:        FastAPI + Postgres + Elasticsearch (with nori)
+              + Anthropic Claude API + faster-whisper
+              (v2 stack — Neo4j + FAISS retired, Sprint 1A PR-1A-1)
 
 프론트엔드:    Chrome Extension (Manifest V3)
               PWA (Share Target API)
@@ -158,8 +159,8 @@ LLM 호출:      Claude API (분석·분해·답변)
 ```
 
 **왜 이 스택인가:**
-- Neo4j: 그래프 쿼리 성능 + ontology 표현력
-- FAISS: 임베딩 기반 의미 검색
+- Postgres: relational state (users, spaces, sessions, source policies, surveys)
+- Elasticsearch (nori): graph adjacency lists + kNN + Korean text search
 - Claude API: 분해 품질 (특히 한국어)
 - faster-whisper: 유튜브 자막 없을 때
 - Docker Compose: 베타 운영 단순함
@@ -181,7 +182,7 @@ LLM 호출:      Claude API (분석·분해·답변)
 │   ├── pack2-capture.html         C-1 ~ C-6
 │   ├── pack3-queue.html           Q-1 ~ Q-3
 │   ├── pack4-surface.html         S-1 ~ S-5
-│   └── pack5-stellar-settings.html SV-1 ~ SV-3, SET-1, SET-2
+│   └── pack5-stellar-settings.html SV-1 ~ SV-4, SET-1, SET-2
 ├── archive/                       옛 핸드오프 (참고용)
 ├── backend/                       FastAPI 서버 (구현 대상)
 │   ├── app/
@@ -362,6 +363,7 @@ LLM 호출:      Claude API (분석·분해·답변)
 | SV-1 Stellar Overview | Sprint 5 | `frontend/src/pages/stellar/overview.tsx` |
 | SV-2 Filtered | Sprint 5 | reuse Stellar with filter prop |
 | SV-3 Contradiction viz | Sprint 5 | reuse Stellar with contradiction layer |
+| SV-4 Star System View (L2) | Sprint 5 | `frontend/src/pages/stellar/star-system.tsx` (1-hop neighborhood + side panel; see pack5) |
 | SET-1 Main settings | Sprint 7 | `frontend/src/pages/settings/main.tsx` |
 | SET-2 Trusted sources | Sprint 7 | `frontend/src/pages/settings/sources.tsx` |
 
@@ -426,7 +428,7 @@ Entity 멘션 스타일:
 ```
 Sprint 0    Foundation (Docker Compose, FastAPI 기본)
    ↓
-Sprint 1A   Data Models + Neo4j Schema      ┐  병렬
+Sprint 1A   Data Models + Postgres + ES Schema  ┐  병렬
 Sprint 1B   Auth + KnowledgeSpace API       ┘
    ↓
 Sprint 2A   Chrome Extension Capture        ┐
@@ -554,7 +556,7 @@ Claude Code가 이 핸드오프를 받으면 다음 순서로 진행:
 5. /backend, /extension, /pwa, /frontend 디렉토리 구조 생성
 6. backend/pyproject.toml 작성
 7. backend/app/main.py FastAPI 기본 앱
-8. docker-compose.yml (Neo4j + backend)
+8. docker-compose.yml (Postgres + Elasticsearch + backend) — v2 stack
 9. .env.example
 10. README.md (개발 환경 부팅 가이드)
 11. .github/workflows/ci.yml
@@ -665,7 +667,7 @@ Sprint 0 작업 시작합니다.
 /wireframes/pack2-capture.html            C-1 ~ C-6
 /wireframes/pack3-queue.html              Q-1 ~ Q-3
 /wireframes/pack4-surface.html            S-1 ~ S-5
-/wireframes/pack5-stellar-settings.html   SV-1 ~ SV-3, SET-1, SET-2
+/wireframes/pack5-stellar-settings.html   SV-1 ~ SV-4, SET-1, SET-2
 /archive/                         옛 핸드오프 (v1, 참고용)
 ```
 

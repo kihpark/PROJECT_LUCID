@@ -42,12 +42,13 @@ subsumed here. O-1 is resolved: build on the WisdomDB chassis (Approach B).
 
 ## 1. Setup
 
-> **v2 stack (Sprint 1A PR-1A-1, 2026-05-21):** beta runs on
-> Postgres + Elasticsearch (with nori). Neo4j and FAISS are retired.
-> Other sections of this file still carry v1 wording (Neo4j edge
-> blocks, `valid_until`, `is_stale`, FactNode schema details); those
-> are tracked in `docs/CONFLICTS.md` C-14, C-22 and will sweep in a
-> follow-up doc PR.
+> **v2 stack (Sprint 1A PR-1A-1, 2026-05-21; sweep completed in
+> chore/lucid-v2-doc-sweep):** beta runs on Postgres + Elasticsearch
+> (with nori). Neo4j and FAISS are retired. The staleness system
+> (`valid_until`, `is_stale`, Mode 5) is also retired (DR-053 / C-14).
+> All v1-era inline references in this file have been swept; the few
+> remaining mentions of `Neo4j` / `FAISS` / `valid_until` are
+> intentional callouts in retraction notes and prohibition lists.
 
 ```bash
 # Requirements: Docker Desktop, Python 3.11+, Node.js 18+
@@ -139,7 +140,7 @@ docker compose down -v                    # stop + wipe postgres + es volumes
 ```
 
 Rules: Never commit code that breaks existing tests.
-Every new feature requires tests. Integration tests need live Neo4j.
+Every new feature requires tests. Integration tests need a live Postgres + Elasticsearch.
 Ruff + mypy must pass before pushing (CI will block otherwise).
 Integration tests are skipped automatically when Postgres / Elasticsearch
 are unreachable, so unit-only `pytest tests/unit` works on any laptop.
@@ -177,11 +178,11 @@ Lucid/
 │   │   │   ├── queue.py           PendingFact lifecycle
 │   │   │   ├── quorum.py          Multi-validator quorum logic
 │   │   │   └── marker.py          Apply L1/L2/L3/L4 marks
-│   │   ├── graph/                 Neo4j operations
+│   │   ├── graph/                 Graph operations (v2: ES adjacency lists)
 │   │   │   ├── service.py         CRUD + search + traversal (space-scoped)
-│   │   │   └── schema.py          Cypher constraints/indexes
-│   │   ├── embed/                 Vector search (FAISS — not Qdrant)
-│   │   │   └── service.py         Embed once at validation (local model)
+│   │   │   └── schema.py          ES index mappings (PR-1A-3)
+│   │   ├── embed/                 kNN vector search via ES dense_vector (PR-1A-3)
+│   │   │   └── service.py         Embed once at validation (embedding source TBD; see CONFLICTS.md C-18)
 │   │   ├── surface/               Proactive recall
 │   │   │   └── engine.py          C3 contextual surfacing
 │   │   └── synergy/               Background intelligence
@@ -230,238 +231,125 @@ Lucid/
 
 ## 4. Core Data Model
 
-`models/` is the single source of truth. Build it first — it has zero
-dependencies and every other module imports from it.
+The canonical models live in **code**, not in this file. Inline
+snippets that used to define Pydantic shapes or Cypher schemas have
+been retired; the entries below are pointers + invariants.
 
-### KnowledgeSpace (the fundamental organizational unit)
+| Layer | Location | Notes |
+|-------|----------|-------|
+| Pydantic models (Object, AtomicFact, FactNode, LinkRecord, ValidationRecord, ContradictionPair, GatekeepingWarning, Source) | `backend/api/models/` | Source of truth (PR-1A-2) |
+| Relational (User, KnowledgeSpace, AuthSession, SourcePolicy, ArchetypeSurvey, GraphNote) | `backend/api/storage/postgres/orm.py` + Alembic | 6 SQLAlchemy 2.x classes; sync engine |
+| Search + graph adjacency (lucid_facts, lucid_objects, lucid_sources) | `backend/api/storage/elasticsearch/` | Index mappings + kNN (PR-1A-3, planned) |
 
-```python
-class KnowledgeSpace(BaseModel):
-    id: UUID
-    type: Literal["personal","team","policy","public"]
-    name: str
-    owner_id: UUID
-    members: List[SpaceMember]
-    visibility: Literal["private","team","org","public"]
-    jurisdiction: List[str]       # ["KR","EU","US","global"]
-    languages: List[str]          # ["ko","en"]
-    validation_quorum: int        # 1=personal, 3+=team, dynamic=policy
-    created_at: str
-```
+### KnowledgeSpace (Postgres `knowledge_spaces`)
 
-Every FactNode belongs to exactly one KnowledgeSpace.
-This single abstraction serves all three user contexts.
+Every FactNode belongs to exactly one KnowledgeSpace. In beta only
+`type='personal'` is enabled; `team`, `policy`, and `public` are
+valid enum values but blocked at the API layer (Sprint 1B). The
+type CHECK constraint is enforced at the database level in
+`alembic/versions/0001_initial.py`.
 
-> **S0 assumption.** Multi-user auth (JWT) is TASK-014, post-beta. Until then,
-> S0 seeds one hardcoded dev user and one default `personal` KnowledgeSpace,
-> so `owner_id` / `validator_id` UUIDs are well-defined from day one.
+### Fact lifecycle: AtomicFact → FactNode
 
-### Fact lifecycle: AtomicFact → PendingFact → FactNode
+Two Pydantic models, one per lifecycle stage:
 
-These are **three distinct Pydantic models**, one per lifecycle stage. Do not
-collapse them into one model with a `state` flag.
+| Model | Stage | Persisted in |
+|-------|-------|--------------|
+| `AtomicFact` | Structurer output (Sprint 3) | not persisted; passed to the Decide overlay |
+| `FactNode` | Post-Validate / Auto-accepted (Sprint 4) | `lucid_facts` ES index |
 
-| Model | Stage | Adds over the previous stage |
-|-------|-------|------------------------------|
-| `AtomicFact` | Structurer output | The raw decomposed claim payload. No id, no validation. |
-| `PendingFact` | In the HITL queue | `+ id, space_id, created_at, queue_status`. Awaiting L1. |
-| `FactNode` | Persisted in Neo4j | `+ validation marks, validated_at, graph metadata`. Validated. |
+The v1 design had a separate `PendingFact` stage in a Neo4j queue.
+v2 collapses this: Save triggers analysis, the Decide overlay shows
+AtomicFacts directly, and Accept / Review-then-Accept / Discard
+creates the FactNode or drops it. See `docs/capture-stage-spec.md`
+and `docs/validate-stage-spec.md`.
 
-`PendingFact` and `FactNode` reuse `AtomicFact`'s claim fields by composition
-(an `AtomicFact` field) or inheritance — implementer's choice — but the three
-class names must exist and be importable from `models/fact.py`.
+### Forbidden fields on AtomicFact / FactNode (DR-053, C-14)
 
-### AtomicFact (the fundamental knowledge unit)
-
-```python
-class AtomicFact(BaseModel):
-    claim: str                    # Single falsifiable statement, max 200 chars
-    subject: str                  # Primary entity (normalized)
-    predicate: str                # Relationship verb
-    object: str                   # Target entity or value
-    confidence: Literal["HIGH","MEDIUM","LOW"]  # AI source-credibility estimate
-
-    # Provenance
-    source_url: str
-    source_title: str
-    source_type: str              # youtube|web|image|audio|pdf|text
-    personal_note: str            # Why this was saved
-
-    # Geopolitical context
-    jurisdiction: List[str]       # ["KR"] | ["EU"] | ["global"] etc.
-    language: str                 # "ko" | "en"
-```
-
-`FactNode` extends the above with:
-
-```python
-    id: UUID
-    space_id: UUID                # Parent KnowledgeSpace — REQUIRED (DR-016)
-
-    # Temporal validity (valid_from REQUIRED for policy/legal facts — DR-015)
-    valid_from: Optional[str]     # ISO date — when this fact became true
-    valid_until: Optional[str]    # ISO date — when this fact expires/needs review
-    is_stale: bool = False        # Set by the background staleness checker
-
-    # Validation marks (L1 always required; L2-L4 are future)
-    l1_validated: bool = False
-    l1_validated_at: Optional[str]
-    l2_agreement_pct: Optional[float]   # M12
-    l3_agreement_pct: Optional[float]   # M6
-    l4_expert_id: Optional[str]         # M18+
-
-    confidence: Literal["HIGH","MEDIUM","LOW"]  # carried from AtomicFact
-    created_at: str
-    validated_at: Optional[str]
-```
-
-### ValidationMark
-
-```python
-ValidationMark = Literal["L1","L2","L3","L4"]
-# A tier label, used by core/validate/marker.py to apply a validation mark
-# to a FactNode. L1 = self HITL (M0), L3 = system aggregate (M6),
-# L2 = trust network (M12), L4 = expert certification (M18+).
-```
-
-### ValidationRecord (who validated what and when)
-
-```python
-class ValidationRecord(BaseModel):
-    id: UUID
-    fact_id: UUID
-    space_id: UUID
-    validator_id: UUID
-    validator_role: str           # "researcher"|"official"|"expert"
-    action: Literal["accept","edit","reject"]
-    edited_claim: Optional[str]
-    validated_at: str
-    institutional_affiliation: Optional[str]  # "국회입법조사처"
-    l4_credential: Optional[str]             # Expert cert ID
-```
-
-### Confidence vs. Validation — two independent axes
-
-`confidence` (HIGH/MEDIUM/LOW) is the AI's estimate of **source credibility**.
-A validation mark (L1-L4) is **human judgment on truth**. They are independent:
-a HIGH-confidence fact can be rejected by a human; a LOW-confidence fact can be
-accepted. Never conflate the two, and never derive one from the other.
-
-### ObjectNode (OPL-inspired — replaces the old ConceptNode)
-
-```python
-# In Neo4j:
-(:Object {
-    uid: UUID,
-    name: str,                    # Normalized entity name
-    object_class: str,            # Lucid Ontology (12 classes):
-                                  # AtomicFact | Concept | Entity | Event |
-                                  # Procedure | Knowledge | Task | Metric |
-                                  # Resource | Problem | Source
-                                  # Entity subclasses (DR-030):
-                                  # Person | Organization | Service |
-                                  # Product | Place
-                                  # See docs/structure-stage-spec.md §4
-    observed_properties: JSON     # Latest known property values
-})
-```
-
-`models/graph.py` carries a Pydantic `ObjectNode` mirroring this node.
-`ConceptNode` is removed — anywhere a stale doc still says `ConceptNode`,
-read `ObjectNode`.
-
-### SpaceNode
-
-```python
-(:Space {
-    uid: UUID,
-    type: str,                    # personal|team|policy|public
-    name: str,
-    owner_id: UUID,
-    visibility: str,
-    validation_quorum: int,
-    created_at: str
-})
-```
-
-KnowledgeSpace persists as a first-class `(:Space)` Neo4j node (the beta runs
-on Neo4j only — DR-005). Every `(:Fact)` and `(:PendingFact)` carries a
-`space_id` property; queries are space-scoped through it.
-
-### SourceNode
-
-```python
-(:Source {
-    uid: UUID,
-    ref_url: str,
-    publisher_class: str,         # "primary"|"peer_reviewed"|
-                                  # "reputable_secondary"|"user_generated"
-    credibility_tier: str,        # "HIGH"|"MEDIUM"|"LOW" — cached at capture
-    captured_at: str
-})
-```
-
-### Neo4j Edge Types
-
-```cypher
--- Provenance (immutable, weight 1.0)
-(:Fact)-[:DERIVED_FROM { weight: 1.0 }]->(:Source)
-
--- State assertions (Fact -> Object property link)
-(:Fact)-[:ASSERTS_STATE { property: str, value: str, unit: str }]->(:Object)
-
--- Synergy edges (human-confirmed, lower traversal weight)
-(:Fact)-[:SUPPORTS    { weight: 0.85 }]->(:Fact)
-(:Fact)-[:EXAMPLE_OF  { weight: 0.70 }]->(:Fact)
-(:Fact)-[:CONTRADICTS { reason_code: str }]->(:Fact)
-(:Fact)-[:REINFORCES  { weight_bump: float }]->(:Fact)
-
--- Concept links
-(:Fact)-[:HAS_CONCEPT]->(:Object)
-(:Fact)-[:MENTIONS]->(:Object)
-```
-
-DERIVED_FROM is immutable provenance. SUPPORTS/EXAMPLE_OF are human-confirmed
-synthetic edges with lower traversal weight. Surface and Query modules always
-prefer DERIVED_FROM paths over synthetic edges.
-
-### Neo4j Indexes & Constraints (required — DR-016)
-
-```cypher
-CREATE CONSTRAINT space_id   IF NOT EXISTS FOR (s:Space)  REQUIRE s.uid IS UNIQUE;
-CREATE CONSTRAINT fact_id    IF NOT EXISTS FOR (f:Fact)   REQUIRE f.id  IS UNIQUE;
-CREATE CONSTRAINT object_uid IF NOT EXISTS FOR (o:Object) REQUIRE o.uid IS UNIQUE;
-CREATE CONSTRAINT source_uid IF NOT EXISTS FOR (s:Source) REQUIRE s.uid IS UNIQUE;
-
-CREATE INDEX fact_space   IF NOT EXISTS FOR (f:Fact)   ON (f.space_id);
-CREATE INDEX fact_subject IF NOT EXISTS FOR (f:Fact)   ON (f.subject);
-CREATE INDEX fact_l1      IF NOT EXISTS FOR (f:Fact)   ON (f.l1_validated);
-CREATE INDEX source_tier  IF NOT EXISTS FOR (s:Source) ON (s.credibility_tier);
-```
-
-Every query is space-scoped (`WHERE n.space_id = $space_id`); every Synergy
-retrieval filters on `l1_validated`; C1 looks up facts by `subject`. Without
-these indexes each is a full graph scan.
-
-### Synergy State (stored in Neo4j as nodes for beta — DR-005)
+The fields below were retired with the staleness system (PO
+directive 2026-05-21 [변경 2]). Pydantic `extra="forbid"` rejects
+them at construction; 6 negative tests in
+`backend/tests/unit/test_models_facts.py` lock this down.
 
 ```
-(:ContradictionFlag {
-    subject_key: str, participating_fact_ids: JSON,
-    min_credibility_tier: str, reason_code: str,
-    state: "ACTIVE"|"AUTO_RESOLVED", updated_at: str
-})
+valid_until     — retired (no expiry triggers in v2)
+is_stale        — retired
+stale_at        — retired
+```
 
-(:ConnectionSuggestion {
-    fact_a_id: UUID, fact_b_id: UUID,
-    predicted_relation: str, confidence_score: float,
-    state: "PENDING"|"ACCEPTED"|"SKIPPED"
-})
+`valid_from` is kept as **context-only** metadata (when a time-bound
+claim became true). It never triggers expiry, alerts, or
+re-validation jobs.
 
-(:SynergyJob {
-    cursor: str,    # Last processed fact ID — enables incremental scans
-    last_run_at: str, status: str
-})
+### Confidence
+
+Not assigned at Structure (DR-028 / Critical Rule 13). When
+confidence is surfaced at Validate or Surface, it is **derived** at
+read time from publisher_class + validation_method + time freshness
++ consensus signals. The Structurer never emits a `confidence`
+value.
+
+### Object classes (13 concrete, `ObjectClass` StrEnum)
+
+```
+Concept, Person, Organization, Service, Product, Place, Knowledge,
+Event, Procedure, Task, Metric, Resource, Problem
+```
+
+`AtomicFact` and `Source` are separate top-level models, not
+subclasses of `Object`. The historical "12 ontology classes" count
+from `docs/structure-stage-spec.md` §4 included `Entity` as a parent
+of 5 subs plus `AtomicFact` + 5 others; v2 flattens the Entity
+subtree, so the concrete subclass count is 13.
+
+### Link types (15, plus 1 stored inline)
+
+```
+Fact ↔ Object   (5):  ASSERTS_PROPERTY, DESCRIBES_STATE, ADDRESSES,
+                       USES, INVOLVES
+Object ↔ Object (4):  PART_OF, INSTANCE_OF, LOCATED_IN, HAS_ROLE
+Fact ↔ Fact     (6):  SUPPORTS, CONTRADICTS, EXAMPLE_OF,
+                       DERIVED_FROM, INTERPRETS, SUPERSEDES
+Fact → Source   (+1): stored on `FactNode.source_uids` (a list of
+                       UIDs; no LinkRecord needed)
+```
+
+`LinkRecord` is the in-Pydantic representation; the persisted form is
+ES-side, on the `connected_objects` nested field for Object↔Object
+edges and via dedicated relation queries for Fact↔Fact edges. Final
+schema lands in PR-1A-3.
+
+### ContradictionPair patterns (A / B / C)
+
+See `backend/api/models/contradiction.py`. Three patterns:
+
+```
+A   automatic CONTRADICTS edge (same subject + property + value mismatch)
+B   Suspected (same subject + semantically opposite predicate)
+C   Context-only (same subject but different time / jurisdiction /
+    measurement unit; surfaced as info, not a contradiction)
+```
+
+### GatekeepingWarning (DR-050)
+
+Capture-time check. Warns but never blocks. "Save anyway" creates a
+FactNode with `override_warning=True`. See
+`backend/api/models/contradiction.py::GatekeepingWarning`.
+
+### Source policy (Settings SET-2)
+
+Per-user, per-domain Trusted / Careful policy lives in the Postgres
+`source_policies` table, NOT on the capture event. Setting is asked
+once in Settings SET-2, never at capture time (PO directive
+[변경 3]). See `backend/api/storage/postgres/orm.py::SourcePolicyORM`.
+
+### Schema invariants
+
+```
+- FactNode.knowledge_space_id is required; every ES doc carries it
+- All UID fields are uuid4 strings (ES `keyword` index)
+- All datetime fields are timezone-aware UTC (Pydantic
+  `LucidBaseModel` enforces; helpers in `api.models.base`)
 ```
 
 ---
@@ -554,7 +442,7 @@ Never use similarity below 0.88 for subject-to-Object linking.
 ### C1 Contradiction Detection Sequencing
 ALWAYS post-commit. Never inside the write transaction.
 ```
-1. User accepts fact → Neo4j write commits → PendingFact deleted
+1. User accepts fact → ES `lucid_facts` write commits → AtomicFact discarded
 2. C1 fires in separate operation (async, non-blocking)
 3. Cheap pre-filter: numeric/unit/date mismatch check (no LLM)
 4. If pre-filter fires: LLM conflict check (Haiku, prompt-cached)
@@ -648,7 +536,7 @@ GET    /api/stats                      Global (anonymized)
 ## 7. Critical Rules — Never Violate
 
 1. **Validated facts only in answers.** Query and Surface use ONLY validated
-   FactNodes from Neo4j. Never LLM general knowledge. No relevant fact = honest
+   FactNodes from Elasticsearch. Never LLM general knowledge. No relevant fact = honest
    "I don't have validated information on this."
 
 2. **HITL is mandatory.** All extracted facts go to PendingFact queue first.
@@ -660,8 +548,11 @@ GET    /api/stats                      Global (anonymized)
 4. **personal_note must be prompted.** A fact without context on WHY it was
    saved loses value over time.
 
-5. **Neo4j lists as JSON strings.** Always serialize before storing, deserialize
-   after reading. Never store Python lists directly.
+5. **Storage layer separation.** Relational state (users, spaces,
+   sessions, source policies, surveys, graph_notes) lives in Postgres
+   (`backend/api/storage/postgres/`). Facts, objects, sources, and the
+   graph live in Elasticsearch (`backend/api/storage/elasticsearch/`).
+   Don't cross the boundary — no facts in Postgres, no auth state in ES.
 
 6. **Confidence is enum, not float.** HIGH | MEDIUM | LOW. Human judges
    categorically. Float precision is false precision. Confidence and validation
@@ -670,15 +561,19 @@ GET    /api/stats                      Global (anonymized)
 7. **Subject resolution: two gates, strict order.** Exact match first.
    Vector fallback only at ≥ 0.88. Never lower.
 
-8. **C1 runs post-commit.** Contradiction detection never runs inside the
-   Neo4j write transaction. Always a separate async operation after commit.
+8. **C1 runs post-commit.** Contradiction detection never blocks a
+   FactNode write. ES indexing returns first; the contradiction scan
+   fires as a separate operation against the freshly indexed doc.
 
 9. **Below density floor: degrade honestly.** If domain has < 50 facts,
    label as retrieval, not pattern synthesis. Never fabricate a pattern.
 
-10. **valid_from is required for policy/legal facts.** Any fact referencing
-    a law, regulation, or policy MUST have valid_from set. valid_until is
-    strongly recommended. is_stale must be checkable by background job.
+10. **No staleness system (DR-053 / C-14).** Time-bound facts are
+    permanently true ("Korea base rate 3.5% as of 2024-12 ..."). The
+    `valid_from` field is allowed as context-only metadata; `valid_until`
+    and `is_stale` are forbidden on AtomicFact and FactNode and are
+    rejected by Pydantic `extra="forbid"`. No background staleness
+    checker, no Mode 5 Staleness surface.
 
 11. **space_id on every fact and operation.** No fact exists outside a
     KnowledgeSpace. Every API call that touches facts requires space_id.
@@ -694,13 +589,16 @@ GET    /api/stats                      Global (anonymized)
     Pydantic stub in section 4 still carries a `confidence` field from the
     pre-spec model and must be removed in implementation — see CONFLICTS.md.)
 
-14. **Two capture modes: careful and trusted.** Careful mode (default) sends
-    every extracted fact to PendingFact for HITL validation. Trusted mode
-    auto-accepts facts from a user-registered trusted source list straight into
-    FactNode with `auto_accepted=true` and `trust_basis` metadata. Auto-accepted
-    facts surface in a separate review tab and automatically rejoin the main
-    queue when a contradiction is detected, the trust registration is revoked,
-    or `valid_until` expires. (DR-027. See docs/structure-stage-spec.md §2.)
+14. **Two capture modes: careful and trusted (Settings SET-2).** Per-source
+    policy lives in Settings SET-2, not on the capture event (PO directive
+    [변경 3]). Careful mode (default) routes the captured AtomicFacts to the
+    Decide overlay (Accept all / Review / Discard). Trusted mode auto-accepts
+    facts from a user-registered trusted source list straight into the
+    `lucid_facts` index with `validation_method='auto'` on the
+    ValidationRecord. Auto-accepted facts surface in a separate review tab
+    and automatically rejoin the main queue when a contradiction is detected
+    or the trust registration is revoked. (DR-027 reframed for v2.
+    See `docs/validate-stage-spec.md` §2.)
 
 15. **Surface identity protocol.** Every Lucid response — Active Recall hover
     tooltips, Passive Recall ("Ask Lucid") answers, Gatekeeping warnings — must
@@ -789,16 +687,21 @@ MAX_FACTS_PER_CAPTURE=10       # Limit atomic facts per single capture
 
 - Answer queries using LLM general knowledge — validated facts ONLY
 - Create a FactNode without going through PendingFact → HITL → quorum
-- Run C1 contradiction detection inside a Neo4j write transaction
+- Run C1 contradiction detection inside the ES write path (must
+  fire post-commit, per Critical Rule 8)
 - Use vector similarity below 0.88 for subject-to-Object node linking
-- Add Qdrant, Postgres, or any database beyond Neo4j and FAISS (beta)
-- Use a hosted embedding API — embeddings run on a local model (DR-008)
-- Use `confidence` as float — always HIGH | MEDIUM | LOW enum
+- Add Neo4j, FAISS, Qdrant, or any database beyond Postgres +
+  Elasticsearch (v2 stack, PR-1A-1; see CONFLICTS.md C-22)
+- Add valid_until / is_stale / stale_at to AtomicFact or FactNode
+  (DR-053; rejected by Pydantic extra="forbid")
+- Ask the user "trust this source?" at capture time — that policy
+  lives in Settings SET-2 (PO directive [변경 3])
+- Surface anything beyond Mode 0..4 — Mode 5 Staleness was retired
+- Use `confidence` as float — always HIGH | MEDIUM | LOW enum, and
+  never assigned at Structure (DR-028 / Critical Rule 13)
 - Add a `kind` field (fact/opinion/definition) — deferred, DR-011
 - Use instaloader — ToS violation, use extension-based capture instead
-- Store Python lists directly in Neo4j properties — serialize to JSON string
-- Create any fact or route without space_id
-- Write policy/legal facts without valid_from field
+- Create any fact or route without knowledge_space_id
 - Use em-dashes (—) in code comments or docstrings
 - Add new production dependencies without checking requirements.txt first
 
@@ -858,7 +761,6 @@ Lucid's knowledge graph uses a stellar (우주/별) metaphor where:
   Knowledge cluster = Constellation (별자리)
   Validation level  = Star brightness (L1 dim → L4 brilliant)
   Star color        = Domain (policy=amber, science=blue, econ=teal, tech=purple)
-  is_stale          = Flickering gray star
   CONTRADICTS edge  = Red tension line with pulse animation
 
 Core UX principle — Elastic Navigation:
@@ -869,7 +771,7 @@ Core UX principle — Elastic Navigation:
 
 API requirement for graph endpoint:
   GET /api/spaces/{sid}/graph must return validation_level (1-4),
-  is_stale, is_pending, connection_count, and constellation data.
+  is_pending, connection_count, and constellation data.
   See docs/visual-design.md and docs/feature-spec-stellar-graph.md.
 
 Do NOT implement the graph as a static node-link diagram.
@@ -892,18 +794,18 @@ Full log in [`docs/decision-log.md`](docs/decision-log.md).
 | DR-002 | Source node with credibility_tier cached at capture |
 | DR-003 | C1 runs post-commit, not inside write transaction |
 | DR-004 | Contradiction flags auto-clear on HITL resolution |
-| DR-005 | Synergy state in Neo4j for beta (not Postgres) |
-| DR-006 | FAISS for vector search in beta (not Qdrant) |
+| DR-005 | ~~Synergy state in Neo4j~~ **RETRACTED** — v2 uses ES + Postgres |
+| DR-006 | ~~FAISS for vector search~~ **RETRACTED** — v2 uses ES dense_vector kNN |
 | DR-007 | Subject resolution: exact match → 0.88 vector threshold |
-| DR-008 | Embed once at validation, with a LOCAL embedding model |
+| DR-008 | ~~Embed with LOCAL model~~ **REOPENED** — embedding source TBD in PR-1A-3 (C-18) |
 | DR-009 | Cheap pre-filter (numeric/unit/date) before LLM contradiction check |
 | DR-010 | LLM calls use prompt caching |
 | DR-011 | kind field (fact/opinion/definition) deferred |
 | DR-012 | DNA meta-network deferred to M12+ |
 | DR-013 | Instagram: browser extension only (no instaloader — ToS) |
 | DR-014 | KnowledgeSpace is the core organizational unit (not user) |
-| DR-015 | valid_from required for policy/legal facts |
-| DR-016 | space_id on every fact and API operation; Neo4j indexed |
+| DR-015 | ~~valid_from required for policy/legal facts~~ **RETRACTED** — DR-053 / C-14 |
+| DR-016 | space_id on every fact and API operation (ES `knowledge_space_id` keyword field — was Neo4j-indexed in v1) |
 | DR-017 | Synergy Worker cadence: event-driven with debounce |
 | DR-018 | C2 may traverse EXAMPLE_OF/SUPPORTS, weighted + labeled |
 | DR-019 | Stellar metaphor: KnowledgeSpace=Universe, FactNode=Star |
@@ -938,8 +840,10 @@ Full log in [`docs/decision-log.md`](docs/decision-log.md).
 | DR-048 | Contradiction alerts: queue + Stellar View visual only (no toast) |
 | DR-049 | Gatekeeping requires 3 conditions to warn |
 | DR-050 | Gatekeeping warns, never blocks; override is recorded in metadata |
-| DR-051 | Staleness: daily background scan + dynamic Surface-time trigger |
-| DR-052 | Stale facts shown with label, not hidden from Surface |
+| DR-051 | ~~Staleness daily/dynamic~~ **RETRACTED** — DR-053 / C-14 |
+| DR-052 | ~~Stale facts shown with label~~ **RETRACTED** — DR-053 / C-14 |
+
+| DR-064 | v2 stack: Postgres + Elasticsearch (nori); Neo4j + FAISS retired | (Sprint 1A PR-1A-1, 2026-05-21) |
 
 Still open: **O-3** — contradiction-flag UI placement (inline vs dedicated view).
 
