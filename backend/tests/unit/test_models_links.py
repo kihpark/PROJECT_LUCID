@@ -25,8 +25,8 @@ def test_object_object_link_types_count():
 
 
 def test_fact_fact_link_types_count():
-    """Six Fact-to-Fact link types."""
-    assert len(FactFactLinkType) == 6
+    """Seven Fact-to-Fact link types (DCR-001 added NEGATES)."""
+    assert len(FactFactLinkType) == 7
     expected = {
         "supports",
         "contradicts",
@@ -34,6 +34,7 @@ def test_fact_fact_link_types_count():
         "derived_from",
         "interprets",
         "supersedes",
+        "negates",
     }
     assert {member.value for member in FactFactLinkType} == expected
 
