@@ -1,0 +1,194 @@
+"""Integration: alembic 0009 + capture API + jobs endpoints."""
+from __future__ import annotations
+
+import base64
+import os
+import uuid
+
+import pytest
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _set_secret(monkeypatch):
+    monkeypatch.setenv(
+        "SECRET_KEY", "integration-test-secret-at-least-32-bytes-jwt"
+    )
+
+
+@pytest.fixture
+def client(pg_engine, alembic_upgrade):
+    """FastAPI TestClient against a live Postgres."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import sessionmaker
+
+    sm = sessionmaker(bind=pg_engine, expire_on_commit=False)
+
+    from api.security import dependencies as sec_deps
+    sec_deps._session_factory = sm
+
+    from api.routes import auth as auth_route
+    from api.routes import capture as cap_route
+    from api.routes import jobs as job_route
+    from api.routes import spaces as sp_route
+    from api.routes import users as u_route
+    for mod in (auth_route, cap_route, job_route, sp_route, u_route):
+        mod._new_session = lambda sm=sm: sm()
+
+    from api.main import app
+    return TestClient(app)
+
+
+@pytest.fixture
+def auth_headers(client):
+    """Register a user and return Authorization headers + space_id + user_id."""
+    email = f"capture-{uuid.uuid4().hex[:8]}@lucid.example"
+    reg = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "longerthan8chars!"},
+    )
+    assert reg.status_code == 201, reg.text
+    body = reg.json()
+    return {
+        "headers": {"Authorization": f"Bearer {body['access_token']}"},
+        "space_id": body["space_id"],
+        "user_id": body["user"]["id"],
+        "email": email,
+    }
+
+
+def test_alembic_creates_source_jobs(pg_engine, alembic_upgrade):
+    from sqlalchemy import inspect
+    assert "source_jobs" in set(inspect(pg_engine).get_table_names())
+
+
+def test_capture_endpoint_returns_202_and_creates_job(client, auth_headers):
+    r = client.post(
+        "/api/capture",
+        headers=auth_headers["headers"],
+        json={
+            "source_url": "https://example.com/article",
+            "source_type": "web_article",
+            "captured_from": "chrome_ext",
+        },
+    )
+    assert r.status_code == 202, r.text
+    body = r.json()
+    assert body["status"] == "pending_extract"
+    assert body["status_url"].startswith("/api/jobs/")
+    job_id = body["job_id"]
+
+    # And it is queryable via the jobs endpoint
+    status = client.get(body["status_url"], headers=auth_headers["headers"])
+    assert status.status_code == 200
+    assert status.json()["job_id"] == job_id
+    assert status.json()["captured_from"] == "chrome_ext"
+
+
+def test_capture_with_compressed_payload_persists(client, auth_headers):
+    raw = b"<html><body>hello world</body></html>"
+    r = client.post(
+        "/api/capture",
+        headers=auth_headers["headers"],
+        json={
+            "source_url": "https://example.com/with-html",
+            "source_type": "web_article",
+            "captured_from": "chrome_ext",
+            "raw_payload_b64": base64.b64encode(raw).decode("ascii"),
+        },
+    )
+    assert r.status_code == 202, r.text
+    # Round-trip: fetch the job, ensure the raw_payload column got
+    # populated (gzipped). We only check that the cell is non-empty
+    # here; full decompression test lives in the unit module.
+    from sqlalchemy.orm import Session
+
+    from api.security import dependencies as sec_deps
+    from api.storage.postgres.compression import decompress_payload
+    from api.storage.postgres.orm import SourceJobORM
+    s: Session = sec_deps._session_factory()
+    try:
+        job = s.get(SourceJobORM, uuid.UUID(r.json()["job_id"]))
+        assert job is not None
+        assert job.raw_payload is not None and len(job.raw_payload) > 0
+        # Compression is real (smaller than raw is typical for HTML)
+        assert decompress_payload(job.raw_payload) == raw
+    finally:
+        s.close()
+
+
+def test_capture_invalid_base64_returns_400(client, auth_headers):
+    r = client.post(
+        "/api/capture",
+        headers=auth_headers["headers"],
+        json={
+            "source_url": "https://example.com",
+            "source_type": "web_article",
+            "captured_from": "chrome_ext",
+            "raw_payload_b64": "@@@@not-base64@@@@",
+        },
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "raw_payload_b64_invalid"
+
+
+def test_jobs_endpoint_ownership_403(client, auth_headers):
+    """User A cannot fetch user B's job."""
+    # A captures a job
+    r = client.post(
+        "/api/capture",
+        headers=auth_headers["headers"],
+        json={
+            "source_url": "https://example.com/private",
+            "source_type": "web_article",
+            "captured_from": "chrome_ext",
+        },
+    )
+    job_id = r.json()["job_id"]
+
+    # B registers
+    b_email = f"otherb-{uuid.uuid4().hex[:8]}@lucid.example"
+    b = client.post(
+        "/api/auth/register",
+        json={"email": b_email, "password": "longerthan8chars!"},
+    ).json()
+    b_headers = {"Authorization": f"Bearer {b['access_token']}"}
+
+    # B tries to read A's job
+    r2 = client.get(f"/api/jobs/{job_id}", headers=b_headers)
+    assert r2.status_code == 403
+
+
+def test_pending_jobs_filtered_by_user(client, auth_headers):
+    # Capture 2 from current user
+    for url in ("https://example.com/a", "https://example.com/b"):
+        client.post(
+            "/api/capture",
+            headers=auth_headers["headers"],
+            json={
+                "source_url": url,
+                "source_type": "web_article",
+                "captured_from": "chrome_ext",
+            },
+        )
+    # Capture 1 from another user
+    other = client.post(
+        "/api/auth/register",
+        json={"email": f"o-{uuid.uuid4().hex[:8]}@x.com", "password": "longerthan8chars!"},
+    ).json()
+    other_h = {"Authorization": f"Bearer {other['access_token']}"}
+    client.post(
+        "/api/capture",
+        headers=other_h,
+        json={
+            "source_url": "https://example.com/other",
+            "source_type": "web_article",
+            "captured_from": "chrome_ext",
+        },
+    )
+
+    pending = client.get("/api/jobs/pending", headers=auth_headers["headers"]).json()
+    urls = {p["source_url"] for p in pending}
+    assert {"https://example.com/a", "https://example.com/b"}.issubset(urls)
+    assert "https://example.com/other" not in urls
