@@ -203,12 +203,15 @@ Lucid/
 │   │   └── dependencies.py        FastAPI Depends helpers
 │   │                              (require_jwt, get_current_user_id,
 │   │                               get_current_user)
-│   ├── api/storage/postgres/      Relational store — Sprint 1A PR-1A-2 + 1B
-│   │   ├── orm.py                 7 SQLAlchemy 2.x mapped classes
+│   ├── api/storage/postgres/      Relational store — Sprint 1A PR-1A-2 + 1B + DCR-001 + 2C
+│   │   ├── orm.py                 12 SQLAlchemy 2.x mapped classes
 │   │   │                          (Sprint 1B adds UserSettings,
-│   │   │                           password_hash on User)
+│   │   │                           password_hash on User; DCR-001 adds
+│   │   │                           DisambiguationLog + 3 metric logs;
+│   │   │                           Sprint 2C adds SourceJobORM)
 │   │   ├── session.py             Sync engine + sessionmaker
-│   │   └── migrations/            Alembic (6 versions: 0001..0006)
+│   │   ├── compression.py         gzip helpers for raw_payload (Sprint 2C)
+│   │   └── migrations/            Alembic (9 versions: 0001..0009)
 │   ├── api/storage/elasticsearch/ Graph adjacency + kNN — Sprint 1A PR-1A-3
 │   │   ├── client.py              ES sync client singleton
 │   │   ├── mappings.py            3 index mappings (nori + dense_vector hnsw)
@@ -218,6 +221,10 @@ Lucid/
 │   │   ├── queries.py             kNN / nori text / faceted search
 │   │   ├── objects.py             Object CRUD + symmetric link + 1-hop
 │   │   └── sources.py             create_or_update_source (capture_count)
+│   ├── api/extractors/             Sprint 2C PR-2C-2 (planned)
+│   │                              5 extractors + dispatcher + processor
+│   ├── api/metrics/                DCR-001 — anonymized aggregate logs
+│   │   └── precision.py           M1/M2/M3 recorders
 │   ├── alembic.ini                Migration config (run from backend/)
 │   ├── tests/
 │   │   ├── mock_llm.py            Deterministic fake Claude responses
