@@ -211,7 +211,7 @@ Lucid/
 │   │   │                           Sprint 2C adds SourceJobORM)
 │   │   ├── session.py             Sync engine + sessionmaker
 │   │   ├── compression.py         gzip helpers for raw_payload (Sprint 2C)
-│   │   └── migrations/            Alembic (9 versions: 0001..0009)
+│   │   └── migrations/            Alembic (10 versions: 0001..0010)
 │   ├── api/storage/elasticsearch/ Graph adjacency + kNN — Sprint 1A PR-1A-3
 │   │   ├── client.py              ES sync client singleton
 │   │   ├── mappings.py            3 index mappings (nori + dense_vector hnsw)
@@ -234,9 +234,11 @@ Lucid/
 │   │   ├── image.py               Claude Vision (claude-sonnet-4-5);
 │   │   │                          base64 + media-type sniffing
 │   │   ├── highlighted_text.py    pass-through with selection_range
-│   │   └── dispatcher.py          source_type routing + YouTube
-│   │                              transcript->Whisper fallback chain
-│   │                              (PR-2C-3 wires the processor)
+│   │   ├── dispatcher.py          source_type routing + YouTube
+│   │   │                          transcript->Whisper fallback chain
+│   │   └── processor.py           BackgroundTask worker — SourceJob
+│   │                              status lock + decompress + dispatch
+│   │                              + persist extracted_text / warnings
 │   ├── api/metrics/                DCR-001 — anonymized aggregate logs
 │   │   └── precision.py           M1/M2/M3 recorders
 │   ├── alembic.ini                Migration config (run from backend/)
