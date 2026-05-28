@@ -3,6 +3,17 @@
 PR-1A-2: ontology + facts + links + validation + contradiction + source.
 Built first (zero deps); imported by ES storage layer and API routes.
 """
+from api.models.auth import (
+    KnowledgeSpacePublic,
+    LoginRequest,
+    RegisterRequest,
+    RegisterResponse,
+    TokenResponse,
+    UpdateSpaceRequest,
+    UpdateUserSettingsRequest,
+    UserPublic,
+    UserSettingsResponse,
+)
 from api.models.base import UID, LucidBaseModel, utc_now
 from api.models.contradiction import (
     ContradictionPair,
@@ -85,4 +96,14 @@ __all__ = [
     "SourcePolicy",
     "SourceType",
     "Source",
+    # auth (Sprint 1B)
+    "RegisterRequest",
+    "RegisterResponse",
+    "LoginRequest",
+    "TokenResponse",
+    "UserPublic",
+    "KnowledgeSpacePublic",
+    "UpdateSpaceRequest",
+    "UserSettingsResponse",
+    "UpdateUserSettingsRequest",
 ]

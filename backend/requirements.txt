@@ -21,6 +21,11 @@ alembic>=1.13
 # --- Search + graph adjacency (kNN + nori) ---
 elasticsearch>=8.11,<9.0
 
+# --- Auth (Sprint 1B) ---
+PyJWT>=2.8
+bcrypt>=4.1
+email-validator>=2.0  # Pydantic EmailStr validation
+
 # --- LLM ---
 anthropic>=0.25
 openai>=1.30  # text-embedding-3-small for ES kNN (PR-1A-3)

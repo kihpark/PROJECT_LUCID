@@ -54,6 +54,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     name: Mapped[str | None] = mapped_column(String, nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -191,6 +192,44 @@ class GraphNote(Base):
     )
 
 
+class UserSettings(Base):
+    """Per-user beta settings.
+
+    `validation_mode` is the duplicate-fact policy (DR-037: Quick / Strict /
+    Hybrid). `surface_on_by_default` is the Mode 0 default at signup
+    (later toggled per device by the user). Trusted sources live in the
+    separate `source_policies` table (per Settings SET-2).
+    """
+
+    __tablename__ = "user_settings"
+    __table_args__ = (
+        CheckConstraint(
+            "validation_mode IN ('quick', 'strict', 'hybrid')",
+            name="ck_user_settings_validation_mode",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    validation_mode: Mapped[str] = mapped_column(
+        String, nullable=False, default="quick"
+    )
+    surface_on_by_default: Mapped[bool] = mapped_column(
+        Boolean, server_default="true", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -199,4 +238,5 @@ __all__ = [
     "SourcePolicyORM",
     "ArchetypeSurvey",
     "GraphNote",
+    "UserSettings",
 ]
