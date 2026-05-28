@@ -118,11 +118,19 @@ Source                  출처 (wsj.com, nature.com)
 
 각 class에 고유 색이 있다 (와이어프레임 entity 색 코딩 참조).
 
-**Link Types:**
+**Link Types (5 + 4 + 7 = 16; DCR-001 added NEGATES):**
 - Fact↔Object: ASSERTS_PROPERTY, DESCRIBES_STATE, ADDRESSES, USES, INVOLVES
 - Object↔Object: PART_OF, INSTANCE_OF, LOCATED_IN, HAS_ROLE
-- Fact↔Fact: SUPPORTS, CONTRADICTS, EXAMPLE_OF, DERIVED_FROM, INTERPRETS, SUPERSEDES
-- Fact↔Source: CAPTURED_FROM
+- Fact↔Fact: SUPPORTS, CONTRADICTS, EXAMPLE_OF, DERIVED_FROM, INTERPRETS, SUPERSEDES, **NEGATES**
+- Fact↔Source: CAPTURED_FROM (stored on FactNode.source_uids, not as a LinkRecord)
+
+NEGATES (DCR-001, 2026-05-28) is directional and distinct from
+CONTRADICTS: NEGATES marks the fact that explicitly negates another
+fact ("EU AI Act does NOT apply to military" NEGATES the affirmed
+statement). The negating party also carries `negation_flag=True` and
+a `negation_scope` of 'full' or 'partial'. CONTRADICTS remains
+symmetric and is computed from same-Subject + same-Property value
+mismatch.
 
 ---
 

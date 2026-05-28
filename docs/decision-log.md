@@ -41,7 +41,7 @@
 | DR-029 | 12 Object classes finalized: AtomicFact, Concept, Entity, Event, Procedure, Knowledge, Task, Metric, Resource, Problem, Source (Entity parent has 5 subclasses) | CASOS Meta-Network alignment — Agent/Knowledge/Task/Resource axes all explicitly represented for academic analysis compatibility. |
 | DR-030 | Object Subclass applied only to Entity (Person/Organization/Service/Product/Place) and Knowledge (free-text domain) in beta | Minimize cognitive load — Procedure, Resource, Event, Task, Metric, Problem stay as single classes with free-text name in beta. Subclassing for those classes deferred to Phase 1+ pending real-world data. |
 | DR-031 | Duplicate fact from a different source increments source_count on the existing FactNode | Quantitative reinforcement — multi-source agreement automatically strengthens signal without creating duplicate nodes. Exact duplicates from the same source are ignored. |
-| DR-032 | Object matching thresholds: auto-merge (>0.95), semi-auto with user confirmation (0.85-0.95), keep separate (<0.85) | Hybrid approach — automation handles clear cases (case/spacing/transliteration variants) without bothering the user, ambiguous middle band asks for confirmation, low similarity stays separate and is mergeable via Curation. |
+| DR-032 | ~~Object matching: auto (>0.95), semi-auto (0.85-0.95), separate (<0.85)~~ **REFRAMED by DCR-001 (DR-065)**: 0.85-0.95 semi-auto band retired; Person/Org/Service tightened to >=0.98 auto. Everything below auto-merge now goes to the Validate disambiguation queue. | Hybrid approach — reframed in DCR-001. |
 | DR-033 | Knowledge nodes accept any noun-form domain (academic, professional, social, applied) | Free expansion in beta — no domain whitelist; Q2 matching algorithm consolidates synonyms organically; revisit in Phase 1 once distribution data is in. |
 | DR-034 | Curation operations in beta: Reclassify Object, Demote Fact, Drop Fact, Tag/Untag (4 ops only) | 4 ops only — Merge Objects, Split Object, Reclassify Fact, and Cross-space Move deferred to post-beta to keep curation surface tight. |
 | DR-035 | Validate offers 3 actions in beta: Accept / Edit / Reject | Minimize cognitive load — Skip and Bulk-accept deferred to Phase 1. See validate-stage-spec.md §5 and §11. |
@@ -91,6 +91,7 @@ and C-22 for full context.
 | DR-052 | Stale facts shown with label | Superseded by DR-053 |
 | DR-027 | Two capture modes (careful + trusted) selected per capture | Reframed: per-source policy in Settings SET-2, not per-capture |
 | DR-043 | Surface: 6 modes | Reframed: 5 modes; Mode 5 Staleness retired |
+| DR-032 | Object matching: 0.85-0.95 semi-auto band | Reframed: user-delegated via Validate queue; Person/Org/Service tightened to 0.98 (DCR-001 / DR-065) |
 
 DR-016 was not retracted but **rewritten**: the requirement is still
 that every fact carry `knowledge_space_id`; the Neo4j-index part of
@@ -102,6 +103,7 @@ New active DRs that supersede the above:
 |----|----------|
 | DR-053 | Beta is wedge discovery, not validation (PO 2026-05-21) |
 | DR-064 | v2 stack: Postgres + Elasticsearch (with nori); Neo4j + FAISS retired (Sprint 1A PR-1A-1, 2026-05-21) |
+| DR-065 | DCR-001 adoption: Negation (negation_flag + negation_scope + NEGATES link), Entity Disambiguation (user-delegated, semi-auto band retired, Person/Org/Service tightened to 0.98), Internal Metrics (M1 Extraction Precision, M2 Negation Error Rate, M3 Contradiction Recall — anonymized aggregate only) | Adopted from PO analysis of MIRAE Asset GraphRAG case (2026-05-28). See structure-stage-spec.md Appendix A and validate-stage-spec.md Appendix A. |
 
 ## Open
 

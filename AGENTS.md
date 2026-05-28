@@ -497,6 +497,30 @@ async def check_quorum(space: KnowledgeSpace, fact_id: UUID) -> bool:
 
 ---
 
+### NEGATES vs CONTRADICTS (DCR-001)
+
+C1 contradiction detection considers two distinct cases for the same
+Subject + Property pair:
+
+```
+NEGATES       Directional. Fact A is the explicit negative statement
+              of Fact B ("X is NOT Y" → NEGATES the affirmative).
+              The negating party carries `negation_flag=True` and a
+              `negation_scope` of 'full' or 'partial'.
+
+CONTRADICTS   Symmetric. Two facts whose claims cannot both be true,
+              detected by same-Subject + same-Property + value
+              mismatch. CONTRADICTS is content-comparison; NEGATES
+              is intrinsic to the fact's own claim.
+```
+
+C1 emits CONTRADICTS automatically when the value-mismatch test fires
+on a (Subject, Property) pair. NEGATES requires the Structurer to
+mark the originating AtomicFact's `negation_flag` at decomposition
+time; the link is then created during fact_fact_links extraction
+(structure-stage-spec.md §6 step 6).
+
+
 ## 6. API Endpoints
 
 All endpoints are namespaced under KnowledgeSpace.
