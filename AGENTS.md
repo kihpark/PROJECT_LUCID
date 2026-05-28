@@ -197,10 +197,18 @@ Lucid/
 │   │   ├── validation.py          ValidationRecord
 │   │   ├── contradiction.py       ContradictionPair (A/B/C) + GatekeepingWarning
 │   │   └── source.py              Source + SourcePolicy + SourceType
-│   ├── api/storage/postgres/      Relational store — Sprint 1A PR-1A-2
-│   │   ├── orm.py                 6 SQLAlchemy 2.x mapped classes
+│   ├── api/security/              Sprint 1B — auth primitives
+│   │   ├── password.py            bcrypt hash + verify
+│   │   ├── jwt.py                 HS256 mint + decode + JWTPayload
+│   │   └── dependencies.py        FastAPI Depends helpers
+│   │                              (require_jwt, get_current_user_id,
+│   │                               get_current_user)
+│   ├── api/storage/postgres/      Relational store — Sprint 1A PR-1A-2 + 1B
+│   │   ├── orm.py                 7 SQLAlchemy 2.x mapped classes
+│   │   │                          (Sprint 1B adds UserSettings,
+│   │   │                           password_hash on User)
 │   │   ├── session.py             Sync engine + sessionmaker
-│   │   └── migrations/            Alembic (4 versions: 0001..0004)
+│   │   └── migrations/            Alembic (6 versions: 0001..0006)
 │   ├── api/storage/elasticsearch/ Graph adjacency + kNN — Sprint 1A PR-1A-3
 │   │   ├── client.py              ES sync client singleton
 │   │   ├── mappings.py            3 index mappings (nori + dense_vector hnsw)
