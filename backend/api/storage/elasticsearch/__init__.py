@@ -16,6 +16,7 @@ from api.storage.elasticsearch.client import (
 from api.storage.elasticsearch.indexes import (
     create_indexes,
     delete_indexes,
+    ensure_negation_fields,
     reindex_all,
 )
 from api.storage.elasticsearch.mappings import (
@@ -34,6 +35,7 @@ __all__ = [
     "create_indexes",
     "delete_indexes",
     "reindex_all",
+    "ensure_negation_fields",
     "INDEX_MAPPINGS",
     "LUCID_FACTS_MAPPING",
     "LUCID_OBJECTS_MAPPING",

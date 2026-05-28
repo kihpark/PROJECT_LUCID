@@ -38,7 +38,14 @@ class ObjectObjectLinkType(StrEnum):
 
 
 class FactFactLinkType(StrEnum):
-    """Six Fact-to-Fact link types."""
+    """Seven Fact-to-Fact link types.
+
+    DCR-001 (2026-05-28) added NEGATES.  NEGATES vs CONTRADICTS:
+      - CONTRADICTS  symmetric; two facts whose claims cannot both be true.
+      - NEGATES      directional; this fact is the explicit negative
+                     statement of the target fact. The negating party
+                     carries `negation_flag=True` (see api.models.facts).
+    """
 
     SUPPORTS = "supports"
     CONTRADICTS = "contradicts"
@@ -46,6 +53,7 @@ class FactFactLinkType(StrEnum):
     DERIVED_FROM = "derived_from"
     INTERPRETS = "interprets"
     SUPERSEDES = "supersedes"
+    NEGATES = "negates"  # DCR-001
 
 
 # Type alias covering the union of all three link-type enums.

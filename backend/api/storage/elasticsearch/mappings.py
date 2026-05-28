@@ -46,6 +46,8 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             "tags": {"type": "keyword"},
             "aliases": {"type": "text", "analyzer": "korean_analyzer"},
             "override_warning": {"type": "boolean"},
+            "negation_flag": {"type": "boolean"},
+            "negation_scope": {"type": "keyword"},
             "edit_history": {
                 "type": "nested",
                 "properties": {

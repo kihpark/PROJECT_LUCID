@@ -63,6 +63,13 @@ class AtomicFact(LucidBaseModel):
       - NO `is_stale` field (forbidden by extra="forbid")
       - NO `stale_at` field (forbidden by extra="forbid")
       - `valid_from` stays as context-only metadata; never triggers expiry.
+
+    DCR-001 (2026-05-28):
+      - `negation_flag` marks intrinsically-negative claims
+      - `negation_scope` ('full' | 'partial' | None) clarifies the
+        negation extent. When ambiguous, the structurer emits with
+        failure_reason='negation_ambiguous' and routes the fact to
+        the Validate disambiguation queue.
     """
 
     claim: str
@@ -72,6 +79,8 @@ class AtomicFact(LucidBaseModel):
     object_value: str
     valid_from: datetime | None = None
     tags_suggested: list[str] = Field(default_factory=list)
+    negation_flag: bool = False
+    negation_scope: Literal["full", "partial"] | None = None
 
 
 class FactNode(LucidBaseModel):
@@ -101,3 +110,5 @@ class FactNode(LucidBaseModel):
     override_warning: bool = False
     edit_history: list[EditRecord] = Field(default_factory=list)
     knowledge_space_id: UID
+    negation_flag: bool = False
+    negation_scope: Literal["full", "partial"] | None = None

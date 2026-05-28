@@ -20,6 +20,12 @@ from api.models.contradiction import (
     ContradictionPattern,
     GatekeepingWarning,
 )
+from api.models.disambiguation import (
+    DecisionMethod,
+    DisambiguationCandidate,
+    DisambiguationCard,
+    DisambiguationLog,
+)
 from api.models.facts import (
     AtomicFact,
     EditRecord,
@@ -106,4 +112,9 @@ __all__ = [
     "UpdateSpaceRequest",
     "UserSettingsResponse",
     "UpdateUserSettingsRequest",
+    # disambiguation (DCR-001)
+    "DecisionMethod",
+    "DisambiguationCandidate",
+    "DisambiguationCard",
+    "DisambiguationLog",
 ]

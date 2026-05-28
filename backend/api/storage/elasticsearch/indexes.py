@@ -71,3 +71,34 @@ def reindex_all() -> dict[str, str]:
     """
     delete_indexes()
     return create_indexes()
+
+
+def ensure_negation_fields() -> dict[str, str]:
+    """Idempotent: add negation_flag + negation_scope to lucid_facts.
+
+    For DCR-001. Existing clusters with the old mapping get the new
+    fields added via the put_mapping API; new clusters get them
+    automatically through create_indexes(). Safe to run on every boot.
+
+    Returns a dict { index_name: 'added' | 'present' | 'missing-index' }.
+    """
+    client = get_client()
+    if not client.indices.exists(index=LUCID_FACTS):
+        return {LUCID_FACTS: "missing-index"}
+    current = client.indices.get_mapping(index=LUCID_FACTS)
+    props = (
+        current.get(LUCID_FACTS, {})
+        .get("mappings", {})
+        .get("properties", {})
+    )
+    if "negation_flag" in props and "negation_scope" in props:
+        return {LUCID_FACTS: "present"}
+    client.indices.put_mapping(
+        index=LUCID_FACTS,
+        properties={
+            "negation_flag": {"type": "boolean"},
+            "negation_scope": {"type": "keyword"},
+        },
+    )
+    logger.info("Added negation_flag + negation_scope to %s", LUCID_FACTS)
+    return {LUCID_FACTS: "added"}
