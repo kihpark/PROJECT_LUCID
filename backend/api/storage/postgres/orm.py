@@ -230,6 +230,112 @@ class UserSettings(Base):
     )
 
 
+class DisambiguationLog(Base):
+    """One Object-disambiguation decision (DCR-001 / DR-065)."""
+
+    __tablename__ = "disambiguation_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "decision_method IN ('existing', 'new')",
+            name="ck_disambiguation_decision_method",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    fact_uid: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    mention_text: Mapped[str] = mapped_column(String, nullable=False)
+    resolved_to_uid: Mapped[str | None] = mapped_column(String, nullable=True)
+    decision_method: Mapped[str] = mapped_column(String, nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class PrecisionLog(Base):
+    """M1: Extraction Precision — per-fact Validate decision history."""
+
+    __tablename__ = "precision_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('accept', 'edit', 'reject', 'discard')",
+            name="ck_precision_log_decision",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    fact_uid: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class NegationLog(Base):
+    """M2: Negation Error Rate — AI vs user-corrected negation tags."""
+
+    __tablename__ = "negation_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "ai_scope IS NULL OR ai_scope IN ('full', 'partial')",
+            name="ck_negation_log_ai_scope",
+        ),
+        CheckConstraint(
+            "user_corrected_scope IS NULL OR user_corrected_scope IN ('full', 'partial')",
+            name="ck_negation_log_user_scope",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    fact_uid: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    ai_negation_flag: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    user_corrected_flag: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    ai_scope: Mapped[str | None] = mapped_column(String, nullable=True)
+    user_corrected_scope: Mapped[str | None] = mapped_column(String, nullable=True)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ContradictionLog(Base):
+    """M3: Contradiction Recall — user confirmation of detected pairs."""
+
+    __tablename__ = "contradiction_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "pattern IN ('A', 'B', 'C')",
+            name="ck_contradiction_log_pattern",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    pair_uid: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    pattern: Mapped[str] = mapped_column(String, nullable=False)
+    user_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -239,4 +345,8 @@ __all__ = [
     "ArchetypeSurvey",
     "GraphNote",
     "UserSettings",
+    "DisambiguationLog",
+    "PrecisionLog",
+    "NegationLog",
+    "ContradictionLog",
 ]
