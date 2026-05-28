@@ -57,6 +57,15 @@ from api.models.objects import (
     Task,
 )
 from api.models.source import Source, SourcePolicy, SourceType
+from api.models.source_job import (
+    CapturedFrom,
+    CaptureRequest,
+    CaptureResponse,
+    ExtractedContent,
+    JobStatusResponse,
+    SourceJob,
+    SourceStatus,
+)
 from api.models.validation import ValidationMethod, ValidationRecord
 
 __all__ = [
@@ -117,4 +126,12 @@ __all__ = [
     "DisambiguationCandidate",
     "DisambiguationCard",
     "DisambiguationLog",
+    # source job (Sprint 2C)
+    "SourceJob",
+    "SourceStatus",
+    "CapturedFrom",
+    "CaptureRequest",
+    "CaptureResponse",
+    "JobStatusResponse",
+    "ExtractedContent",
 ]

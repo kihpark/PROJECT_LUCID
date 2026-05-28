@@ -26,12 +26,13 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -336,6 +337,70 @@ class ContradictionLog(Base):
     )
 
 
+class SourceJobORM(Base):
+    """SourceJob persistence (Sprint 2C PR-2C-1).
+
+    `raw_payload` is gzip-compressed before storage (see
+    api.storage.postgres.compression). The status CHECK enumerates
+    only the Sprint 2C lifecycle values; Sprint 3 extends the CHECK
+    via a separate migration when 'pending_structure' and downstream
+    states land.
+    """
+
+    __tablename__ = "source_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending_extract', 'extracting', 'extracted', 'extract_failed')",
+            name="ck_source_job_status",
+        ),
+        CheckConstraint(
+            "captured_from IN ('chrome_ext', 'pwa_share', 'api')",
+            name="ck_source_job_captured_from",
+        ),
+        CheckConstraint(
+            "policy_at_capture IN ('trusted', 'careful')",
+            name="ck_source_job_policy",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    knowledge_space_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_spaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    source_type: Mapped[str] = mapped_column(String, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    captured_from: Mapped[str] = mapped_column(String, nullable=False)
+    raw_payload: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="pending_extract", index=True
+    )
+    policy_at_capture: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="careful"
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_metadata: Mapped[dict | None] = mapped_column(  # type: ignore[type-arg]
+        JSONB, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -349,4 +414,5 @@ __all__ = [
     "PrecisionLog",
     "NegationLog",
     "ContradictionLog",
+    "SourceJobORM",
 ]
