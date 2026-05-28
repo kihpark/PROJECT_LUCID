@@ -21,12 +21,14 @@ from api.extractors.dispatcher import (
     extract_youtube,
     get_extractor,
 )
+from api.extractors.processor import process_source_job
 
 __all__ = [
     "SOURCE_TYPE_TO_EXTRACTOR",
     "extract",
     "extract_youtube",
     "get_extractor",
+    "process_source_job",
     "Extractor",
     "ExtractResult",
     "ExtractorError",

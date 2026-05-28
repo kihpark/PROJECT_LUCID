@@ -96,13 +96,17 @@ def _resolve_policy(session: Session, user: User, source_url: str) -> str:
 
 
 def _enqueue_extract(job_id: uuid.UUID) -> None:
-    """Placeholder hook called from BackgroundTasks.
+    """BackgroundTasks entry point — call the real processor.
 
-    PR-2C-3 replaces this with the real extractor processor. For
-    PR-2C-1 we only log; the test suite asserts the BackgroundTask
-    was scheduled by inspecting `tasks.tasks` on the request mock.
+    PR-2C-3 wired this to `process_source_job` (in
+    `api.extractors.processor`). Imported lazily to keep the route
+    module's startup imports light and to make the call site easy to
+    monkey-patch in unit tests.
     """
-    logger.info("BackgroundTasks would extract source_job %s here (PR-2C-3 wires)", job_id)
+    from api.extractors.processor import process_source_job
+
+    logger.info("BackgroundTasks: dispatching extract for source_job %s", job_id)
+    process_source_job(job_id)
 
 
 @router.post(
