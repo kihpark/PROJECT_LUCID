@@ -221,8 +221,22 @@ Lucid/
 │   │   ├── queries.py             kNN / nori text / faceted search
 │   │   ├── objects.py             Object CRUD + symmetric link + 1-hop
 │   │   └── sources.py             create_or_update_source (capture_count)
-│   ├── api/extractors/             Sprint 2C PR-2C-2 (planned)
-│   │                              5 extractors + dispatcher + processor
+│   ├── api/extractors/             Sprint 2C PR-2C-2 (implemented)
+│   │   ├── base.py                Extractor ABC + ExtractResult +
+│   │   │                          NoTranscriptError + UnknownSourceTypeError
+│   │   ├── web_article.py         readability-lxml + BeautifulSoup +
+│   │   │                          langdetect; paywall warning heuristic
+│   │   ├── youtube_transcript.py  youtube-transcript-api; video_id parser
+│   │   ├── youtube_whisper.py     yt-dlp + faster-whisper small;
+│   │   │                          module-level transcribe lock + temp
+│   │   │                          dir cleanup
+│   │   ├── pdf.py                 pdfplumber; scan-page warning; tables
+│   │   ├── image.py               Claude Vision (claude-sonnet-4-5);
+│   │   │                          base64 + media-type sniffing
+│   │   ├── highlighted_text.py    pass-through with selection_range
+│   │   └── dispatcher.py          source_type routing + YouTube
+│   │                              transcript->Whisper fallback chain
+│   │                              (PR-2C-3 wires the processor)
 │   ├── api/metrics/                DCR-001 — anonymized aggregate logs
 │   │   └── precision.py           M1/M2/M3 recorders
 │   ├── alembic.ini                Migration config (run from backend/)
