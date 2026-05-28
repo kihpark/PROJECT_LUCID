@@ -31,6 +31,30 @@
 
 ---
 
+> ## v2.1 supersession notice (2026-05-28, DCR-001)
+>
+> DCR-001 (Negation, Disambiguation, Internal Metrics) added the
+> following to this spec on top of the v2 banner above:
+>
+> - **Negation fields on AtomicFact / FactNode**: `negation_flag`
+>   (bool, default False) and `negation_scope` ('full' | 'partial' |
+>   None). See §3.
+> - **NEGATES** link type added to Fact↔Fact (6 → 7 link types).
+>   See §5. NEGATES is distinct from CONTRADICTS:
+>   - **NEGATES** is intrinsic to a fact (this fact says "X is NOT Y"),
+>     marked on a single fact via `negation_flag=True`.
+>   - **CONTRADICTS** is a relationship between two facts whose
+>     claims cannot both be true.
+> - **7-step decomposition algorithm** (§6) — added "negation
+>   detection" between Object identification and AtomicFact emission.
+> - **Object matching thresholds tightened (DCR-001 / DR-065 reframes
+>   DR-032)**: auto-merge stays at >=0.95 for most classes; Person /
+>   Organization / Service require >=0.98. The 0.85-0.95 semi-auto
+>   band is **retired** — those go to user disambiguation in Validate.
+>   See §13 Q2.
+
+---
+
 
 ## 0. 본 문서의 범위
 
@@ -454,3 +478,153 @@ Validate 단계 명세서 작성
 ---
 
 *Lucid Structure Spec v1.0 | Beta Scope Locked | Be lucid.*
+
+
+---
+
+## A. DCR-001 detail (2026-05-28) — Negation, NEGATES, Algorithm v2.1
+
+This appendix is the authoritative source for the DCR-001 additions
+referenced in the v2.1 banner above. The original §3, §5, §6, §13
+prose is preserved for historical context; this appendix overrides
+it where they conflict.
+
+### A.1 AtomicFact / FactNode negation fields
+
+```
+negation_flag: bool = False
+    True when the decomposed claim is intrinsically negative, e.g.
+    "X is NOT Y", "Z does not Y", "X is prohibited".
+    The structurer sets this; the validator can override.
+
+negation_scope: Optional[Literal["full", "partial"]] = None
+    "full"      The entire claim is negated. ("X does not exist.")
+    "partial"   Only part of the claim is negated. ("X is not Y, but
+                X is Z.")  partial cases require user confirmation
+                (the negation warning card in Validate).
+    None        When negation_flag=False, scope is None.
+
+failure_reason candidate (§7):
+    "negation_ambiguous"  emitted when the structurer cannot decide
+                          between full and partial scope; the
+                          AtomicFact is sent to the Validate
+                          disambiguation queue instead of the main
+                          PendingFact list.
+```
+
+Negation token list (Korean + English, beta seed list):
+
+```
+EN:  not, no, never, n't, prohibit, forbid, deny, banned, illegal, fail to
+KO:  않다, 없다, 아니다, 금지, 불가능, 못, 안, 제외
+```
+
+The structurer's prompt includes this list; misses go to
+`negation_ambiguous`. Updates to the list are tracked in the
+beta-backlog (Sprint 3 P0-EVAL).
+
+### A.2 NEGATES link type
+
+`NEGATES` is a **Fact -> Fact** link distinct from `CONTRADICTS`:
+
+```
+CONTRADICTS  (existing, 6th link)
+    Symmetric. Two facts that cannot both be true.
+    Example: fn-201 "interest rate is 3.5%" vs fn-205
+             "interest rate is 4.0%" (same Subject, same
+             property, different value).
+
+NEGATES      (new in DCR-001, 7th link)
+    Directional. Fact A negates Fact B if A is the explicit
+    negative statement of B.
+    Example: fn-310 "EU AI Act does NOT apply to military"
+             NEGATES fn-309 "EU AI Act applies to military".
+    Distinct from CONTRADICTS because the asymmetry is meaningful:
+    fn-310 carries negation_flag=True and is the negating party;
+    fn-309 is the affirmed party (unmarked).
+```
+
+After DCR-001 the Fact <-> Fact link enum has 7 members:
+`SUPPORTS, CONTRADICTS, EXAMPLE_OF, DERIVED_FROM, INTERPRETS,
+SUPERSEDES, NEGATES`.
+
+C1 contradiction detection considers both CONTRADICTS and NEGATES
+when computing the same-Subject + same-Property check.
+
+### A.3 Decomposition algorithm — 7 steps
+
+```
+Input:    merged_text + source_metadata + capture_mode + user_language
+Output:   {objects, facts, fact_object_links, fact_fact_links,
+           disambiguation_candidates, extraction_status, failure_reason}
+
+Step 1.  Identify all Object candidates in the text.
+Step 2.  Assign each Object a class from the 13-class ontology.
+Step 3.  Decompose all assertions into AtomicFact candidates
+         (proposition / procedure).
+Step 4.  [NEW in DCR-001] Negation detection.
+         For each AtomicFact candidate:
+           - scan for negation tokens (A.1 list)
+           - if found, set negation_flag=True
+           - decide scope (full / partial) by syntactic context
+           - on ambiguity, emit with failure_reason='negation_ambiguous'
+Step 5.  Extract AtomicFact <-> Object relations (5 link types).
+Step 6.  Extract AtomicFact <-> AtomicFact relations
+         (now 7 link types including NEGATES).
+Step 7.  Extract time metadata (valid_from only; valid_until retired).
+         Emit JSON; on overall failure return an empty result with
+         `failure_reason` set.
+```
+
+### A.4 Output JSON shape (DCR-001 additions)
+
+```jsonc
+{
+  "objects": [...],
+  "facts": [
+    {
+      "uid": "fn-...",
+      "type": "proposition" | "procedure",
+      "claim": "...",
+      "subject_uid": "...",
+      "predicate": "...",
+      "object_value": "...",
+      "negation_flag": true,                 // DCR-001
+      "negation_scope": "full" | "partial" | null  // DCR-001
+    }
+  ],
+  "fact_object_links": [...],
+  "fact_fact_links": [
+    { "from_uid": "...", "to_uid": "...",
+      "link_type": "negates" }               // DCR-001 (one of 7)
+  ],
+  "disambiguation_candidates": [             // DCR-001
+    {
+      "fact_uid": "...",
+      "mention_text": "Apple",
+      "candidate_object_uids": ["obj-a1", "obj-a2"],
+      "scores": [0.91, 0.88]
+    }
+  ],
+  "extraction_status": "success" | "no_facts_found",
+  "failure_reason": null | "opinion_content" | "advertisement" |
+                    "negation_ambiguous" | ...
+}
+```
+
+### A.5 Object matching thresholds (DCR-001 / DR-065)
+
+```
+Auto-merge:
+  Most classes               score >= 0.95
+  Person / Organization / Service   score >= 0.98 (tighter — high
+                                                   confusion cost)
+Disambiguation queue (user-delegated):
+  Everything below the auto-merge threshold goes here. No more
+  semi-auto 0.85-0.95 band (retired; DR-032 reframed).
+Keep separate:
+  When the user clicks "create new" in the Disambiguation card.
+
+Every disambiguation decision is logged to the Postgres
+`disambiguation_logs` table (DCR-001 schema).
+```

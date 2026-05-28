@@ -36,6 +36,26 @@
 
 ---
 
+> ## v2.1 supersession notice (2026-05-28, DCR-001)
+>
+> DCR-001 added two new UI elements to the Validate stage:
+>
+> - **Negation warning card** — when a decomposed AtomicFact carries
+>   `negation_flag=True` and `negation_scope='partial'` (or
+>   `failure_reason='negation_ambiguous'`), the Validate UI surfaces
+>   a warning card asking the user to confirm the negation scope
+>   before the fact enters the graph.
+> - **Disambiguation card + queue** — when an Object mention falls
+>   in the retired 0.85-0.95 semi-auto band (or is below 0.98 for
+>   Person / Organization / Service), the candidate object set is
+>   surfaced in a Disambiguation card. The user picks the matching
+>   existing object OR confirms "create new". Every decision is
+>   logged to the Postgres `disambiguation_logs` table for analysis.
+>
+> All other Validate-stage prose in this file remains accurate.
+
+---
+
 
 ## 0. 본 문서의 범위
 
@@ -603,3 +623,99 @@ Surface 단계 명세서 작성
 ---
 
 *Lucid Validate Spec v1.0 | Beta Scope Locked | Be lucid.*
+
+
+---
+
+## A. DCR-001 detail (2026-05-28) — Negation warning card + Disambiguation queue
+
+### A.1 Negation warning card
+
+Fires when an AtomicFact arrives in the Decide overlay with
+`negation_flag=True` AND (`negation_scope='partial'` OR
+`failure_reason='negation_ambiguous'`).
+
+```
++----------------------------------------------------------+
+|  WARNING  Possible negation                              |
+|----------------------------------------------------------|
+|  Claim:                                                  |
+|  "EU AI Act does not apply to military"                  |
+|                                                          |
+|  Subject:  EU AI Act                                     |
+|  Predicate: applies_to                                   |
+|  Object:    military                                     |
+|                                                          |
+|  Detected negation: scope = partial / ambiguous          |
+|                                                          |
+|  Confirm the scope:                                      |
+|   ( ) Full negation (the entire claim is negative)       |
+|   ( ) Partial negation (only the verb is negated)        |
+|   ( ) Not a negation (override the detector)             |
+|                                                          |
+|  [ Confirm ]   [ Discard ]                               |
++----------------------------------------------------------+
+```
+
+Confirmed scope is written to `FactNode.negation_scope` and the fact
+is created. "Not a negation" override sets `negation_flag=False` and
+clears the scope.
+
+### A.2 Disambiguation card + queue
+
+Fires when the structurer surfaces an Object mention with at least
+one match candidate but no auto-merge (score below 0.95 / 0.98
+threshold per A.5 of structure-spec). All candidates go through the
+disambiguation queue — the retired 0.85-0.95 auto band is gone.
+
+```
++----------------------------------------------------------+
+|  Disambiguation                                          |
+|----------------------------------------------------------|
+|  Mention:                                                |
+|  "Apple"                                                 |
+|                                                          |
+|  Existing matches in your graph:                         |
+|   o  Apple Inc. (Organization) - confidence 0.91         |
+|       2 facts, last seen 2024-08-12                      |
+|   o  Apple (Product, iPhone maker) - 0.88                |
+|       1 fact, last seen 2024-06-04                       |
+|   o  apple (Resource, fruit) - 0.45                      |
+|       0 facts                                            |
+|                                                          |
+|  [ Use existing ]   [ Create new ]   [ Skip ]            |
++----------------------------------------------------------+
+```
+
+The decision is recorded in `disambiguation_logs` (Postgres table
+created by alembic 0007). Records:
+
+```
+fact_uid          which fact this disambiguation belongs to
+mention_text      the text of the Object mention
+resolved_to_uid   chosen object_uid (or null for 'create new')
+decision_method   'existing' | 'new'
+decided_at        timestamp
+decided_by        user_id
+```
+
+### A.3 Confirm modal
+
+When the user clicks Accept in the Decide overlay AND there are
+unresolved negation warnings OR disambiguation cards, a confirm
+modal blocks submission until all warnings are addressed:
+
+```
++----------------------------------------------------------+
+|  Cannot accept yet                                       |
+|                                                          |
+|  2 cards still need your attention:                      |
+|   - 1 negation warning                                   |
+|   - 1 disambiguation card                                |
+|                                                          |
+|  [ Go to first ]   [ Discard all ]                       |
++----------------------------------------------------------+
+```
+
+The "Discard all" path drops everything (fact and Object candidates
+included); no partial save.
