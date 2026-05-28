@@ -60,6 +60,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["F401"]  # unused imports OK in test scaffolds
+"api/routes/**" = ["B008"]  # FastAPI Depends() in argument defaults is idiomatic
+"api/security/dependencies.py" = ["B008"]  # same — FastAPI Depends() pattern
 
 # --- Mypy ---
 # Sprint 0 baseline: lenient. Strictness ratchets up sprint-by-sprint as

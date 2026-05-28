@@ -11,11 +11,13 @@ from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import (
+    auth,
     capture,
     graph,
     query,
     spaces,
     surface,
+    users,
     validate,
     validation_api,
 )
@@ -94,6 +96,8 @@ async def health(response: Response) -> dict:
 
 # Routers - namespaced under /api/spaces/{sid}/ per AGENTS.md section 6.
 for _router in (
+    auth.router,
+    users.router,
     spaces.router,
     capture.router,
     validate.router,
