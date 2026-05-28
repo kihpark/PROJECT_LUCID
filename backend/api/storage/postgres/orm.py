@@ -31,9 +31,16 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    deferred,
+    mapped_column,
+    relationship,
+)
 
 
 class Base(DeclarativeBase):
@@ -392,6 +399,18 @@ class SourceJobORM(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     client_metadata: Mapped[dict | None] = mapped_column(  # type: ignore[type-arg]
         JSONB, nullable=True
+    )
+    # PR-2C-3: extracted content lives on source_jobs (no separate table).
+    # extracted_text is deferred() so list queries don't pay the TEXT bytes.
+    extracted_text: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
+    extracted_metadata: Mapped[dict] = mapped_column(  # type: ignore[type-arg]
+        JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
+    extraction_warnings: Mapped[list] = mapped_column(  # type: ignore[type-arg]
+        JSONB, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    extracted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
