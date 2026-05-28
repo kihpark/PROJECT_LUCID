@@ -221,6 +221,15 @@ Lucid/
 │   │   ├── queries.py             kNN / nori text / faceted search
 │   │   ├── objects.py             Object CRUD + symmetric link + 1-hop
 │   │   └── sources.py             create_or_update_source (capture_count)
+│   ├── api/structure/              Sprint 3 PR-3-1 (Claude decomposition)
+│   │   ├── models.py              StructureResult + StructureFact +
+│   │   │                          StructureObject + 5/4/7 link models
+│   │   ├── prompts.py             System prompt: 13-class ontology +
+│   │   │                          7-step DCR-001 + KO/EN negation tokens +
+│   │   │                          3 few-shot examples
+│   │   ├── claude_client.py       Sonnet 4.5 + ephemeral prompt caching +
+│   │   │                          safe JSON parse + graceful fallbacks
+│   │   └── decomposer.py          decompose() public entry point
 │   ├── api/extractors/             Sprint 2C PR-2C-2 (implemented)
 │   │   ├── base.py                Extractor ABC + ExtractResult +
 │   │   │                          NoTranscriptError + UnknownSourceTypeError
