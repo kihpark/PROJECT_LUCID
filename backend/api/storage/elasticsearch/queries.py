@@ -157,3 +157,51 @@ def faceted_search_facts(
         for f in facets
     }
     return {"results": results, "facets": facet_results, "total": resp["hits"]["total"]["value"]}
+
+
+
+def knn_search_objects(
+    embedding: list[float],
+    *,
+    k: int = 10,
+    knowledge_space_id: str | None = None,
+    object_class: str | None = None,
+    extra_filters: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """kNN over `lucid_objects.embedding` (DCR-001 Object disambiguation).
+
+    `object_class` is the most common filter — the Person/Org/Service
+    tightening to >= 0.98 in DCR-001 / DR-065 is applied at the matcher
+    layer, not here; this function returns raw candidates with their
+    cosine score.
+    """
+    from api.storage.elasticsearch.client import LUCID_OBJECTS
+
+    client = get_client()
+    filters = _space_filter(knowledge_space_id)
+    if object_class is not None:
+        filters.append({"term": {"class": object_class}})
+    if extra_filters:
+        for field, value in extra_filters.items():
+            filters.append({"term": {field: value}})
+
+    body: dict[str, Any] = {
+        "knn": {
+            "field": "embedding",
+            "query_vector": embedding,
+            "k": k,
+            "num_candidates": max(50, k * 5),
+        },
+        "size": k,
+    }
+    if filters:
+        body["knn"]["filter"] = filters
+
+    resp = client.search(index=LUCID_OBJECTS, body=body)
+    hits = resp["hits"]["hits"]
+    out: list[dict[str, Any]] = []
+    for h in hits:
+        doc = h["_source"]
+        doc["_score"] = h.get("_score")
+        out.append(doc)
+    return out

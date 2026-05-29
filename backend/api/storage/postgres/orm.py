@@ -357,7 +357,8 @@ class SourceJobORM(Base):
     __tablename__ = "source_jobs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending_extract', 'extracting', 'extracted', 'extract_failed')",
+            "status IN ('pending_extract', 'extracting', 'extracted', 'extract_failed', "
+            "'structuring', 'structured', 'structure_failed')",
             name="ck_source_job_status",
         ),
         CheckConstraint(
