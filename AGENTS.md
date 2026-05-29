@@ -221,15 +221,32 @@ Lucid/
 │   │   ├── queries.py             kNN / nori text / faceted search
 │   │   ├── objects.py             Object CRUD + symmetric link + 1-hop
 │   │   └── sources.py             create_or_update_source (capture_count)
-│   ├── api/structure/              Sprint 3 PR-3-1 (Claude decomposition)
+│   ├── api/structure/              Sprint 3 (Claude decomposition + DCR-001)
 │   │   ├── models.py              StructureResult + StructureFact +
-│   │   │                          StructureObject + 5/4/7 link models
+│   │   │                          StructureObject + 5/4/7 link models (PR-3-1)
 │   │   ├── prompts.py             System prompt: 13-class ontology +
 │   │   │                          7-step DCR-001 + KO/EN negation tokens +
-│   │   │                          3 few-shot examples
+│   │   │                          6 few-shot examples (PR-3-1: 3; PR-3-2: +3
+│   │   │                          KO statistic / multi-fact / homonym). PR-3-2
+│   │   │                          adds forecast/conditional triggers to
+│   │   │                          negation_ambiguous (할 수도 / perhaps not / if)
 │   │   ├── claude_client.py       Sonnet 4.5 + ephemeral prompt caching +
-│   │   │                          safe JSON parse + graceful fallbacks
-│   │   └── decomposer.py          decompose() public entry point
+│   │   │                          safe JSON parse + graceful fallbacks (PR-3-1)
+│   │   ├── decomposer.py          decompose() public entry point (PR-3-1)
+│   │   ├── object_matcher.py      Sprint 3 PR-3-2: DCR-001 match-or-create.
+│   │   │                          exact name (KS-scoped) -> kNN (lucid_objects)
+│   │   │                          -> threshold check (0.98 tight / 0.95 std /
+│   │   │                          0.70 floor; DR-065 retired 0.85-0.95 semi-auto)
+│   │   ├── link_creator.py        Sprint 3 PR-3-2: 16 link types
+│   │   │                          (5 fact_object + 4 object_object + 7 fact_fact
+│   │   │                          incl. NEGATES). Object<->Object writes call
+│   │   │                          es.objects.link_objects (PR-1A-3 symmetric).
+│   │   └── processor.py           Sprint 3 PR-3-2: BackgroundTask worker.
+│   │                              extracted -> structuring -> structured /
+│   │                              structure_failed. Writes M1 telemetry
+│   │                              (fact_count / object_auto / object_new /
+│   │                              disambig_pending / link counts) into
+│   │                              source_job.extracted_metadata["structure"].
 │   ├── api/extractors/             Sprint 2C PR-2C-2 (implemented)
 │   │   ├── base.py                Extractor ABC + ExtractResult +
 │   │   │                          NoTranscriptError + UnknownSourceTypeError

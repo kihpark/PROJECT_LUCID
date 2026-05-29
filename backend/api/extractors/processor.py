@@ -140,7 +140,17 @@ def process_source_job(job_id: uuid.UUID | str) -> None:
 
         # Success branch
         _record_success(session, job, result)
-        # TODO Sprint 3: enqueue a structure job for this source_job_id
+        # Sprint 3 PR-3-2: enqueue the structure stage on the same job.
+        # Imported lazily so structure module is optional at import time.
+        try:
+            from api.structure.processor import process_extracted_job
+            process_extracted_job(job.id)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "process_extracted_job enqueue failed for job %s (extract still "
+                "succeeded; structure can be retried manually)",
+                job.id,
+            )
 
     finally:
         session.close()
