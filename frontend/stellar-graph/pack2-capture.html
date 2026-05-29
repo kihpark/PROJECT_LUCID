@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lucid Wireframes — Pack 2: Save & Decide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Pretendard:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-base: #0a0a0a; --bg-elevated: #141414; --bg-card: #1a1a1a; --bg-hover: #242424;
+    --border-subtle: #2a2a2a; --border-medium: #3a3a3a;
+    --text-primary: #f5f5f5; --text-secondary: #a0a0a0; --text-tertiary: #707070;
+    --accent-warm: #ffd966; --accent-cool: #6db4f5;
+    --success: #4ecdc4; --warning: #ffd966; --danger: #ff6b6b;
+    --font-sans: 'Inter', 'Pretendard', sans-serif;
+    --font-kr: 'Pretendard', 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  body { font-family: var(--font-sans); background: var(--bg-base); color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased; line-height: 1.5; }
+  body.lang-kr { font-family: var(--font-kr); }
+  .top-bar { position: fixed; top: 0; left: 0; right: 0; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+  .brand { font-weight: 600; font-size: 16px; color: var(--accent-warm); }
+  .brand-tag { font-size: 11px; color: var(--text-tertiary); margin-left: 8px; font-family: var(--font-mono); }
+  .controls { display: flex; align-items: center; gap: 16px; }
+  .lang-toggle { display: flex; background: var(--bg-card); border-radius: 4px; padding: 2px; border: 1px solid var(--border-subtle); }
+  .lang-toggle button { background: transparent; border: none; color: var(--text-secondary); padding: 4px 10px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); border-radius: 3px; }
+  .lang-toggle button.active { background: var(--accent-warm); color: var(--bg-base); }
+  .screen-nav { display: flex; gap: 4px; }
+  .screen-nav button { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 6px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); }
+  .screen-nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .screen-nav button.active { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  .main { margin-top: 60px; padding: 32px; min-height: calc(100vh - 60px); }
+  .screen { display: none; max-width: 1200px; margin: 0 auto; }
+  .screen.active { display: block; }
+  .screen-header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
+  .screen-id { font-family: var(--font-mono); font-size: 11px; color: var(--accent-warm); letter-spacing: 0.1em; text-transform: uppercase; }
+  .screen-title { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .screen-desc { color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+  
+  .flow-diagram { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 16px 24px; margin: 16px 0 24px; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); line-height: 1.6; overflow-x: auto; }
+  .flow-diagram .hl { color: var(--accent-warm); font-weight: 600; }
+  
+  .browser-frame { background: #2a2a2a; border-radius: 8px; max-width: 1000px; margin: 0 auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); overflow: hidden; }
+  .browser-chrome { background: #1a1a1a; padding: 10px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #000; }
+  .browser-dots { display: flex; gap: 6px; }
+  .browser-dots span { width: 12px; height: 12px; border-radius: 50%; }
+  .browser-dots span:nth-child(1) { background: #ff5f56; }
+  .browser-dots span:nth-child(2) { background: #ffbd2e; }
+  .browser-dots span:nth-child(3) { background: #27c93f; }
+  .browser-url { flex: 1; background: #2a2a2a; padding: 4px 12px; border-radius: 4px; color: var(--text-secondary); font-size: 12px; font-family: var(--font-mono); }
+  .browser-ext-icon { width: 26px; height: 26px; background: var(--bg-elevated); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--accent-warm); font-weight: 700; font-family: var(--font-mono); border: 1px solid var(--border-medium); position: relative; cursor: pointer; }
+  .ext-badge { position: absolute; top: -4px; right: -4px; background: var(--accent-warm); color: var(--bg-base); font-size: 9px; font-weight: 700; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 4px; font-family: var(--font-mono); }
+  .extension-area { position: relative; padding: 24px; min-height: 560px; background: #f5f5f5; }
+  .page-content { background: white; padding: 32px; border-radius: 4px; color: #333; font-size: 14px; line-height: 1.7; }
+  .page-content h2 { color: #1a1a1a; font-size: 22px; margin-bottom: 16px; font-weight: 700; }
+  .page-content p { margin-bottom: 16px; color: #444; }
+  
+  .context-menu { position: absolute; background: white; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); min-width: 240px; padding: 4px 0; z-index: 50; top: 80px; left: 350px; }
+  .context-menu-item { padding: 8px 16px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: #333; }
+  .context-menu-item:hover { background: #f0f0f0; }
+  .context-menu-item.highlight { background: #fff8e1; color: #a06000; font-weight: 500; }
+  .context-menu-divider { height: 1px; background: #e0e0e0; margin: 4px 0; }
+  .context-menu-shortcut { margin-left: auto; font-size: 11px; color: #999; font-family: var(--font-mono); }
+  
+  .progress-toast { position: absolute; bottom: 24px; right: 24px; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 8px; padding: 14px 18px; width: 300px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 12px; animation: slideIn 0.3s ease-out; }
+  @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .toast-spinner { width: 16px; height: 16px; border: 2px solid var(--border-subtle); border-top-color: var(--accent-warm); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toast-body { flex: 1; min-width: 0; }
+  .toast-title { font-size: 12px; color: var(--text-primary); font-weight: 500; margin-bottom: 2px; }
+  .toast-meta { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  
+  .decide-overlay { position: absolute; top: 60px; right: 24px; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 12px; width: 420px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); overflow: hidden; }
+  .overlay-header { padding: 14px 18px; background: var(--bg-elevated); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); }
+  .overlay-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); font-weight: 500; }
+  .check-mini { width: 14px; height: 14px; background: var(--success); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--bg-base); font-weight: 700; font-size: 9px; }
+  .overlay-close { background: transparent; border: none; color: var(--text-tertiary); cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1; }
+  .overlay-close:hover { color: var(--text-primary); }
+  .overlay-body { padding: 16px 18px; }
+  
+  .source-info { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 14px; }
+  .source-icon { width: 32px; height: 32px; background: var(--bg-elevated); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; border: 1px solid var(--border-subtle); }
+  .source-meta { flex: 1; min-width: 0; }
+  .source-title { font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .source-url { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  .trust-badge { font-size: 10px; background: rgba(78,205,196,0.1); color: var(--success); padding: 2px 8px; border-radius: 10px; font-family: var(--font-mono); margin-top: 4px; display: inline-block; }
+  
+  .facts-label { font-size: 11px; color: var(--text-tertiary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); }
+  .facts-bullet-list { list-style: none; padding: 0; margin: 0 0 14px 0; max-height: 200px; overflow-y: auto; padding-right: 6px; }
+  .facts-bullet-list::-webkit-scrollbar { width: 4px; }
+  .facts-bullet-list::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 2px; }
+  .facts-bullet-list li { display: block; padding: 6px 0; font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; }
+  
+  .tags-input { margin-bottom: 16px; }
+  .tags-input label { font-size: 11px; color: var(--text-tertiary); display: block; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); }
+  .tags-area { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 4px; min-height: 36px; align-items: center; }
+  .tag-chip { background: var(--bg-card); border: 1px solid var(--border-medium); color: var(--text-primary); padding: 4px 10px; border-radius: 10px; font-size: 11px; font-family: var(--font-mono); cursor: pointer; }
+  .tag-chip:hover { border-color: var(--accent-warm); color: var(--accent-warm); }
+  .tag-chip:last-child { background: transparent; border: 1px dashed var(--border-medium); color: var(--text-tertiary); }
+  .tag-chip:last-child:hover { border-color: var(--accent-warm); color: var(--accent-warm); }
+  .tags-hint { font-size: 10px; color: var(--text-tertiary); margin-top: 6px; font-family: var(--font-mono); }
+  
+  .decide-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .action-btn { padding: 11px 14px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; font-size: 13px; font-weight: 500; font-family: var(--font-sans); text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .action-btn:hover { background: var(--bg-hover); }
+  .action-btn.primary { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  .action-btn.primary:hover { background: #ffe488; }
+  .action-btn.danger { color: var(--danger); border-color: var(--border-subtle); }
+  .action-btn.danger:hover { background: rgba(255,107,107,0.06); border-color: var(--danger); }
+  .action-btn-hint { font-size: 11px; color: var(--text-tertiary); font-weight: 400; }
+  .action-btn.primary .action-btn-hint { color: rgba(10,10,10,0.6); }
+  
+  .review-progress { background: var(--bg-elevated); border-radius: 4px; height: 4px; margin-bottom: 14px; overflow: hidden; }
+  .review-progress-fill { background: var(--accent-warm); height: 100%; width: 33%; }
+  .review-counter { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; font-family: var(--font-mono); }
+  .review-card { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 16px; margin-bottom: 14px; }
+  .review-card-claim { font-size: 13.5px; color: var(--text-primary); line-height: 1.55; margin-bottom: 14px; }
+  .review-card-meta { display: flex; gap: 8px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
+  .meta-pill { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); padding: 3px 8px; background: var(--bg-card); border-radius: 10px; border: 1px solid var(--border-subtle); }
+  .meta-pill.type { color: var(--accent-warm); border-color: rgba(255,217,102,0.3); }
+  .show-more-link { color: var(--accent-cool); font-size: 11px; cursor: pointer; font-family: var(--font-mono); margin-bottom: 12px; display: inline-block; }
+  .show-more-link:hover { text-decoration: underline; }
+  .review-card-actions { display: flex; gap: 6px; }
+  .review-action-btn { flex: 1; padding: 8px; border-radius: 4px; border: 1px solid var(--border-subtle); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; font-size: 12px; font-family: var(--font-sans); }
+  .review-action-btn.accept { color: var(--success); border-color: rgba(78,205,196,0.3); }
+  .review-action-btn.accept:hover { background: rgba(78,205,196,0.08); border-color: var(--success); }
+  .review-action-btn.reject { color: var(--danger); border-color: rgba(255,107,107,0.3); }
+  .review-action-btn.reject:hover { background: rgba(255,107,107,0.08); border-color: var(--danger); }
+  .review-action-btn.edit { color: var(--accent-cool); border-color: rgba(109,180,245,0.3); }
+  .review-action-btn.edit:hover { background: rgba(109,180,245,0.08); border-color: var(--accent-cool); }
+  .review-back { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: none; color: var(--text-secondary); font-size: 11px; cursor: pointer; font-family: var(--font-mono); margin-bottom: 12px; padding: 0; }
+  .review-back:hover { color: var(--accent-warm); }
+  
+  /* Graph Preview */
+  .graph-preview-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-cool); font-size: 11px; cursor: pointer; font-family: var(--font-mono); margin-bottom: 12px; padding: 6px 0; user-select: none; }
+  .graph-preview-toggle:hover { color: #8cc4ff; }
+  .graph-preview-toggle .gp-arrow { transition: transform 0.2s; }
+  .graph-preview-toggle.open .gp-arrow { transform: rotate(180deg); }
+  
+  .graph-preview { display: none; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 14px; margin-bottom: 14px; }
+  .graph-preview.open { display: block; }
+  
+  .gp-section { margin-bottom: 14px; }
+  .gp-section:last-child { margin-bottom: 0; }
+  
+  .gp-section-label { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); margin-bottom: 8px; }
+  
+  .gp-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
+  .gp-marker { width: 14px; text-align: center; font-family: var(--font-mono); font-weight: 700; }
+  .gp-new .gp-marker { color: var(--success); }
+  .gp-existing .gp-marker { color: var(--accent-warm); }
+  .gp-class { color: var(--text-tertiary); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; min-width: 90px; letter-spacing: 0.03em; }
+  .gp-name { color: var(--text-primary); flex: 1; min-width: 0; }
+  .gp-count { color: var(--text-tertiary); font-family: var(--font-mono); font-size: 10px; }
+  
+  .gp-related { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+  .gp-fnid { color: var(--accent-cool); font-family: var(--font-mono); font-size: 10px; padding: 2px 6px; background: rgba(109,180,245,0.08); border-radius: 3px; flex-shrink: 0; cursor: pointer; }
+  .gp-fnid:hover { background: rgba(109,180,245,0.15); }
+  
+  .dismiss-hint { font-size: 10px; color: var(--text-tertiary); text-align: center; margin-top: 12px; font-family: var(--font-mono); letter-spacing: 0.03em; }
+  
+  .mobile-frame { max-width: 380px; margin: 0 auto; background: #000; border-radius: 36px; padding: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .mobile-screen { background: var(--bg-base); border-radius: 28px; overflow: hidden; min-height: 720px; position: relative; }
+  .mobile-notch { position: absolute; top: 0; left: 50%; transform: translateX(-50%); background: #000; width: 120px; height: 26px; border-radius: 0 0 14px 14px; z-index: 10; }
+  .mobile-status-bar { padding: 16px 24px 8px; display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); }
+  .mobile-header { padding: 20px 20px 12px; display: flex; justify-content: space-between; align-items: center; }
+  .mobile-brand { color: var(--accent-warm); font-weight: 600; font-size: 18px; }
+  .mobile-section { padding: 16px 20px; }
+  .mobile-section h3 { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); margin-bottom: 10px; }
+  .capture-input { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .capture-input-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+  .capture-input textarea { width: 100%; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px; color: var(--text-primary); font-family: inherit; font-size: 13px; resize: none; min-height: 60px; margin-bottom: 10px; }
+  .capture-btn-full { width: 100%; background: var(--accent-warm); color: var(--bg-base); border: none; padding: 12px; border-radius: 6px; font-weight: 600; font-size: 14px; cursor: pointer; }
+  .quick-action { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 14px 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .quick-action-icon { width: 32px; height: 32px; background: var(--bg-elevated); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .quick-action-text { flex: 1; font-size: 13px; color: var(--text-primary); }
+  .quick-action-hint { font-size: 11px; color: var(--text-tertiary); }
+  .share-hint { margin: 20px; padding: 14px; background: rgba(109,180,245,0.08); border: 1px solid rgba(109,180,245,0.2); border-radius: 8px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+  .share-hint strong { color: var(--accent-cool); font-weight: 500; }
+  .mobile-bottom-nav { position: absolute; bottom: 0; left: 0; right: 0; background: var(--bg-elevated); border-top: 1px solid var(--border-subtle); padding: 14px 20px 26px; display: flex; justify-content: space-around; }
+  .nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-tertiary); font-size: 10px; cursor: pointer; font-family: var(--font-mono); }
+  .nav-item.active { color: var(--accent-warm); }
+  .nav-icon { font-size: 18px; }
+  .toggle { position: relative; width: 32px; height: 18px; background: var(--border-medium); border-radius: 9px; cursor: pointer; }
+  .toggle.on { background: var(--accent-warm); }
+  .toggle::after { content: ''; position: absolute; width: 14px; height: 14px; border-radius: 50%; background: white; top: 2px; left: 2px; transition: left 0.2s; }
+  .toggle.on::after { left: 16px; }
+  
+  .failure-card { max-width: 480px; margin: 60px auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; }
+  .failure-header { padding: 24px; background: rgba(255,107,107,0.05); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 16px; }
+  .failure-icon { width: 40px; height: 40px; background: rgba(255,107,107,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--danger); font-size: 20px; }
+  .failure-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .failure-reason { font-size: 13px; color: var(--text-secondary); }
+  .failure-body { padding: 20px 24px; }
+  .failure-detail { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 16px; }
+  .failure-source-info { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 12px; margin-bottom: 16px; font-size: 12px; }
+  .failure-source-info .row { display: flex; padding: 4px 0; }
+  .failure-source-info .key { color: var(--text-tertiary); width: 100px; font-family: var(--font-mono); }
+  .failure-source-info .val { color: var(--text-primary); flex: 1; }
+  .failure-options { padding: 0 24px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .failure-options .option { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 12px 14px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+  .failure-options .option:hover { background: var(--bg-hover); }
+  .failure-options .option-text { font-size: 13px; color: var(--text-primary); }
+  .failure-options .option-hint { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  
+  .screen-doc { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 20px; margin-top: 32px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .screen-doc h4 { color: var(--text-primary); font-size: 14px; margin-bottom: 8px; margin-top: 12px; }
+  .screen-doc h4:first-child { margin-top: 0; }
+  .screen-doc ul { padding-left: 20px; margin-bottom: 8px; }
+  .screen-doc code { font-family: var(--font-mono); background: var(--bg-card); padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--accent-warm); }
+  
+  [data-lang] { display: none; }
+  body.lang-en [data-lang="en"] { display: inline; }
+  body.lang-en [data-lang-block="en"] { display: block; }
+  body.lang-en li[data-lang="en"] { display: list-item; }
+  body.lang-kr [data-lang="kr"] { display: inline; }
+  body.lang-kr [data-lang-block="kr"] { display: block; }
+  body.lang-kr li[data-lang="kr"] { display: list-item; }
+</style>
+</head>
+<body class="lang-en">
+
+<div class="top-bar">
+  <div>
+    <span class="brand">Lucid</span>
+    <span class="brand-tag">WIREFRAMES // PACK 2: SAVE &amp; DECIDE</span>
+  </div>
+  <div class="controls">
+    <div class="screen-nav">
+      <button class="active" data-screen="c1">C-1</button>
+      <button data-screen="c2">C-2</button>
+      <button data-screen="c3">C-3</button>
+      <button data-screen="c4">C-4</button>
+      <button data-screen="c5">C-5</button>
+      <button data-screen="c6">C-6</button>
+    </div>
+    <div class="lang-toggle">
+      <button class="active" data-lang-btn="en">EN</button>
+      <button data-lang-btn="kr">KR</button>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- C-1 -->
+<div class="screen active" id="screen-c1">
+  <div class="screen-header">
+    <div class="screen-id">C-1</div>
+    <div class="screen-title">
+      <span data-lang="en">Step 1 — Right-click → Save to Lucid</span>
+      <span data-lang="kr">1단계 — 우클릭 → Save to Lucid</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User reads an article they want to remember. Right-clicks on the page. The Lucid item is prominent in the context menu.</span>
+      <span data-lang="kr">기억해두고 싶은 기사를 읽다가 페이지를 우클릭. 컨텍스트 메뉴에서 Lucid 항목이 눈에 띈다.</span>
+    </div>
+  </div>
+  
+  <div class="flow-diagram"><span class="hl">●</span> Step 1: Save to Lucid     →     Step 2: Background Analysis     →     Step 3: Decide</div>
+  
+  <div class="browser-frame">
+    <div class="browser-chrome">
+      <div class="browser-dots"><span></span><span></span><span></span></div>
+      <div class="browser-url">wsj.com/articles/eu-ai-act-enters-into-force</div>
+      <div class="browser-ext-icon">L</div>
+    </div>
+    <div class="extension-area">
+      <div class="page-content">
+        <h2>EU AI Act Enters Into Force After 36-Month Legislative Process</h2>
+        <p>The European Union's landmark Artificial Intelligence Act took effect on August 1, 2024, capping a 36-month legislative journey that began with the European Commission's initial proposal in April 2021. The regulation establishes a risk-based framework with provisions covering high-risk systems, general-purpose AI models, and prohibited practices.</p>
+        <p>Industry observers have characterized the law as the most comprehensive AI governance framework to date.</p>
+      </div>
+      
+      <div class="context-menu">
+        <div class="context-menu-item">
+          <span style="width:16px;">⏎</span>
+          <span data-lang="en">Back</span>
+          <span data-lang="kr">뒤로</span>
+        </div>
+        <div class="context-menu-item">
+          <span style="width:16px;">↻</span>
+          <span data-lang="en">Reload</span>
+          <span data-lang="kr">새로고침</span>
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item highlight">
+          <span style="width:16px;">⭐</span>
+          <span data-lang="en">Save to Lucid</span>
+          <span data-lang="kr">Save to Lucid</span>
+          <span class="context-menu-shortcut">⌘⇧L</span>
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item">
+          <span style="width:16px;">🖨</span>
+          <span data-lang="en">Print</span>
+          <span data-lang="kr">인쇄</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">What "Save to Lucid" means</h4>
+    <h4 data-lang-block="kr">"Save to Lucid"의 의미</h4>
+    <p data-lang-block="en">This click hands the page to Lucid for analysis. For trusted sources, facts enter the graph immediately. For other sources, the user sees a Decide overlay (Step 3) and chooses what to do with the extracted facts.</p>
+    <p data-lang-block="kr">이 클릭은 페이지를 Lucid에게 분석 맡기는 동작. 신뢰 등록된 출처면 즉시 그래프 진입. 그 외 출처는 사용자가 Decide 오버레이(3단계)에서 추출 결과를 보고 결정.</p>
+    
+    <h4 data-lang-block="en">Alternative entry points</h4>
+    <h4 data-lang-block="kr">다른 진입점</h4>
+    <ul data-lang-block="en">
+      <li>Keyboard shortcut: <code>Cmd/Ctrl + Shift + L</code></li>
+      <li>Extension icon click → popup with "Save this page" button</li>
+      <li>Highlight text first, then right-click → "Save selection to Lucid"</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>단축키: <code>Cmd/Ctrl + Shift + L</code></li>
+      <li>확장 아이콘 클릭 → 팝업의 "Save this page" 버튼</li>
+      <li>텍스트 선택 후 우클릭 → "Save selection to Lucid"</li>
+    </ul>
+  </div>
+</div>
+
+<!-- C-2 -->
+<div class="screen" id="screen-c2">
+  <div class="screen-header">
+    <div class="screen-id">C-2</div>
+    <div class="screen-title">
+      <span data-lang="en">Step 2 — Background Analysis (Toast + Badge)</span>
+      <span data-lang="kr">2단계 — 백그라운드 분석 (Toast + Badge)</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Lucid analyzes in the background. Subtle toast shows progress; extension icon badge updates. User keeps reading — no interruption.</span>
+      <span data-lang="kr">Lucid가 백그라운드에서 분석. 작은 toast로 진행 표시, 확장 배지 갱신. 사용자는 계속 읽음 — 방해 없음.</span>
+    </div>
+  </div>
+  
+  <div class="flow-diagram">     Step 1: Save to Lucid     →     <span class="hl">●</span> Step 2: Background Analysis     →     Step 3: Decide</div>
+  
+  <div class="browser-frame">
+    <div class="browser-chrome">
+      <div class="browser-dots"><span></span><span></span><span></span></div>
+      <div class="browser-url">wsj.com/articles/eu-ai-act-enters-into-force</div>
+      <div class="browser-ext-icon">L<span class="ext-badge">…</span></div>
+    </div>
+    <div class="extension-area">
+      <div class="page-content">
+        <h2>EU AI Act Enters Into Force After 36-Month Legislative Process</h2>
+        <p>The European Union's landmark Artificial Intelligence Act took effect on August 1, 2024, capping a 36-month legislative journey that began with the European Commission's initial proposal in April 2021. The regulation establishes a risk-based framework with provisions covering high-risk systems, general-purpose AI models, and prohibited practices.</p>
+        <p>Industry observers have characterized the law as the most comprehensive AI governance framework to date.</p>
+      </div>
+      
+      <div class="progress-toast">
+        <div class="toast-spinner"></div>
+        <div class="toast-body">
+          <div class="toast-title">
+            <span data-lang="en">Analyzing with Lucid…</span>
+            <span data-lang="kr">Lucid가 분석 중…</span>
+          </div>
+          <div class="toast-meta">
+            <span data-lang="en">WSJ · 3 facts found so far</span>
+            <span data-lang="kr">WSJ · 사실 3개 발견</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Notification model — toast during, badge after</h4>
+    <h4 data-lang-block="kr">알림 모델 — 진행 중 toast, 완료 후 badge</h4>
+    <ul data-lang-block="en">
+      <li><code>Toast</code> shown during analysis (3–10 sec typical). Non-blocking, dismissable. User can keep reading.</li>
+      <li><code>Badge</code> on extension icon — "…" during analysis, switches to a number when ready (e.g., "3").</li>
+      <li>On completion, toast briefly shows a green check then disappears. Badge persists until user opens Decide overlay (C-3).</li>
+      <li>If user navigated away, badge alone signals completion. They return to Decide anytime via extension popup.</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>Toast</code>는 분석 중 표시 (보통 3–10초). 방해 없음, 닫기 가능. 사용자는 계속 읽을 수 있음.</li>
+      <li><code>Badge</code>는 확장 아이콘에 표시 — 분석 중 "…", 완료 시 숫자 ("3").</li>
+      <li>완료 시 toast가 잠시 녹색 체크를 보인 후 사라짐. Badge는 Decide 오버레이(C-3)를 열 때까지 유지.</li>
+      <li>사용자가 다른 곳으로 갔어도 badge가 완료를 알림. 확장 팝업에서 언제든 Decide로 복귀 가능.</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Trusted source — automatic flow</h4>
+    <h4 data-lang-block="kr">신뢰 출처 — 자동 흐름</h4>
+    <p data-lang-block="en">If the source is registered as trusted, Step 3 is skipped entirely. Toast shows "✓ Saved to graph · 3 facts added" then disappears. Facts enter the graph with L1 auto-accept marks. Reviewable later in the Auto-accepted tab.</p>
+    <p data-lang-block="kr">출처가 신뢰 등록되어 있으면 3단계 완전 생략. Toast가 "✓ 그래프에 저장됨 · 사실 3개 추가" 표시 후 사라짐. 사실들은 L1 auto-accept 마크와 함께 그래프 진입. Auto-accepted 탭에서 사후 검토 가능.</p>
+  </div>
+</div>
+
+<!-- C-3 -->
+<div class="screen" id="screen-c3">
+  <div class="screen-header">
+    <div class="screen-id">C-3</div>
+    <div class="screen-title">
+      <span data-lang="en">Step 3 — Decide (Summary Mode)</span>
+      <span data-lang="kr">3단계 — 결정 (요약 모드)</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Analysis complete. User clicks the badge or toast and sees this overlay. Quickly scan facts, adjust tags, then choose: Accept all, Review one-by-one, or Discard all.</span>
+      <span data-lang="kr">분석 완료. 사용자가 배지 또는 toast 클릭하면 오버레이 표시. 사실을 빠르게 훑고, 태그 조정 후 선택: 모두 승인, 개별 검토, 또는 모두 폐기.</span>
+    </div>
+  </div>
+  
+  <div class="flow-diagram">     Step 1: Save to Lucid     →     Step 2: Background Analysis     →     <span class="hl">●</span> Step 3: Decide</div>
+  
+  <div class="browser-frame">
+    <div class="browser-chrome">
+      <div class="browser-dots"><span></span><span></span><span></span></div>
+      <div class="browser-url">wsj.com/articles/eu-ai-act-enters-into-force</div>
+      <div class="browser-ext-icon">L<span class="ext-badge">3</span></div>
+    </div>
+    <div class="extension-area">
+      <div class="page-content">
+        <h2>EU AI Act Enters Into Force After 36-Month Legislative Process</h2>
+        <p>The European Union's landmark Artificial Intelligence Act took effect on August 1, 2024...</p>
+      </div>
+      
+      <div class="decide-overlay">
+        <div class="overlay-header">
+          <div class="overlay-status">
+            <div class="check-mini">✓</div>
+            <span data-lang="en">Analysis complete</span>
+            <span data-lang="kr">분석 완료</span>
+          </div>
+          <button class="overlay-close">×</button>
+        </div>
+        <div class="overlay-body">
+          <div class="source-info">
+            <div class="source-icon">📰</div>
+            <div class="source-meta">
+              <div class="source-title">EU AI Act Enters Into Force...</div>
+              <div class="source-url">wsj.com · Aug 1, 2024</div>
+              <span class="trust-badge" data-lang="en">trusted source</span>
+              <span class="trust-badge" data-lang="kr">신뢰 출처</span>
+            </div>
+          </div>
+          
+          <div class="facts-label" data-lang="en">3 facts extracted</div>
+          <div class="facts-label" data-lang="kr">사실 3개 추출됨</div>
+          <ul class="facts-bullet-list">
+            <li data-lang="en">EU AI Act took effect on August 1, 2024, after a legislative process initiated by the European Commission in April 2021.</li>
+            <li data-lang="kr">EU AI Act는 2024년 8월 1일 발효됐다. 유럽위원회가 2021년 4월 처음 제안한 후 입법 과정이 진행됐다.</li>
+            <li data-lang="en">The legislative process from initial proposal to enforcement took 36 months in total.</li>
+            <li data-lang="kr">최초 제안부터 시행까지 입법 과정에 총 36개월이 소요됐다.</li>
+            <li data-lang="en">The regulation establishes a risk-based framework covering high-risk systems, general-purpose AI models, and prohibited practices.</li>
+            <li data-lang="kr">이 규제는 고위험 시스템, 범용 AI 모델, 금지 관행을 다루는 위험 기반 프레임워크를 수립한다.</li>
+          </ul>
+          
+          <div class="tags-input">
+            <label data-lang="en">Tags</label>
+            <label data-lang="kr">태그</label>
+            <div class="tags-area">
+              <span class="tag-chip">ai-governance</span>
+              <span class="tag-chip">eu</span>
+              <span class="tag-chip">+</span>
+            </div>
+            <div class="tags-hint" data-lang="en">Suggested: regulation, policy, 2024</div>
+            <div class="tags-hint" data-lang="kr">제안: regulation, policy, 2024</div>
+          </div>
+          
+          <div class="decide-actions">
+            <button class="action-btn primary">
+              <span>
+                <span data-lang="en">Accept all</span>
+                <span data-lang="kr">모두 승인</span>
+              </span>
+              <span class="action-btn-hint" data-lang="en">→ all 3 enter graph</span>
+              <span class="action-btn-hint" data-lang="kr">→ 3개 모두 그래프 진입</span>
+            </button>
+            <button class="action-btn">
+              <span>
+                <span data-lang="en">Review one-by-one</span>
+                <span data-lang="kr">개별 검토</span>
+              </span>
+              <span class="action-btn-hint" data-lang="en">→ decide each fact</span>
+              <span class="action-btn-hint" data-lang="kr">→ 사실별 결정</span>
+            </button>
+            <button class="action-btn danger">
+              <span>
+                <span data-lang="en">Discard all</span>
+                <span data-lang="kr">모두 폐기</span>
+              </span>
+              <span class="action-btn-hint" data-lang="en">→ nothing saved</span>
+              <span class="action-btn-hint" data-lang="kr">→ 저장 안 됨</span>
+            </button>
+          </div>
+          
+          <div class="dismiss-hint">
+            <span data-lang="en">Press ESC to defer decision · facts stay in Pending</span>
+            <span data-lang="kr">ESC로 결정 미루기 · 사실은 Pending에 남음</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Three decisions, mapped to user intent</h4>
+    <h4 data-lang-block="kr">세 가지 결정, 사용자 의도 매핑</h4>
+    <ul data-lang-block="en">
+      <li><code>Accept all</code> — Most common path. All facts enter graph as L1.</li>
+      <li><code>Review one-by-one</code> — Want to inspect each fact. Overlay switches to Review mode (C-4).</li>
+      <li><code>Discard all</code> — Extraction is wrong, or changed mind. Complete discard. To save again, start the capture flow over.</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>모두 승인</code> — 가장 일반적 경로. 모든 사실이 L1으로 그래프 진입.</li>
+      <li><code>개별 검토</code> — 사실 하나씩 검토. 오버레이가 Review 모드(C-4)로 전환.</li>
+      <li><code>모두 폐기</code> — 추출이 잘못됐거나 마음이 바뀌었을 때. 완전 폐기. 다시 저장하려면 캡처 흐름 처음부터.</li>
+    </ul>
+    
+    <h4 data-lang-block="en">ESC = defer, not decide</h4>
+    <h4 data-lang-block="kr">ESC = 미루기, 결정 아님</h4>
+    <p data-lang-block="en">Closing the overlay without choosing is treated as "defer". Facts stay in Pending Queue, accessible later from extension popup or the Lucid app. This protects users who get interrupted mid-decision.</p>
+    <p data-lang-block="kr">선택 없이 오버레이 닫기 = "미루기". 사실은 Pending Queue에 남아 나중에 확장 팝업 또는 Lucid 앱에서 접근 가능. 결정 도중 방해받는 사용자를 보호.</p>
+  </div>
+</div>
+
+<!-- C-4 -->
+<div class="screen" id="screen-c4">
+  <div class="screen-header">
+    <div class="screen-id">C-4</div>
+    <div class="screen-title">
+      <span data-lang="en">Step 3 — Decide (Review Mode, fact-by-fact)</span>
+      <span data-lang="kr">3단계 — 결정 (Review 모드, 사실 하나씩)</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User clicked "Review one-by-one" in C-3. Same overlay, different mode. Each fact gets Accept / Edit / Reject. Progress bar at top.</span>
+      <span data-lang="kr">C-3에서 "개별 검토" 선택. 같은 오버레이, 다른 모드. 각 사실에 Accept / Edit / Reject. 상단에 진행 바.</span>
+    </div>
+  </div>
+  
+  <div class="flow-diagram">     Step 1: Save to Lucid     →     Step 2: Background Analysis     →     <span class="hl">●</span> Step 3: Decide (Review mode)</div>
+  
+  <div class="browser-frame">
+    <div class="browser-chrome">
+      <div class="browser-dots"><span></span><span></span><span></span></div>
+      <div class="browser-url">wsj.com/articles/eu-ai-act-enters-into-force</div>
+      <div class="browser-ext-icon">L<span class="ext-badge">2</span></div>
+    </div>
+    <div class="extension-area">
+      <div class="page-content">
+        <h2>EU AI Act Enters Into Force After 36-Month Legislative Process</h2>
+        <p>The European Union's landmark Artificial Intelligence Act took effect on August 1, 2024...</p>
+      </div>
+      
+      <div class="decide-overlay">
+        <div class="overlay-header">
+          <div class="overlay-status">
+            <div class="check-mini">✓</div>
+            <span data-lang="en">Reviewing facts</span>
+            <span data-lang="kr">사실 검토 중</span>
+          </div>
+          <button class="overlay-close">×</button>
+        </div>
+        <div class="overlay-body">
+          <button class="review-back">
+            <span>←</span>
+            <span data-lang="en">Back to summary</span>
+            <span data-lang="kr">요약으로</span>
+          </button>
+          
+          <div class="review-counter">
+            <span data-lang="en">Fact 1 of 3</span>
+            <span data-lang="kr">사실 1 / 3</span>
+            <span>33%</span>
+          </div>
+          <div class="review-progress">
+            <div class="review-progress-fill"></div>
+          </div>
+          
+          <div class="review-card">
+            <div class="review-card-claim" data-lang="en">EU AI Act took effect on August 1, 2024, after a legislative process initiated by the European Commission in April 2021.</div>
+            <div class="review-card-claim" data-lang="kr">EU AI Act는 2024년 8월 1일 발효됐다. 유럽위원회가 2021년 4월 처음 제안한 후 입법 과정이 진행됐다.</div>
+            
+            <div class="review-card-meta">
+              <span class="meta-pill type" data-lang="en">proposition</span>
+              <span class="meta-pill type" data-lang="kr">명제</span>
+              <span class="meta-pill">Subject: EU AI Act</span>
+            </div>
+            
+            <div class="graph-preview-toggle" id="gpt1">
+              <span class="gp-arrow">▾</span>
+              <span data-lang="en">Show graph preview</span>
+              <span data-lang="kr">그래프 미리보기</span>
+            </div>
+            
+            <div class="graph-preview" id="gp1">
+              <div class="gp-section">
+                <div class="gp-section-label" data-lang="en">Creates</div>
+                <div class="gp-section-label" data-lang="kr">새로 생성</div>
+                <div class="gp-row gp-new">
+                  <span class="gp-marker">+</span>
+                  <span class="gp-class">Fact</span>
+                  <span class="gp-name" data-lang="en">"EU AI Act took effect..."</span>
+                  <span class="gp-name" data-lang="kr">"EU AI Act 발효..."</span>
+                </div>
+                <div class="gp-row gp-new">
+                  <span class="gp-marker">+</span>
+                  <span class="gp-class">Event</span>
+                  <span class="gp-name" data-lang="en">EU AI Act enactment</span>
+                  <span class="gp-name" data-lang="kr">EU AI Act 발효</span>
+                </div>
+              </div>
+              
+              <div class="gp-section">
+                <div class="gp-section-label" data-lang="en">Connects to existing</div>
+                <div class="gp-section-label" data-lang="kr">기존 노드와 연결</div>
+                <div class="gp-row gp-existing">
+                  <span class="gp-marker">◐</span>
+                  <span class="gp-class">Organization</span>
+                  <span class="gp-name">European Commission</span>
+                  <span class="gp-count">3 facts</span>
+                </div>
+                <div class="gp-row gp-existing">
+                  <span class="gp-marker">◐</span>
+                  <span class="gp-class">Knowledge</span>
+                  <span class="gp-name">AI Governance</span>
+                  <span class="gp-count">12 facts</span>
+                </div>
+              </div>
+              
+              <div class="gp-section">
+                <div class="gp-section-label" data-lang="en">Related in your graph</div>
+                <div class="gp-section-label" data-lang="kr">그래프 내 관련 사실</div>
+                <div class="gp-related">
+                  <span class="gp-fnid">fn-145</span>
+                  <span data-lang="en">GDPR enforcement began May 2018, established baseline...</span>
+                  <span data-lang="kr">GDPR 시행 시작 2018년 5월, 기준 수립...</span>
+                </div>
+                <div class="gp-related">
+                  <span class="gp-fnid">fn-201</span>
+                  <span data-lang="en">EU AI Act passed European Parliament March 2024...</span>
+                  <span data-lang="kr">EU AI Act 유럽의회 통과 2024년 3월...</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="review-card-actions">
+              <button class="review-action-btn accept">
+                <span data-lang="en">Accept</span>
+                <span data-lang="kr">승인</span>
+              </button>
+              <button class="review-action-btn edit">
+                <span data-lang="en">Edit</span>
+                <span data-lang="kr">수정</span>
+              </button>
+              <button class="review-action-btn reject">
+                <span data-lang="en">Reject</span>
+                <span data-lang="kr">폐기</span>
+              </button>
+            </div>
+          </div>
+          
+          <div class="dismiss-hint">
+            <span data-lang="en">2 more after this · Accept rest · Discard rest</span>
+            <span data-lang="kr">이후 2개 남음 · 나머지 승인 · 나머지 폐기</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Why Review mode lives in the overlay</h4>
+    <h4 data-lang-block="kr">Review 모드가 오버레이 안에 있는 이유</h4>
+    <p data-lang-block="en">Review is a continuation of the same decision moment. User is still on the source page; context is still fresh. Forcing navigation to a separate validation screen would break flow. The overlay simply switches modes.</p>
+    <p data-lang-block="kr">Review는 같은 결정 순간의 연장. 사용자는 출처 페이지에 그대로 있고 맥락도 신선. 별도 검증 화면으로 이동하면 흐름이 끊김. 오버레이는 모드만 전환.</p>
+    
+    <h4 data-lang-block="en">Three actions per fact</h4>
+    <h4 data-lang-block="kr">사실당 3가지 행동</h4>
+    <ul data-lang-block="en">
+      <li><code>Accept</code> — Fact enters graph with L1 mark. Next card appears.</li>
+      <li><code>Edit</code> — Inline edit field opens. Original preserved as alias. Save → enter graph.</li>
+      <li><code>Reject</code> — Fact discarded. Next card appears.</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>승인</code> — 사실이 L1 마크와 함께 그래프 진입. 다음 카드 표시.</li>
+      <li><code>수정</code> — 인라인 편집 필드 열림. 원본은 alias로 보존. 저장 → 그래프 진입.</li>
+      <li><code>폐기</code> — 사실 폐기. 다음 카드 표시.</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Escape hatches</h4>
+    <h4 data-lang-block="kr">중간에 빠져나오기</h4>
+    <p data-lang-block="en">Bottom hint shows "Accept rest" and "Discard rest" — finish the batch in one click after handling a few. "Back to summary" returns to C-3 without losing progress on already-decided facts.</p>
+    <p data-lang-block="kr">하단 힌트에 "나머지 승인" / "나머지 폐기" — 몇 개 처리한 후 한 클릭으로 배치 마무리. "요약으로"는 C-3로 돌아가되 이미 결정한 사실들 진행 상태 유지.</p>
+    
+    <h4 data-lang-block="en">Graph preview — see how the fact fits</h4>
+    <h4 data-lang-block="kr">Graph preview — 사실이 어떻게 들어가는지 보기</h4>
+    <p data-lang-block="en">Optional expansion. User clicks "Show graph preview" to see — in plain text — what nodes will be created and what existing objects this fact connects to. No diagram, no learning curve. Three sections:</p>
+    <p data-lang-block="kr">선택 확장. 사용자가 "그래프 미리보기" 클릭하면 평문으로 — 어떤 노드가 생기고 어떤 기존 객체와 연결되는지 확인. 다이어그램 없음, 학습 곡선 없음. 세 섹션:</p>
+    <ul data-lang-block="en">
+      <li><code>Creates</code> — New nodes that will be added (+ marker)</li>
+      <li><code>Connects to existing</code> — Existing graph objects that will gain a new connection (◐ marker)</li>
+      <li><code>Related in your graph</code> — Existing facts in similar domain, fn-IDs clickable</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>새로 생성</code> — 추가될 새 노드 (+ 마커)</li>
+      <li><code>기존 노드와 연결</code> — 새 연결을 받게 될 기존 객체 (◐ 마커)</li>
+      <li><code>그래프 내 관련 사실</code> — 유사 도메인 기존 사실, fn-ID 클릭 가능</li>
+    </ul>
+    <p data-lang-block="en">This is hidden by default. Users who don't care can ignore it. Users curious about graph structure can expand and learn the system through use.</p>
+    <p data-lang-block="kr">기본 숨김. 관심 없는 사용자는 무시 가능. 그래프 구조 궁금한 사용자는 펼쳐서 사용하며 시스템 학습.</p>
+  </div>
+</div>
+
+<!-- C-5 -->
+<div class="screen" id="screen-c5">
+  <div class="screen-header">
+    <div class="screen-id">C-5</div>
+    <div class="screen-title">
+      <span data-lang="en">PWA Home (Mobile)</span>
+      <span data-lang="kr">PWA 홈 (모바일)</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Mobile users open Lucid PWA. Primary action is URL paste. Share Target is the smooth path via OS share sheet. Same flow: analyze → decide.</span>
+      <span data-lang="kr">모바일 사용자가 Lucid PWA를 연다. 주요 액션은 URL 붙여넣기. Share Target은 OS 공유 시트의 매끄러운 경로. 동일한 흐름: 분석 → 결정.</span>
+    </div>
+  </div>
+  
+  <div class="mobile-frame">
+    <div class="mobile-screen">
+      <div class="mobile-notch"></div>
+      <div class="mobile-status-bar">
+        <span>9:41</span>
+        <span>● ● ●</span>
+      </div>
+      
+      <div class="mobile-header">
+        <div class="mobile-brand">Lucid</div>
+        <div class="toggle on"></div>
+      </div>
+      
+      <div class="mobile-section">
+        <h3>
+          <span data-lang="en">Save a page</span>
+          <span data-lang="kr">페이지 저장</span>
+        </h3>
+        <div class="capture-input">
+          <div class="capture-input-label">
+            <span data-lang="en">Paste a URL or share from another app</span>
+            <span data-lang="kr">URL을 붙여넣거나 다른 앱에서 공유</span>
+          </div>
+          <textarea placeholder="https://..."></textarea>
+          <button class="capture-btn-full">
+            <span data-lang="en">Save to Lucid</span>
+            <span data-lang="kr">Save to Lucid</span>
+          </button>
+        </div>
+      </div>
+      
+      <div class="share-hint">
+        <strong data-lang="en">Tip: Share from any app</strong>
+        <strong data-lang="kr">팁: 어떤 앱에서든 공유 가능</strong>
+        <br>
+        <span data-lang="en">In Instagram, Twitter, YouTube, or news apps, tap the share button and select Lucid.</span>
+        <span data-lang="kr">인스타그램, 트위터, 유튜브, 뉴스 앱에서 공유 버튼을 탭하고 Lucid 선택.</span>
+      </div>
+      
+      <div class="mobile-section" style="padding-top: 0;">
+        <h3>
+          <span data-lang="en">Recent</span>
+          <span data-lang="kr">최근</span>
+        </h3>
+        <div class="quick-action">
+          <div class="quick-action-icon">📥</div>
+          <div class="quick-action-text">
+            <span data-lang="en">Pending decisions</span>
+            <span data-lang="kr">결정 대기</span>
+          </div>
+          <div class="quick-action-hint">3</div>
+        </div>
+        <div class="quick-action">
+          <div class="quick-action-icon">💬</div>
+          <div class="quick-action-text">
+            <span data-lang="en">Ask Lucid</span>
+            <span data-lang="kr">Lucid에게 묻기</span>
+          </div>
+          <div class="quick-action-hint">›</div>
+        </div>
+        <div class="quick-action">
+          <div class="quick-action-icon">⭐</div>
+          <div class="quick-action-text">
+            <span data-lang="en">Knowledge graph</span>
+            <span data-lang="kr">지식 그래프</span>
+          </div>
+          <div class="quick-action-hint">247 facts</div>
+        </div>
+      </div>
+      
+      <div class="mobile-bottom-nav">
+        <div class="nav-item active">
+          <div class="nav-icon">📥</div>
+          <div>Save</div>
+        </div>
+        <div class="nav-item">
+          <div class="nav-icon">✓</div>
+          <div>Pending</div>
+        </div>
+        <div class="nav-item">
+          <div class="nav-icon">⭐</div>
+          <div>Graph</div>
+        </div>
+        <div class="nav-item">
+          <div class="nav-icon">💬</div>
+          <div>Ask</div>
+        </div>
+        <div class="nav-item">
+          <div class="nav-icon">⚙</div>
+          <div>Settings</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Same flow, mobile-adapted</h4>
+    <h4 data-lang-block="kr">동일한 흐름, 모바일 적응</h4>
+    <ul data-lang-block="en">
+      <li>Tap "Save to Lucid" or share from any app → analysis starts</li>
+      <li>Analysis happens in background; full-screen Decide overlay appears when ready</li>
+      <li>Same three options (Accept all / Review / Discard all)</li>
+      <li>Bottom nav: Save / Pending / Graph / Ask / Settings</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>"Save to Lucid" 탭 또는 다른 앱에서 공유 → 분석 시작</li>
+      <li>분석은 백그라운드, 준비되면 전체 화면 Decide 오버레이 표시</li>
+      <li>같은 3가지 옵션 (모두 승인 / 개별 검토 / 모두 폐기)</li>
+      <li>하단 네비: Save / Pending / Graph / Ask / Settings</li>
+    </ul>
+  </div>
+</div>
+
+<!-- C-6 -->
+<div class="screen" id="screen-c6">
+  <div class="screen-header">
+    <div class="screen-id">C-6</div>
+    <div class="screen-title">
+      <span data-lang="en">Analysis Failure — Honest Empty Result</span>
+      <span data-lang="kr">분석 실패 — 정직한 빈 결과</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">When AI cannot extract verifiable facts. Source is preserved as memo. No fake facts forced into the graph.</span>
+      <span data-lang="kr">AI가 검증 가능한 사실을 추출할 수 없을 때. 출처는 메모로 보존. 가짜 사실을 강제로 그래프에 넣지 않음.</span>
+    </div>
+  </div>
+  
+  <div class="failure-card">
+    <div class="failure-header">
+      <div class="failure-icon">!</div>
+      <div>
+        <div class="failure-title">
+          <span data-lang="en">No verifiable facts found</span>
+          <span data-lang="kr">검증 가능한 사실 없음</span>
+        </div>
+        <div class="failure-reason">
+          <span data-lang="en">Detected as: opinion content</span>
+          <span data-lang="kr">판단: 의견 콘텐츠</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="failure-body">
+      <div class="failure-detail">
+        <span data-lang="en">This page contains primarily subjective opinions and editorial commentary. Lucid only stores claims that can be verified or measured.</span>
+        <span data-lang="kr">이 페이지는 주관적 의견과 사설 논평이 주를 이룹니다. Lucid는 검증 가능하거나 측정 가능한 주장만 저장합니다.</span>
+      </div>
+      
+      <div class="failure-source-info">
+        <div class="row">
+          <span class="key">source:</span>
+          <span class="val">techcrunch.com</span>
+        </div>
+        <div class="row">
+          <span class="key">title:</span>
+          <span class="val" data-lang="en">Why AI Will Change Everything (Trust Me)</span>
+          <span class="val" data-lang="kr">왜 AI가 모든 것을 바꿀 것인가 (날 믿어)</span>
+        </div>
+        <div class="row">
+          <span class="key">captured:</span>
+          <span class="val">2026-05-20 14:32</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="failure-options">
+      <div class="option">
+        <span class="option-text" data-lang="en">Keep source as bookmark</span>
+        <span class="option-text" data-lang="kr">출처를 북마크로 보존</span>
+        <span class="option-hint">default</span>
+      </div>
+      <div class="option">
+        <span class="option-text" data-lang="en">Override — analyze anyway (not recommended)</span>
+        <span class="option-text" data-lang="kr">강제 — 그래도 분석 (권장 안 함)</span>
+        <span class="option-hint">→</span>
+      </div>
+      <div class="option">
+        <span class="option-text" data-lang="en">Discard everything</span>
+        <span class="option-text" data-lang="kr">모두 폐기</span>
+        <span class="option-hint">→</span>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Failure categories</h4>
+    <h4 data-lang-block="kr">실패 카테고리</h4>
+    <ul data-lang-block="en">
+      <li><code>opinion_content</code> — Subjective views, editorial</li>
+      <li><code>advertisement</code> — Promotional content</li>
+      <li><code>non_factual_creative</code> — Fiction, poetry, art</li>
+      <li><code>ambiguous_attribution</code> — Unclear who is making the claim</li>
+      <li><code>non_verifiable</code> — Metaphysical or unfalsifiable claims</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>opinion_content</code> — 주관적 견해, 사설</li>
+      <li><code>advertisement</code> — 판촉 콘텐츠</li>
+      <li><code>non_factual_creative</code> — 소설, 시, 예술</li>
+      <li><code>ambiguous_attribution</code> — 누가 주장하는지 불명확</li>
+      <li><code>non_verifiable</code> — 형이상학적 또는 반증 불가</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Why this matters</h4>
+    <h4 data-lang-block="kr">왜 중요한가</h4>
+    <p data-lang-block="en">If Lucid silently extracted fake "facts" from opinion pieces, the knowledge graph would contaminate itself. Honest empty results protect graph integrity.</p>
+    <p data-lang-block="kr">의견 글에서 가짜 "사실"을 조용히 추출하면 지식 그래프가 스스로 오염됩니다. 정직한 빈 결과가 그래프의 무결성을 보호합니다.</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+  document.querySelectorAll('.screen-nav button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const screenId = btn.dataset.screen;
+      document.querySelectorAll('.screen-nav button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById('screen-' + screenId).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+  
+  document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lang = btn.dataset.langBtn;
+      document.querySelectorAll('[data-lang-btn]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.body.classList.remove('lang-en', 'lang-kr');
+      document.body.classList.add('lang-' + lang);
+    });
+  });
+  
+  document.querySelectorAll('.toggle').forEach(t => {
+    t.addEventListener('click', () => t.classList.toggle('on'));
+  });
+  
+  document.querySelectorAll('.tag-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      if (chip.textContent.trim() === '+') return;
+      chip.style.opacity = chip.style.opacity === '0.4' ? '1' : '0.4';
+    });
+  });
+  
+  document.querySelectorAll('.graph-preview-toggle').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+      const id = toggle.id.replace('gpt', 'gp');
+      const preview = document.getElementById(id);
+      if (preview) {
+        preview.classList.toggle('open');
+        toggle.classList.toggle('open');
+      }
+    });
+  });
+</script>
+
+</body>
+</html>

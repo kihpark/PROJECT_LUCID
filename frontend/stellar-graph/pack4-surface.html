@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lucid Wireframes — Pack 4: Surface</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Pretendard:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-base: #0a0a0a; --bg-elevated: #141414; --bg-card: #1a1a1a; --bg-hover: #242424;
+    --border-subtle: #2a2a2a; --border-medium: #3a3a3a;
+    --text-primary: #f5f5f5; --text-secondary: #a0a0a0; --text-tertiary: #707070;
+    --accent-warm: #ffd966; --accent-cool: #6db4f5;
+    --success: #4ecdc4; --warning: #ffd966; --danger: #ff6b6b;
+    --font-sans: 'Inter', 'Pretendard', sans-serif;
+    --font-kr: 'Pretendard', 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+    
+    /* Object class colors (12 classes, CSVS-spec aligned) */
+    --c-fact: 255, 217, 102;
+    --c-concept: 183, 148, 246;
+    --c-person: 246, 165, 192;
+    --c-org: 109, 180, 245;
+    --c-service: 78, 205, 196;
+    --c-product: 78, 205, 196;
+    --c-place: 149, 225, 163;
+    --c-knowledge: 149, 225, 163;
+    --c-event: 232, 184, 212;
+    --c-procedure: 255, 160, 122;
+    --c-task: 168, 218, 220;
+    --c-metric: 255, 230, 109;
+    --c-resource: 201, 180, 138;
+    --c-problem: 255, 107, 107;
+    --c-source: 136, 136, 136;
+  }
+  body { font-family: var(--font-sans); background: var(--bg-base); color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased; line-height: 1.5; }
+  body.lang-kr { font-family: var(--font-kr); }
+  
+  .top-bar { position: fixed; top: 0; left: 0; right: 0; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+  .brand { font-weight: 600; font-size: 16px; color: var(--accent-warm); }
+  .brand-tag { font-size: 11px; color: var(--text-tertiary); margin-left: 8px; font-family: var(--font-mono); }
+  .controls { display: flex; align-items: center; gap: 16px; }
+  .lang-toggle { display: flex; background: var(--bg-card); border-radius: 4px; padding: 2px; border: 1px solid var(--border-subtle); }
+  .lang-toggle button { background: transparent; border: none; color: var(--text-secondary); padding: 4px 10px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); border-radius: 3px; }
+  .lang-toggle button.active { background: var(--accent-warm); color: var(--bg-base); }
+  .screen-nav { display: flex; gap: 4px; }
+  .screen-nav button { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 6px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); }
+  .screen-nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .screen-nav button.active { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  
+  .main { margin-top: 60px; padding: 32px; min-height: calc(100vh - 60px); }
+  
+  .entity-legend { max-width: 1200px; margin: 0 auto 24px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 14px 18px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .entity-legend-label { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 8px; flex-shrink: 0; }
+  .entity-legend .em { font-size: 11px; }
+  .screen { display: none; max-width: 1200px; margin: 0 auto; }
+  .screen.active { display: block; }
+  .screen-header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
+  .screen-id { font-family: var(--font-mono); font-size: 11px; color: var(--accent-warm); letter-spacing: 0.1em; text-transform: uppercase; }
+  .screen-title { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .screen-desc { color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+  
+  .screen-doc { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 20px; margin-top: 32px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .screen-doc h4 { color: var(--text-primary); font-size: 14px; margin-bottom: 8px; margin-top: 12px; }
+  .screen-doc h4:first-child { margin-top: 0; }
+  .screen-doc ul { padding-left: 20px; margin-bottom: 8px; }
+  .screen-doc code { font-family: var(--font-mono); background: var(--bg-card); padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--accent-warm); }
+  
+  /* ====================
+     Entity class color coding (subtle background)
+     Applied to ENTITY mentions in fact text and labels.
+     Style: tinted background, original text color, small left dot.
+  ==================== */
+  .em { display: inline; padding: 1px 7px 1px 14px; border-radius: 3px; position: relative; font-weight: 500; white-space: nowrap; }
+  .em::before { content: ''; position: absolute; left: 5px; top: 50%; transform: translateY(-50%); width: 5px; height: 5px; border-radius: 50%; }
+  
+  .em-fact      { background: rgba(var(--c-fact), 0.10);      border: 1px solid rgba(var(--c-fact), 0.22); }
+  .em-fact::before      { background: rgb(var(--c-fact)); }
+  
+  .em-concept   { background: rgba(var(--c-concept), 0.10);   border: 1px solid rgba(var(--c-concept), 0.22); }
+  .em-concept::before   { background: rgb(var(--c-concept)); }
+  
+  .em-person    { background: rgba(var(--c-person), 0.10);    border: 1px solid rgba(var(--c-person), 0.22); }
+  .em-person::before    { background: rgb(var(--c-person)); }
+  
+  .em-org       { background: rgba(var(--c-org), 0.10);       border: 1px solid rgba(var(--c-org), 0.22); }
+  .em-org::before       { background: rgb(var(--c-org)); }
+  
+  .em-service   { background: rgba(var(--c-service), 0.10);   border: 1px solid rgba(var(--c-service), 0.22); }
+  .em-service::before   { background: rgb(var(--c-service)); }
+  
+  .em-product   { background: rgba(var(--c-product), 0.10);   border: 1px solid rgba(var(--c-product), 0.22); }
+  .em-product::before   { background: rgb(var(--c-product)); }
+  
+  .em-place     { background: rgba(var(--c-place), 0.10);     border: 1px solid rgba(var(--c-place), 0.22); }
+  .em-place::before     { background: rgb(var(--c-place)); }
+  
+  .em-knowledge { background: rgba(var(--c-knowledge), 0.10); border: 1px solid rgba(var(--c-knowledge), 0.22); }
+  .em-knowledge::before { background: rgb(var(--c-knowledge)); }
+  
+  .em-event     { background: rgba(var(--c-event), 0.10);     border: 1px solid rgba(var(--c-event), 0.22); }
+  .em-event::before     { background: rgb(var(--c-event)); }
+  
+  .em-procedure { background: rgba(var(--c-procedure), 0.10); border: 1px solid rgba(var(--c-procedure), 0.22); }
+  .em-procedure::before { background: rgb(var(--c-procedure)); }
+  
+  .em-task      { background: rgba(var(--c-task), 0.10);      border: 1px solid rgba(var(--c-task), 0.22); }
+  .em-task::before      { background: rgb(var(--c-task)); }
+  
+  .em-metric    { background: rgba(var(--c-metric), 0.10);    border: 1px solid rgba(var(--c-metric), 0.22); }
+  .em-metric::before    { background: rgb(var(--c-metric)); }
+  
+  .em-resource  { background: rgba(var(--c-resource), 0.10);  border: 1px solid rgba(var(--c-resource), 0.22); }
+  .em-resource::before  { background: rgb(var(--c-resource)); }
+  
+  .em-problem   { background: rgba(var(--c-problem), 0.10);   border: 1px solid rgba(var(--c-problem), 0.22); }
+  .em-problem::before   { background: rgb(var(--c-problem)); }
+  
+  /* Variant: inline plain text variant for very dense flows (Active Recall) */
+  .em-mini { padding: 0 5px; font-size: inherit; }
+  .em-mini::before { display: none; }
+  
+  /* ====================
+     S-1: Active Recall (Gmail-like editor with dotted underline + tooltip)
+  ==================== */
+  
+  .editor-frame { background: white; border-radius: 8px; max-width: 880px; margin: 0 auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); overflow: hidden; position: relative; }
+  .editor-chrome { background: #f5f5f5; padding: 14px 20px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 16px; }
+  .editor-chrome-title { font-size: 13px; color: #333; font-weight: 500; }
+  .editor-chrome-meta { font-size: 12px; color: #888; margin-left: auto; }
+  
+  .editor-subject { padding: 14px 24px; border-bottom: 1px solid #f0f0f0; font-size: 14px; color: #333; background: white; }
+  .editor-subject-label { color: #999; font-size: 12px; margin-right: 8px; }
+  
+  .editor-body { padding: 28px 32px; min-height: 380px; background: white; color: #222; font-size: 15px; line-height: 1.7; position: relative; }
+  
+  .lucid-keyword { border-bottom: 2px dotted #ffa500; cursor: pointer; position: relative; padding-bottom: 1px; }
+  .lucid-keyword:hover { background: rgba(255, 217, 102, 0.15); }
+  
+  .lucid-keyword-active { background: rgba(255, 217, 102, 0.2); border-bottom: 2px dotted #ff8c00; }
+  
+  .lucid-tooltip { position: absolute; top: 100px; left: 200px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-medium); border-radius: 8px; width: 360px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); z-index: 10; overflow: hidden; }
+  
+  .lucid-tooltip-header { padding: 10px 14px; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; }
+  .lucid-tooltip-title { font-size: 11px; color: var(--accent-warm); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
+  .lucid-tooltip-count { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  
+  .lucid-tooltip-facts { padding: 4px 0; }
+  .lucid-fact-item { padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); cursor: pointer; transition: background 0.15s; }
+  .lucid-fact-item:last-child { border-bottom: none; }
+  .lucid-fact-item:hover { background: var(--bg-hover); }
+  
+  .lucid-fact-claim { font-size: 12.5px; color: var(--text-primary); line-height: 1.5; margin-bottom: 4px; }
+  .lucid-fact-meta { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  .lucid-fact-fnid { color: var(--accent-cool); }
+  .lucid-fact-source { color: var(--text-secondary); }
+  
+  .lucid-tooltip-actions { padding: 8px 14px; background: var(--bg-elevated); border-top: 1px solid var(--border-subtle); display: flex; gap: 8px; justify-content: space-between; align-items: center; }
+  .lucid-action-btn { background: transparent; border: 1px solid var(--border-medium); color: var(--text-secondary); padding: 5px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: var(--font-sans); }
+  .lucid-action-btn:hover { color: var(--text-primary); border-color: var(--accent-warm); }
+  .lucid-action-btn.primary { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); font-weight: 500; }
+  
+  /* ====================
+     S-2: See All panel (Lucid app sidepanel from extension)
+  ==================== */
+  
+  .panel-frame { background: var(--bg-elevated); border-radius: 12px; max-width: 760px; margin: 0 auto; border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .panel-header { padding: 16px 20px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; }
+  .panel-title { font-size: 14px; color: var(--text-primary); font-weight: 500; }
+  .panel-title-em { color: var(--accent-warm); font-family: var(--font-mono); }
+  .panel-meta { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  
+  .panel-filter { padding: 12px 20px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px; align-items: center; }
+  .panel-filter-pill { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 4px 10px; border-radius: 12px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); }
+  .panel-filter-pill.active { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  
+  .panel-body { padding: 16px 20px; max-height: 480px; overflow-y: auto; }
+  .panel-fact { padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 8px; transition: border-color 0.15s; }
+  .panel-fact:hover { border-color: var(--border-medium); }
+  
+  .panel-fact-claim { font-size: 13px; color: var(--text-primary); line-height: 1.55; margin-bottom: 8px; }
+  .panel-fact-meta-row { display: flex; align-items: center; gap: 8px; font-size: 11px; flex-wrap: wrap; }
+  .panel-fact-pill { background: var(--bg-elevated); padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border-subtle); color: var(--text-tertiary); font-family: var(--font-mono); }
+  .panel-fact-pill.fnid { color: var(--accent-cool); }
+  .panel-fact-pill.tag { color: var(--text-secondary); }
+  .panel-fact-actions { display: flex; gap: 6px; margin-left: auto; }
+  .panel-mini-btn { background: transparent; border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 3px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; font-family: var(--font-mono); }
+  .panel-mini-btn:hover { color: var(--accent-warm); border-color: var(--accent-warm); }
+  
+  /* ====================
+     S-3: Passive Recall (Ask Lucid)
+  ==================== */
+  
+  .ask-frame { background: var(--bg-elevated); border-radius: 12px; max-width: 720px; margin: 0 auto; border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .ask-header { padding: 14px 20px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; }
+  .ask-title { font-size: 14px; color: var(--accent-warm); font-weight: 600; font-family: var(--font-mono); }
+  .ask-shortcut { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); padding: 3px 8px; background: var(--bg-base); border-radius: 4px; border: 1px solid var(--border-subtle); }
+  
+  .ask-conversation { padding: 20px; min-height: 380px; max-height: 520px; overflow-y: auto; }
+  
+  .ask-message { margin-bottom: 20px; }
+  .ask-message-role { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-mono); margin-bottom: 6px; }
+  .ask-message.user .ask-message-role { color: var(--accent-cool); }
+  .ask-message.lucid .ask-message-role { color: var(--accent-warm); }
+  
+  .ask-user-text { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--text-primary); display: inline-block; max-width: 100%; }
+  
+  .ask-lucid-text { font-size: 13.5px; color: var(--text-primary); line-height: 1.65; }
+  .ask-prefix { color: var(--accent-warm); font-weight: 500; }
+  
+  .ask-fact-list { list-style: none; padding: 0; margin: 10px 0; }
+  .ask-fact-list li { display: block; padding: 6px 0; font-size: 13px; color: var(--text-secondary); line-height: 1.55; }
+  .ask-fact-cite { color: var(--accent-cool); font-family: var(--font-mono); font-size: 11px; padding: 1px 5px; background: rgba(109,180,245,0.08); border-radius: 3px; margin-left: 4px; cursor: pointer; }
+  .ask-fact-cite:hover { background: rgba(109,180,245,0.15); }
+  
+  /* Relationship tree — facts as related structure, not flat list */
+  .ask-rel-tree { background: rgba(255,217,102,0.04); border-left: 2px solid rgba(255,217,102,0.3); padding: 12px 16px; margin: 14px 0; border-radius: 0 4px 4px 0; }
+  .ask-rel-tree-title { font-family: var(--font-mono); font-size: 10px; color: var(--accent-warm); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+  .ask-rel-node { padding: 4px 0; font-size: 13px; color: var(--text-secondary); line-height: 1.55; }
+  .ask-rel-node-root { font-weight: 500; color: var(--text-primary); }
+  .ask-rel-children { padding-left: 22px; border-left: 1px dashed var(--border-medium); margin-left: 8px; margin-top: 4px; }
+  .ask-rel-link { font-family: var(--font-mono); font-size: 9px; padding: 1px 5px; border-radius: 2px; margin-right: 6px; letter-spacing: 0.05em; }
+  .ask-rel-link.supports { background: rgba(149,225,163,0.12); color: var(--em-knowledge); }
+  .ask-rel-link.supersedes { background: rgba(232,184,212,0.12); color: var(--em-event); }
+  .ask-rel-link.contradicts { background: rgba(255,107,107,0.12); color: var(--danger); }
+  .ask-rel-link.derived { background: rgba(109,180,245,0.12); color: var(--accent-cool); }
+  .ask-rel-summary { font-size: 11px; color: var(--text-tertiary); font-style: italic; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-subtle); }
+  
+  .ask-warning { padding: 8px 12px; background: rgba(255, 107, 107, 0.06); border: 1px solid rgba(255, 107, 107, 0.2); border-radius: 6px; font-size: 12px; color: var(--text-primary); margin-top: 12px; }
+  .ask-warning strong { color: var(--danger); }
+  
+  .ask-empty { padding: 10px 12px; background: rgba(255, 217, 102, 0.05); border: 1px solid rgba(255, 217, 102, 0.2); border-radius: 6px; font-size: 12px; color: var(--text-secondary); margin-top: 10px; }
+  
+  .ask-suggested-action { display: inline-flex; align-items: center; gap: 6px; background: var(--bg-card); border: 1px solid var(--border-medium); color: var(--text-primary); padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; margin-top: 8px; font-family: var(--font-sans); }
+  .ask-suggested-action:hover { border-color: var(--accent-warm); color: var(--accent-warm); }
+  
+  .ask-input-area { padding: 14px 20px; background: var(--bg-card); border-top: 1px solid var(--border-subtle); display: flex; gap: 10px; align-items: center; }
+  .ask-input { flex: 1; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 14px; color: var(--text-primary); font-family: inherit; font-size: 13px; }
+  .ask-input:focus { outline: none; border-color: var(--accent-warm); }
+  .ask-send-btn { background: var(--accent-warm); color: var(--bg-base); border: none; padding: 9px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-sans); }
+  
+  /* ====================
+     S-4: Contradiction Queue
+  ==================== */
+  
+  .app-frame-mini { background: var(--bg-elevated); border-radius: 12px; max-width: 920px; margin: 0 auto; border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .content-header-bar { padding: 20px 24px; border-bottom: 1px solid var(--border-subtle); }
+  .content-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+  .content-subtitle { font-size: 13px; color: var(--text-secondary); }
+  
+  .contradict-list { padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+  
+  .contradict-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; border-left: 3px solid var(--danger); padding: 16px 18px; }
+  .contradict-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .contradict-icon { color: var(--danger); font-size: 16px; }
+  .contradict-title { font-size: 13px; color: var(--text-primary); font-weight: 500; }
+  .contradict-detected { font-size: 11px; color: var(--text-tertiary); margin-left: auto; font-family: var(--font-mono); }
+  
+  .contradict-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .contradict-fact { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 12px; }
+  .contradict-fact-fnid { font-size: 10px; color: var(--accent-cool); font-family: var(--font-mono); margin-bottom: 6px; }
+  .contradict-fact-claim { font-size: 12.5px; color: var(--text-primary); line-height: 1.55; margin-bottom: 8px; }
+  .contradict-fact-meta { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .contradict-fact-meta .src { color: var(--text-secondary); }
+  
+  .contradict-vs { display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); margin: 0 4px; }
+  
+  .contradict-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+  .contradict-btn { background: var(--bg-elevated); border: 1px solid var(--border-medium); color: var(--text-primary); padding: 7px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; font-family: var(--font-sans); }
+  .contradict-btn:hover { background: var(--bg-hover); }
+  .contradict-btn.primary { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); font-weight: 500; }
+  .contradict-btn.danger { color: var(--danger); border-color: rgba(255, 107, 107, 0.3); }
+  .contradict-btn.danger:hover { background: rgba(255, 107, 107, 0.08); border-color: var(--danger); }
+  
+  /* ====================
+     S-5: Gatekeeping Warning
+  ==================== */
+  
+  .gatekeep-card { max-width: 540px; margin: 40px auto; background: var(--bg-card); border: 2px solid var(--danger); border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+  .gatekeep-header { padding: 22px 24px 18px; background: rgba(255, 107, 107, 0.06); border-bottom: 1px solid rgba(255, 107, 107, 0.2); display: flex; align-items: flex-start; gap: 14px; }
+  .gatekeep-icon { width: 36px; height: 36px; background: rgba(255, 107, 107, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--danger); font-size: 18px; font-weight: 700; flex-shrink: 0; }
+  .gatekeep-title { font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+  .gatekeep-subtitle { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+  
+  .gatekeep-body { padding: 18px 24px; }
+  
+  .gatekeep-claim-box { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 12px 14px; margin-bottom: 18px; }
+  .gatekeep-claim-label { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); margin-bottom: 6px; }
+  .gatekeep-claim-text { font-size: 13px; color: var(--text-primary); line-height: 1.5; }
+  .gatekeep-claim-source { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); margin-top: 6px; }
+  
+  .gatekeep-evidence-label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); margin-bottom: 10px; }
+  .gatekeep-evidence { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 4px 0; margin-bottom: 16px; }
+  .gatekeep-evidence-item { padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); }
+  .gatekeep-evidence-item:last-child { border-bottom: none; }
+  .gatekeep-evidence-claim { font-size: 12.5px; color: var(--text-primary); line-height: 1.5; margin-bottom: 4px; }
+  .gatekeep-evidence-meta { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); display: flex; gap: 8px; }
+  .gatekeep-evidence-source { color: var(--success); }
+  .gatekeep-evidence-fnid { color: var(--accent-cool); }
+  
+  .gatekeep-conditions { padding: 12px 14px; background: rgba(255, 107, 107, 0.04); border: 1px solid rgba(255, 107, 107, 0.15); border-radius: 6px; margin-bottom: 18px; font-size: 11px; color: var(--text-secondary); }
+  .gatekeep-conditions-title { font-size: 10px; color: var(--danger); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .gatekeep-conditions ul { list-style: none; padding: 0; margin: 0; }
+  .gatekeep-conditions li { padding: 3px 0 3px 18px; position: relative; line-height: 1.55; }
+  .gatekeep-conditions li::before { content: '✓'; position: absolute; left: 0; color: var(--danger); font-weight: 700; }
+  
+  .gatekeep-footer { padding: 16px 24px; background: var(--bg-elevated); display: flex; gap: 10px; }
+  .gatekeep-btn { padding: 10px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; font-family: var(--font-sans); flex: 1; }
+  .gatekeep-btn.primary { background: var(--bg-card); border: 1px solid var(--border-medium); color: var(--text-primary); }
+  .gatekeep-btn.primary:hover { border-color: var(--accent-warm); }
+  .gatekeep-btn.override { background: transparent; border: 1px solid rgba(255, 107, 107, 0.3); color: var(--danger); }
+  .gatekeep-btn.override:hover { background: rgba(255, 107, 107, 0.08); border-color: var(--danger); }
+  
+  [data-lang] { display: none; }
+  body.lang-en [data-lang="en"] { display: inline; }
+  body.lang-en [data-lang-block="en"] { display: block; }
+  body.lang-en li[data-lang="en"] { display: list-item; }
+  body.lang-kr [data-lang="kr"] { display: inline; }
+  body.lang-kr [data-lang-block="kr"] { display: block; }
+  body.lang-kr li[data-lang="kr"] { display: list-item; }
+</style>
+</head>
+<body class="lang-en">
+
+<div class="top-bar">
+  <div>
+    <span class="brand">Lucid</span>
+    <span class="brand-tag">WIREFRAMES // PACK 4: SURFACE</span>
+  </div>
+  <div class="controls">
+    <div class="screen-nav">
+      <button class="active" data-screen="s1">S-1</button>
+      <button data-screen="s2">S-2</button>
+      <button data-screen="s3">S-3</button>
+      <button data-screen="s4">S-4</button>
+      <button data-screen="s5">S-5</button>
+    </div>
+    <div class="lang-toggle">
+      <button class="active" data-lang-btn="en">EN</button>
+      <button data-lang-btn="kr">KR</button>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+<div class="entity-legend">
+  <span class="entity-legend-label" data-lang="en">Entity color coding</span>
+  <span class="entity-legend-label" data-lang="kr">엔티티 색 가이드</span>
+  <span class="em em-org">Organization</span>
+  <span class="em em-person">Person</span>
+  <span class="em em-service">Service</span>
+  <span class="em em-product">Product</span>
+  <span class="em em-place">Place</span>
+  <span class="em em-event">Event</span>
+  <span class="em em-knowledge">Knowledge</span>
+  <span class="em em-concept">Concept</span>
+  <span class="em em-procedure">Procedure</span>
+  <span class="em em-metric">Metric</span>
+  <span class="em em-resource">Resource</span>
+  <span class="em em-problem">Problem</span>
+</div>
+
+<!-- S-1: Active Recall — dotted underline + tooltip -->
+<div class="screen active" id="screen-s1">
+  <div class="screen-header">
+    <div class="screen-id">S-1</div>
+    <div class="screen-title">
+      <span data-lang="en">Active Recall — Dotted Underline + Tooltip</span>
+      <span data-lang="kr">Active Recall — 점선 밑줄 + 풍선</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User writes an email or doc. Lucid silently scans keywords. When a phrase matches validated facts in the graph, a dotted orange underline appears. Hover shows the related facts in a tooltip. Insert citation or open full panel.</span>
+      <span data-lang="kr">사용자가 이메일이나 문서 작성 중. Lucid가 조용히 키워드 스캔. 그래프의 검증된 사실과 일치하면 점선 주황 밑줄. 호버하면 관련 사실 풍선. 인용 삽입 또는 전체 패널 열기.</span>
+    </div>
+  </div>
+  
+  <div class="editor-frame">
+    <div class="editor-chrome">
+      <span class="editor-chrome-title">Gmail — Compose</span>
+      <span class="editor-chrome-meta">Draft saved · 2 min ago</span>
+    </div>
+    <div class="editor-subject">
+      <span class="editor-subject-label">To:</span>
+      hkpark@hks.harvard.edu
+    </div>
+    <div class="editor-subject">
+      <span class="editor-subject-label">Subject:</span>
+      <span data-lang="en">Comparative analysis — AI governance frameworks</span>
+      <span data-lang="kr">비교 분석 — AI 거버넌스 프레임워크</span>
+    </div>
+    
+    <div class="editor-body">
+      <div data-lang-block="en">
+        <p>Dear Prof. Park,</p>
+        <p>Following up on our conversation last week, I've completed the comparative review of recent AI governance frameworks. The <span class="lucid-keyword lucid-keyword-active">EU AI Act</span> provides the most comprehensive structure to date, while Korea's approach takes a notably different posture.</p>
+        <p>A few observations worth sharing:</p>
+        <p>The <span class="lucid-keyword">Korean AI Basic Act</span> emphasizes promotion over restriction — a philosophical inversion of the EU model. This came up in our discussion as a possible explanation for divergent investment flows.</p>
+        <p>I should have the draft ready by Friday.</p>
+        <p>Best,<br>Kiheung</p>
+      </div>
+      <div data-lang-block="kr">
+        <p>박 교수님께,</p>
+        <p>지난주 대화에 이어, 최근 AI 거버넌스 프레임워크 비교 검토를 마쳤습니다. <span class="lucid-keyword lucid-keyword-active">EU AI Act</span>는 현재까지 가장 포괄적인 구조를 제공하며, 한국의 접근법은 눈에 띄게 다른 자세를 취합니다.</p>
+        <p>몇 가지 짚어둘 만한 관찰:</p>
+        <p><span class="lucid-keyword">한국 AI 기본법</span>은 규제보다 진흥을 강조 — EU 모델의 철학적 반전입니다. 우리 논의에서 투자 흐름 차이의 설명으로 언급되었던 부분입니다.</p>
+        <p>금요일까지 초안 마련하겠습니다.</p>
+        <p>감사합니다.<br>박기흥 드림</p>
+      </div>
+      
+      <div class="lucid-tooltip">
+        <div class="lucid-tooltip-header">
+          <span class="lucid-tooltip-title">Lucid · related facts</span>
+          <span class="lucid-tooltip-count">
+            <span data-lang="en">3 of 7</span>
+            <span data-lang="kr">3 / 7</span>
+          </span>
+        </div>
+        <div class="lucid-tooltip-facts">
+          <div class="lucid-fact-item">
+            <div class="lucid-fact-claim" data-lang="en"><span class="em em-event">EU AI Act</span> took effect on August 1, 2024, after a 36-month legislative process.</div>
+            <div class="lucid-fact-claim" data-lang="kr"><span class="em em-event">EU AI Act</span>는 36개월 입법 과정을 거쳐 2024년 8월 1일 발효됐다.</div>
+            <div class="lucid-fact-meta">
+              <span class="lucid-fact-fnid">fn-220</span>
+              <span class="lucid-fact-source">wsj.com</span>
+            </div>
+          </div>
+          <div class="lucid-fact-item">
+            <div class="lucid-fact-claim" data-lang="en"><span class="em em-event">EU AI Act</span> establishes a <span class="em em-knowledge">risk-based framework</span> with four risk tiers.</div>
+            <div class="lucid-fact-claim" data-lang="kr"><span class="em em-event">EU AI Act</span>는 4단계 <span class="em em-knowledge">위험 분류 프레임워크</span>를 수립한다.</div>
+            <div class="lucid-fact-meta">
+              <span class="lucid-fact-fnid">fn-221</span>
+              <span class="lucid-fact-source">europa.eu</span>
+            </div>
+          </div>
+          <div class="lucid-fact-item">
+            <div class="lucid-fact-claim" data-lang="en"><span class="em em-knowledge">High-risk systems</span> under <span class="em em-event">EU AI Act</span> require <span class="em em-procedure">third-party conformity assessment</span>.</div>
+            <div class="lucid-fact-claim" data-lang="kr"><span class="em em-event">EU AI Act</span>의 <span class="em em-knowledge">고위험 시스템</span>은 <span class="em em-procedure">제3자 적합성 평가</span>를 요구한다.</div>
+            <div class="lucid-fact-meta">
+              <span class="lucid-fact-fnid">fn-222</span>
+              <span class="lucid-fact-source">europa.eu</span>
+            </div>
+          </div>
+        </div>
+        <div class="lucid-tooltip-actions">
+          <button class="lucid-action-btn primary">
+            <span data-lang="en">Insert citation</span>
+            <span data-lang="kr">인용 삽입</span>
+          </button>
+          <button class="lucid-action-btn">
+            <span data-lang="en">See all 7 →</span>
+            <span data-lang="kr">전체 7개 →</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">How it works</h4>
+    <h4 data-lang-block="kr">작동 방식</h4>
+    <ul data-lang-block="en">
+      <li>User types in any web text field (Gmail, Google Docs, Notion, Slack, etc.) via Chrome extension</li>
+      <li>500ms debounce after keystroke — Lucid scans keywords against the graph</li>
+      <li>Matching phrases get a dotted orange underline (subtle, non-intrusive)</li>
+      <li>Hover the underline → tooltip appears with top 3 related facts</li>
+      <li>"Insert citation" puts fn-ID inline at cursor; "See all" opens the See All panel (S-2)</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>사용자가 어느 웹 텍스트 필드든 입력 (Gmail, Google Docs, Notion, Slack 등 Chrome 확장)</li>
+      <li>키 입력 후 500ms 디바운스 — Lucid가 그래프 대조</li>
+      <li>일치 구문에 점선 주황 밑줄 (은은함, 비방해)</li>
+      <li>밑줄 호버 → 풍선에 상위 3개 관련 사실</li>
+      <li>"인용 삽입"은 fn-ID를 커서 위치에; "전체 7개"는 See All 패널(S-2) 오픈</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Design choices</h4>
+    <h4 data-lang-block="kr">디자인 결정</h4>
+    <ul data-lang-block="en">
+      <li>Dotted underline (not solid) — signals "informational" not "error"</li>
+      <li>Orange (not red) — distinct from spell-check or grammar tools</li>
+      <li>Tooltip appears on hover only — no popup while typing</li>
+      <li>Lucid ON/OFF toggle (extension popup) instantly disables underlines</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>점선 밑줄 (실선 아님) — "정보용" 신호, "오류"가 아님</li>
+      <li>주황색 (빨강 아님) — 맞춤법·문법 도구와 구분</li>
+      <li>풍선은 호버 시에만 — 타이핑 중 팝업 없음</li>
+      <li>확장 팝업의 Lucid ON/OFF 토글로 즉시 밑줄 비활성화</li>
+    </ul>
+  </div>
+</div>
+
+<!-- S-2: See All panel -->
+<div class="screen" id="screen-s2">
+  <div class="screen-header">
+    <div class="screen-id">S-2</div>
+    <div class="screen-title">
+      <span data-lang="en">Active Recall — See All Panel</span>
+      <span data-lang="kr">Active Recall — 전체 보기 패널</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User clicked "See all 7" from the tooltip. Full list opens as a side panel (or modal on mobile). Filter, sort, insert citations one at a time.</span>
+      <span data-lang="kr">툴팁에서 "전체 7개" 클릭. 사이드 패널로 전체 목록 표시 (모바일은 모달). 필터, 정렬, 인용 개별 삽입.</span>
+    </div>
+  </div>
+  
+  <div class="panel-frame">
+    <div class="panel-header">
+      <div class="panel-title">
+        <span data-lang="en">All facts about</span>
+        <span data-lang="kr">관련 사실 전체:</span>
+        <span class="em em-event" style="font-family: var(--font-mono); font-size: 13px;">EU AI Act</span>
+      </div>
+      <span class="panel-meta">
+        <span data-lang="en">7 facts</span>
+        <span data-lang="kr">사실 7개</span>
+      </span>
+    </div>
+    
+    <div class="panel-filter">
+      <div class="panel-filter-pill active" data-lang="en">All</div>
+      <div class="panel-filter-pill active" data-lang="kr">전체</div>
+      <div class="panel-filter-pill" data-lang="en">Recent</div>
+      <div class="panel-filter-pill" data-lang="kr">최근</div>
+      <div class="panel-filter-pill" data-lang="en">By source</div>
+      <div class="panel-filter-pill" data-lang="kr">출처별</div>
+    </div>
+    
+    <div class="panel-body">
+      <div class="panel-fact">
+        <div class="panel-fact-claim" data-lang="en"><span class="em em-event">EU AI Act</span> took effect on August 1, 2024, after a 36-month legislative process initiated by the <span class="em em-org">European Commission</span> in April 2021.</div>
+        <div class="panel-fact-claim" data-lang="kr"><span class="em em-event">EU AI Act</span>는 <span class="em em-org">유럽위원회</span>가 2021년 4월 처음 제안한 후 36개월 입법 과정을 거쳐 2024년 8월 1일 발효됐다.</div>
+        <div class="panel-fact-meta-row">
+          <span class="panel-fact-pill fnid">fn-220</span>
+          <span class="panel-fact-pill">wsj.com</span>
+          <span class="panel-fact-pill tag">ai-governance</span>
+          <span class="panel-fact-pill tag">eu</span>
+          <div class="panel-fact-actions">
+            <button class="panel-mini-btn" data-lang="en">Insert</button>
+            <button class="panel-mini-btn" data-lang="kr">삽입</button>
+            <button class="panel-mini-btn" data-lang="en">Open</button>
+            <button class="panel-mini-btn" data-lang="kr">열기</button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="panel-fact">
+        <div class="panel-fact-claim" data-lang="en"><span class="em em-event">EU AI Act</span> establishes a <span class="em em-knowledge">risk-based framework</span> with four risk tiers: unacceptable, high, limited, and minimal.</div>
+        <div class="panel-fact-claim" data-lang="kr"><span class="em em-event">EU AI Act</span>는 4단계 위험 분류 (수용불가, 고위험, 제한, 최소) 기반의 <span class="em em-knowledge">위험 기반 프레임워크</span>를 수립한다.</div>
+        <div class="panel-fact-meta-row">
+          <span class="panel-fact-pill fnid">fn-221</span>
+          <span class="panel-fact-pill">europa.eu</span>
+          <span class="panel-fact-pill tag">ai-governance</span>
+          <span class="panel-fact-pill tag">eu</span>
+          <div class="panel-fact-actions">
+            <button class="panel-mini-btn" data-lang="en">Insert</button>
+            <button class="panel-mini-btn" data-lang="kr">삽입</button>
+            <button class="panel-mini-btn" data-lang="en">Open</button>
+            <button class="panel-mini-btn" data-lang="kr">열기</button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="panel-fact">
+        <div class="panel-fact-claim" data-lang="en"><span class="em em-knowledge">High-risk systems</span> under <span class="em em-event">EU AI Act</span> require <span class="em em-procedure">third-party conformity assessment</span> before market deployment.</div>
+        <div class="panel-fact-claim" data-lang="kr"><span class="em em-event">EU AI Act</span>의 <span class="em em-knowledge">고위험 시스템</span>은 시장 출시 전 <span class="em em-procedure">제3자 적합성 평가</span>를 요구한다.</div>
+        <div class="panel-fact-meta-row">
+          <span class="panel-fact-pill fnid">fn-222</span>
+          <span class="panel-fact-pill">europa.eu</span>
+          <span class="panel-fact-pill tag">ai-governance</span>
+          <span class="panel-fact-pill tag">compliance</span>
+          <div class="panel-fact-actions">
+            <button class="panel-mini-btn" data-lang="en">Insert</button>
+            <button class="panel-mini-btn" data-lang="kr">삽입</button>
+            <button class="panel-mini-btn" data-lang="en">Open</button>
+            <button class="panel-mini-btn" data-lang="kr">열기</button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="panel-fact">
+        <div class="panel-fact-claim" data-lang="en"><span class="em em-event">EU AI Act</span> fines can reach up to <span class="em em-metric">€35 million or 7% of global annual turnover</span> for prohibited practices.</div>
+        <div class="panel-fact-claim" data-lang="kr"><span class="em em-event">EU AI Act</span>는 금지 관행에 대해 <span class="em em-metric">최대 3,500만 유로 또는 글로벌 연매출 7%</span>의 과징금 부과 가능.</div>
+        <div class="panel-fact-meta-row">
+          <span class="panel-fact-pill fnid">fn-223</span>
+          <span class="panel-fact-pill">wsj.com</span>
+          <span class="panel-fact-pill tag">ai-governance</span>
+          <span class="panel-fact-pill tag">eu</span>
+          <div class="panel-fact-actions">
+            <button class="panel-mini-btn" data-lang="en">Insert</button>
+            <button class="panel-mini-btn" data-lang="kr">삽입</button>
+            <button class="panel-mini-btn" data-lang="en">Open</button>
+            <button class="panel-mini-btn" data-lang="kr">열기</button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="panel-fact">
+        <div class="panel-fact-claim" data-lang="en"><span class="em em-product">General-purpose AI models</span> with systemic risk face additional obligations under Article 51.</div>
+        <div class="panel-fact-claim" data-lang="kr">시스템적 위험을 가진 <span class="em em-product">범용 AI 모델</span>은 51조에 따른 추가 의무를 진다.</div>
+        <div class="panel-fact-meta-row">
+          <span class="panel-fact-pill fnid">fn-224</span>
+          <span class="panel-fact-pill">europa.eu</span>
+          <span class="panel-fact-pill tag">ai-governance</span>
+          <span class="panel-fact-pill tag">foundation-models</span>
+          <div class="panel-fact-actions">
+            <button class="panel-mini-btn" data-lang="en">Insert</button>
+            <button class="panel-mini-btn" data-lang="kr">삽입</button>
+            <button class="panel-mini-btn" data-lang="en">Open</button>
+            <button class="panel-mini-btn" data-lang="kr">열기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">What lives here</h4>
+    <h4 data-lang-block="kr">여기에 들어 있는 것</h4>
+    <ul data-lang-block="en">
+      <li>All facts in the graph related to the keyword the user was looking at</li>
+      <li>Sorted by relevance (vector + graph distance), with options for recent or by-source</li>
+      <li>Each fact card: claim + fn-ID + source + tags + actions</li>
+      <li>Insert puts the fact (or just the fn-ID citation) inline at the cursor where the user was typing</li>
+      <li>Open jumps to the fact's full detail view in Lucid app</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>사용자가 보고 있던 키워드와 관련된 그래프 사실 전체</li>
+      <li>관련도 정렬 (벡터 + 그래프 거리), 최근/출처별 옵션</li>
+      <li>각 사실 카드: 주장 + fn-ID + 출처 + 태그 + 액션</li>
+      <li>"삽입"은 사용자가 타이핑하던 커서 위치에 사실(또는 fn-ID 인용) 인라인 삽입</li>
+      <li>"열기"는 Lucid 앱의 해당 사실 상세 보기로 이동</li>
+    </ul>
+  </div>
+</div>
+
+<!-- S-3: Passive Recall (Ask Lucid) -->
+<div class="screen" id="screen-s3">
+  <div class="screen-header">
+    <div class="screen-id">S-3</div>
+    <div class="screen-title">
+      <span data-lang="en">Passive Recall — Ask Lucid</span>
+      <span data-lang="kr">Passive Recall — Ask Lucid</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User opens Ask Lucid (Cmd+Shift+L). Asks questions in natural language. Lucid answers ONLY from validated facts in the graph. Every claim cites fn-IDs. If there's no answer, Lucid says so honestly.</span>
+      <span data-lang="kr">사용자가 Ask Lucid 호출 (Cmd+Shift+L). 자연어로 질문. Lucid는 그래프의 검증된 사실만으로 답변. 모든 주장에 fn-ID 인용. 답이 없으면 정직하게 모른다고 답.</span>
+    </div>
+  </div>
+  
+  <div class="ask-frame">
+    <div class="ask-header">
+      <span class="ask-title">⌬ Ask Lucid</span>
+      <span class="ask-shortcut">⌘⇧L</span>
+    </div>
+    
+    <div class="ask-conversation">
+      
+      <div class="ask-message user">
+        <div class="ask-message-role" data-lang="en">You</div>
+        <div class="ask-message-role" data-lang="kr">사용자</div>
+        <div class="ask-user-text">
+          <span data-lang="en">What do I know about diet and protein timing?</span>
+          <span data-lang="kr">단백질 섭취 타이밍에 대해 내가 검증한 게 뭐가 있지?</span>
+        </div>
+      </div>
+      
+      <div class="ask-message lucid">
+        <div class="ask-message-role" data-lang="en">Lucid</div>
+        <div class="ask-message-role" data-lang="kr">Lucid</div>
+        <div class="ask-lucid-text">
+          <span class="ask-prefix" data-lang="en">As far as I know,</span>
+          <span class="ask-prefix" data-lang="kr">제가 아는 한,</span>
+          <span data-lang="en"> you have 4 validated facts on this topic:</span>
+          <span data-lang="kr"> 이 주제에 대해 검증된 사실 4건이 있습니다:</span>
+          <ul class="ask-fact-list">
+            <li data-lang="en">Daily total <span class="em em-concept">protein intake</span> matters more than timing for <span class="em em-concept">muscle protein synthesis</span>.<span class="ask-fact-cite">fn-401</span></li>
+            <li data-lang="kr">근단백 합성에는 <span class="em em-concept">단백 섭취 타이밍</span>보다 일일 총량이 더 중요하다.<span class="ask-fact-cite">fn-401</span></li>
+            <li data-lang="en"><span class="em em-concept">Protein</span> distributed across 3-5 meals optimizes <span class="em em-concept">muscle protein synthesis</span> better than concentrated intake.<span class="ask-fact-cite">fn-402</span></li>
+            <li data-lang="kr">하루 3-5끼에 분산된 <span class="em em-concept">단백 섭취</span>가 집중 섭취보다 <span class="em em-concept">근단백 합성</span> 최적화에 더 좋다.<span class="ask-fact-cite">fn-402</span></li>
+            <li data-lang="en">The <span class="em em-event">post-workout anabolic window</span> is wider than previously believed — approximately 4-6 hours.<span class="ask-fact-cite">fn-403</span></li>
+            <li data-lang="kr">운동 후 <span class="em em-event">동화 윈도우</span>는 이전 통념보다 넓다 — 약 4-6시간.<span class="ask-fact-cite">fn-403</span></li>
+            <li data-lang="en">Recommended daily <span class="em em-metric">protein for active adults</span>: 1.6-2.2g per kg body weight.<span class="ask-fact-cite">fn-404</span></li>
+            <li data-lang="kr">활동적 성인 <span class="em em-metric">권장 일일 단백질</span>: 체중 1kg당 1.6-2.2g.<span class="ask-fact-cite">fn-404</span></li>
+          </ul>
+          
+          <div class="ask-rel-tree">
+            <div class="ask-rel-tree-title">
+              <span data-lang="en">↳ How these facts relate</span>
+              <span data-lang="kr">↳ 이 사실들이 어떻게 연결되는가</span>
+            </div>
+            <div class="ask-rel-node ask-rel-node-root">
+              <span class="ask-fact-cite">fn-401</span>
+              <span data-lang="en">Total protein amount &gt; timing (core principle)</span>
+              <span data-lang="kr">총량 &gt; 타이밍 (핵심 원리)</span>
+            </div>
+            <div class="ask-rel-children">
+              <div class="ask-rel-node">
+                <span class="ask-rel-link supports">SUPPORTS</span>
+                <span class="ask-fact-cite">fn-402</span>
+                <span data-lang="en">Distributed intake = optimization layer on top of total</span>
+                <span data-lang="kr">분산 섭취 = 총량 위의 최적화 layer</span>
+              </div>
+              <div class="ask-rel-node">
+                <span class="ask-rel-link supersedes">SUPERSEDES</span>
+                <span class="ask-fact-cite">fn-403</span>
+                <span data-lang="en">Old "1-hour window" myth — now 4-6 hours (busted)</span>
+                <span data-lang="kr">옛 "1시간 윈도우" 통념 — 4-6시간으로 폐기됨</span>
+              </div>
+              <div class="ask-rel-node">
+                <span class="ask-rel-link derived">DERIVED_FROM</span>
+                <span class="ask-fact-cite">fn-404</span>
+                <span data-lang="en">Concrete target: 1.6-2.2g/kg/day (operationalization)</span>
+                <span data-lang="kr">구체 목표: 1.6-2.2g/kg/일 (운영화)</span>
+              </div>
+            </div>
+            <div class="ask-rel-summary">
+              <span data-lang="en">No contradictions in this cluster. These 4 facts form a coherent narrative: hit total → distribute across day → ignore narrow window → aim for 1.6-2.2g/kg.</span>
+              <span data-lang="kr">이 군집에 모순 없음. 4건이 일관된 narrative: 총량 충족 → 하루 분산 → 좁은 윈도우 무시 → 1.6-2.2g/kg 목표.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="ask-message user">
+        <div class="ask-message-role" data-lang="en">You</div>
+        <div class="ask-message-role" data-lang="kr">사용자</div>
+        <div class="ask-user-text">
+          <span data-lang="en">Is fasted cardio better for fat loss?</span>
+          <span data-lang="kr">공복 유산소가 지방 감량에 더 좋아?</span>
+        </div>
+      </div>
+      
+      <div class="ask-message lucid">
+        <div class="ask-message-role" data-lang="en">Lucid</div>
+        <div class="ask-message-role" data-lang="kr">Lucid</div>
+        <div class="ask-lucid-text">
+          <span class="ask-prefix" data-lang="en">According to your knowledge graph,</span>
+          <span class="ask-prefix" data-lang="kr">그래프 기준으로,</span>
+          <span data-lang="en"> the claim that fasted cardio is superior for fat loss is not supported by your validated facts. You have:</span>
+          <span data-lang="kr"> 공복 유산소가 지방 감량에 우월하다는 주장은 검증된 사실로 뒷받침되지 않습니다:</span>
+          <ul class="ask-fact-list">
+            <li data-lang="en"><span class="em em-procedure">Fasted cardio</span> shows no significant difference vs <span class="em em-procedure">fed cardio</span> in 24-hour <span class="em em-metric">fat oxidation</span> outcomes.<span class="ask-fact-cite">fn-410</span></li>
+            <li data-lang="kr"><span class="em em-procedure">공복 유산소</span>는 <span class="em em-procedure">식후 유산소</span> 대비 24시간 <span class="em em-metric">지방 산화</span> 결과에서 유의미한 차이를 보이지 않는다.<span class="ask-fact-cite">fn-410</span></li>
+            <li data-lang="en"><span class="em em-procedure">Post-meal exercise</span> reduces <span class="em em-problem">muscle loss risk</span> during caloric deficit.<span class="ask-fact-cite">fn-411</span></li>
+            <li data-lang="kr"><span class="em em-procedure">식후 운동</span>은 칼로리 결손 중 <span class="em em-problem">근손실 위험</span>을 줄인다.<span class="ask-fact-cite">fn-411</span></li>
+          </ul>
+          <div class="ask-warning" data-lang="en">
+            <strong>Note:</strong> The popular belief about fasted cardio contradicts your validated evidence. Would you like to save the new claim for review?
+          </div>
+          <div class="ask-warning" data-lang="kr">
+            <strong>참고:</strong> 공복 유산소에 대한 통념이 기흥님의 검증 증거와 충돌합니다. 새 주장을 검토 큐에 저장하시겠습니까?
+          </div>
+          <button class="ask-suggested-action">
+            <span data-lang="en">+ Save claim for review</span>
+            <span data-lang="kr">+ 주장을 검토 큐에 저장</span>
+          </button>
+        </div>
+      </div>
+      
+      <div class="ask-message user">
+        <div class="ask-message-role" data-lang="en">You</div>
+        <div class="ask-message-role" data-lang="kr">사용자</div>
+        <div class="ask-user-text">
+          <span data-lang="en">What about creatine for endurance training?</span>
+          <span data-lang="kr">지구력 운동에서 크레아틴은 어때?</span>
+        </div>
+      </div>
+      
+      <div class="ask-message lucid">
+        <div class="ask-message-role" data-lang="en">Lucid</div>
+        <div class="ask-message-role" data-lang="kr">Lucid</div>
+        <div class="ask-lucid-text">
+          <span class="ask-prefix" data-lang="en">As far as I know,</span>
+          <span class="ask-prefix" data-lang="kr">제가 아는 한,</span>
+          <span data-lang="en"> your graph has no validated facts about creatine and endurance training.</span>
+          <span data-lang="kr"> 그래프에 크레아틴과 지구력 운동에 대한 검증된 사실이 없습니다.</span>
+          <div class="ask-empty" data-lang="en">
+            I can't answer this from your graph alone. If you'd like, save a relevant article and Lucid will analyze it — facts can then enter your graph after review.
+          </div>
+          <div class="ask-empty" data-lang="kr">
+            그래프 기반으로는 답할 수 없습니다. 관련 자료를 저장해주시면 Lucid가 분석하고, 검토 후 사실들이 그래프에 진입할 수 있습니다.
+          </div>
+        </div>
+      </div>
+      
+    </div>
+    
+    <div class="ask-input-area">
+      <input type="text" class="ask-input" placeholder="Ask Lucid…" data-lang-en-placeholder="Ask Lucid…" data-lang-kr-placeholder="Lucid에게 묻기…" />
+      <button class="ask-send-btn">
+        <span data-lang="en">Send</span>
+        <span data-lang="kr">보내기</span>
+      </button>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Identity protocol — every response signed</h4>
+    <h4 data-lang-block="kr">정체성 규약 — 모든 응답에 서명</h4>
+    <p data-lang-block="en">Every Lucid response begins with one of these phrases:</p>
+    <p data-lang-block="kr">모든 Lucid 응답은 다음 표현 중 하나로 시작:</p>
+    <ul data-lang-block="en">
+      <li><code>"As far as I know,"</code></li>
+      <li><code>"According to your knowledge graph,"</code></li>
+      <li><code>"Based on what you've validated,"</code></li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>"제가 아는 한,"</code></li>
+      <li><code>"그래프 기준으로,"</code></li>
+      <li><code>"기흥님이 검증한 것 기준으로,"</code></li>
+    </ul>
+    <p data-lang-block="en">This is not stylistic. It's an epistemic commitment: Lucid never speaks beyond what the user has validated. No "I think...", no general knowledge fill-ins, no plausible-sounding inventions.</p>
+    <p data-lang-block="kr">단순 말투가 아닙니다. 인식론적 약속: Lucid는 사용자가 검증한 것을 넘어 말하지 않습니다. "내 생각엔...", 일반 지식 메우기, 그럴듯한 창작 없음.</p>
+    
+    <h4 data-lang-block="en">Relationship tree — understanding is structure, not list</h4>
+    <h4 data-lang-block="kr">관계 트리 — 이해는 구조, 목록이 아니다</h4>
+    <p data-lang-block="en">After listing facts, Lucid surfaces the <strong>relationships between them</strong> (SUPPORTS, SUPERSEDES, CONTRADICTS, DERIVED_FROM). This is intentional: understanding is not a list of facts, it's the structure of how facts relate. The relationship tree makes the user feel they are "inside the loop of understanding" with the AI, not just receiving a summary.</p>
+    <p data-lang-block="kr">사실 나열 후 Lucid는 <strong>사실들 사이의 관계</strong> 를 보여줌 (SUPPORTS, SUPERSEDES, CONTRADICTS, DERIVED_FROM). 의도적: 이해는 사실의 목록이 아니라 사실들이 어떻게 연결되는지의 구조. 관계 트리는 사용자가 단순 요약을 받는 게 아니라 AI 와 "이해의 루프 안에" 함께 있다는 느낌을 만듦.</p>
+    <p data-lang-block="en">Without the tree, Lucid is a smart search. With the tree, Lucid surfaces the user's own coherent narrative back to them. This is the bridge from "verified knowledge" to "structured understanding."</p>
+    <p data-lang-block="kr">관계 트리가 없으면 Lucid는 똑똑한 검색에 불과. 있으면 사용자 자신의 일관된 narrative 를 다시 보여주는 시스템. "검증된 지식" 에서 "구조화된 이해" 로 가는 다리.</p>
+    
+    <h4 data-lang-block="en">Three response patterns</h4>
+    <h4 data-lang-block="kr">세 가지 응답 패턴</h4>
+    <ul data-lang-block="en">
+      <li><strong>Affirmative</strong> — Graph has matching facts. List them with fn-IDs. (Example 1: protein timing)</li>
+      <li><strong>Contradictive</strong> — User's claim conflicts with graph. Show conflict, offer to save the new claim for review. (Example 2: fasted cardio)</li>
+      <li><strong>Honest empty</strong> — Graph has nothing. Don't invent. Suggest saving. (Example 3: creatine)</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><strong>긍정</strong> — 그래프에 일치 사실 있음. fn-ID와 함께 나열. (예시 1: 단백질 타이밍)</li>
+      <li><strong>반박</strong> — 사용자 주장이 그래프와 충돌. 충돌 보여주고 검토 큐 저장 제안. (예시 2: 공복 유산소)</li>
+      <li><strong>정직한 빈 답변</strong> — 그래프에 없음. 창작 안 함. 저장 제안. (예시 3: 크레아틴)</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Why this is the killer feature</h4>
+    <h4 data-lang-block="kr">왜 이게 킬러 기능인가</h4>
+    <p data-lang-block="en">ChatGPT and Claude answer from training data — a vast averaged sea. Lucid answers only from what you've personally validated. Same question, very different answer: "What do I know about X?" — only Lucid can answer that question literally and meaningfully.</p>
+    <p data-lang-block="kr">ChatGPT나 Claude는 학습 데이터 — 거대한 평균의 바다 — 에서 답합니다. Lucid는 사용자가 직접 검증한 것에서만 답합니다. 같은 질문 다른 의미: "내가 X에 대해 뭘 알지?" — 이 질문에 문자 그대로 의미 있게 답할 수 있는 건 Lucid뿐입니다.</p>
+  </div>
+</div>
+
+<!-- S-4: Contradiction Queue -->
+<div class="screen" id="screen-s4">
+  <div class="screen-header">
+    <div class="screen-id">S-4</div>
+    <div class="screen-title">
+      <span data-lang="en">Contradiction Queue</span>
+      <span data-lang="kr">모순 큐</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">System detected facts in the user's graph that conflict with each other. Pairs are shown side-by-side with sources and timestamps. User decides which to keep, demote, or merge with context.</span>
+      <span data-lang="kr">시스템이 사용자 그래프 내에서 서로 충돌하는 사실들을 감지. 출처와 시점과 함께 좌우로 표시. 사용자가 유지·강등·맥락 병합을 결정.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame-mini">
+    <div class="content-header-bar">
+      <div class="content-title">
+        <span data-lang="en">Contradictions in your graph</span>
+        <span data-lang="kr">그래프 내 모순</span>
+      </div>
+      <div class="content-subtitle">
+        <span data-lang="en">2 pairs detected · review and decide</span>
+        <span data-lang="kr">2건 감지 · 검토 후 결정</span>
+      </div>
+    </div>
+    
+    <div class="contradict-list">
+      
+      <div class="contradict-card">
+        <div class="contradict-card-header">
+          <span class="contradict-icon">⚠</span>
+          <span class="contradict-title">
+            <span data-lang="en">Subject: <span class="em em-service">ChatGPT</span> · Property: monthly active users</span>
+            <span data-lang="kr">대상: <span class="em em-service">ChatGPT</span> · 속성: 월간 사용자</span>
+          </span>
+          <span class="contradict-detected">
+            <span data-lang="en">detected 2h ago</span>
+            <span data-lang="kr">2시간 전 감지</span>
+          </span>
+        </div>
+        
+        <div class="contradict-pair">
+          <div class="contradict-fact">
+            <div class="contradict-fact-fnid">fn-301</div>
+            <div class="contradict-fact-claim" data-lang="en">"<span class="em em-service">ChatGPT</span> had <span class="em em-metric">200 million weekly active users</span> in May 2026."</div>
+            <div class="contradict-fact-claim" data-lang="kr">"<span class="em em-service">ChatGPT</span>는 2026년 5월에 <span class="em em-metric">주간 활성 사용자 2억 명</span>을 기록했다."</div>
+            <div class="contradict-fact-meta">
+              <span class="src">openai.com</span>
+              <span>·</span>
+              <span data-lang="en">saved 3 days ago</span>
+              <span data-lang="kr">3일 전 저장</span>
+            </div>
+          </div>
+          <div class="contradict-fact">
+            <div class="contradict-fact-fnid">fn-318</div>
+            <div class="contradict-fact-claim" data-lang="en">"<span class="em em-service">ChatGPT</span> reached <span class="em em-metric">500 million weekly users</span> by May 2026."</div>
+            <div class="contradict-fact-claim" data-lang="kr">"<span class="em em-service">ChatGPT</span>는 2026년 5월까지 <span class="em em-metric">주간 사용자 5억 명</span>에 도달했다."</div>
+            <div class="contradict-fact-meta">
+              <span class="src">techcrunch.com</span>
+              <span>·</span>
+              <span data-lang="en">saved 2h ago</span>
+              <span data-lang="kr">2시간 전 저장</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="contradict-actions">
+          <button class="contradict-btn primary">
+            <span data-lang="en">Keep fn-301 (drop fn-318)</span>
+            <span data-lang="kr">fn-301 유지 (fn-318 폐기)</span>
+          </button>
+          <button class="contradict-btn">
+            <span data-lang="en">Keep fn-318 (drop fn-301)</span>
+            <span data-lang="kr">fn-318 유지 (fn-301 폐기)</span>
+          </button>
+          <button class="contradict-btn">
+            <span data-lang="en">Keep both with context note</span>
+            <span data-lang="kr">맥락 메모와 함께 둘 다 유지</span>
+          </button>
+          <button class="contradict-btn danger">
+            <span data-lang="en">Demote both for review</span>
+            <span data-lang="kr">둘 다 검토로 강등</span>
+          </button>
+        </div>
+      </div>
+      
+      <div class="contradict-card">
+        <div class="contradict-card-header">
+          <span class="contradict-icon">⚠</span>
+          <span class="contradict-title">
+            <span data-lang="en">Subject: <span class="em em-event">EU AI Act</span> · Property: facial recognition policy</span>
+            <span data-lang="kr">대상: <span class="em em-event">EU AI Act</span> · 속성: 얼굴 인식 정책</span>
+          </span>
+          <span class="contradict-detected">
+            <span data-lang="en">detected 1 day ago</span>
+            <span data-lang="kr">1일 전 감지</span>
+          </span>
+        </div>
+        
+        <div class="contradict-pair">
+          <div class="contradict-fact">
+            <div class="contradict-fact-fnid">fn-187</div>
+            <div class="contradict-fact-claim" data-lang="en">"<span class="em em-event">EU AI Act</span> prohibits all forms of <span class="em em-procedure">facial recognition</span> by 2026."</div>
+            <div class="contradict-fact-claim" data-lang="kr">"<span class="em em-event">EU AI Act</span>는 2026년까지 모든 형태의 <span class="em em-procedure">얼굴 인식</span>을 금지한다."</div>
+            <div class="contradict-fact-meta">
+              <span class="src">wsj.com</span>
+              <span>·</span>
+              <span data-lang="en">saved 2 weeks ago · auto-accepted</span>
+              <span data-lang="kr">2주 전 저장 · 자동 수락</span>
+            </div>
+          </div>
+          <div class="contradict-fact">
+            <div class="contradict-fact-fnid">fn-225</div>
+            <div class="contradict-fact-claim" data-lang="en">"<span class="em em-event">EU AI Act</span> prohibits <span class="em em-procedure">real-time biometric identification</span> in <span class="em em-place">public spaces</span> with limited law enforcement exceptions."</div>
+            <div class="contradict-fact-claim" data-lang="kr">"<span class="em em-event">EU AI Act</span>는 <span class="em em-place">공공장소</span> <span class="em em-procedure">실시간 생체 인식</span>을 금지하되 법 집행에는 제한적 예외를 둔다."</div>
+            <div class="contradict-fact-meta">
+              <span class="src">europa.eu</span>
+              <span>·</span>
+              <span data-lang="en">saved 1 day ago</span>
+              <span data-lang="kr">1일 전 저장</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="contradict-actions">
+          <button class="contradict-btn primary">
+            <span data-lang="en">Keep fn-225 (more authoritative source)</span>
+            <span data-lang="kr">fn-225 유지 (출처 권위 더 높음)</span>
+          </button>
+          <button class="contradict-btn">
+            <span data-lang="en">Keep fn-187</span>
+            <span data-lang="kr">fn-187 유지</span>
+          </button>
+          <button class="contradict-btn">
+            <span data-lang="en">Keep both with context note</span>
+            <span data-lang="kr">맥락 메모와 함께 둘 다 유지</span>
+          </button>
+          <button class="contradict-btn danger">
+            <span data-lang="en">Demote both for review</span>
+            <span data-lang="kr">둘 다 검토로 강등</span>
+          </button>
+        </div>
+      </div>
+      
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">How contradictions are detected</h4>
+    <h4 data-lang-block="kr">모순 감지 방식</h4>
+    <ul data-lang-block="en">
+      <li><strong>Pattern A</strong> — Same Subject + same Property + different value, same time/context. Auto-flagged.</li>
+      <li><strong>Pattern B</strong> — Same Subject + semantically opposite Predicates. Suggested for review.</li>
+      <li><strong>Pattern C</strong> — Same Subject + Property but different time/jurisdiction. NOT a contradiction — both preserved (timeline).</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><strong>패턴 A</strong> — 같은 대상 + 같은 속성 + 다른 값, 같은 시점/맥락. 자동 플래그.</li>
+      <li><strong>패턴 B</strong> — 같은 대상 + 의미적으로 반대되는 술어. 검토 제안.</li>
+      <li><strong>패턴 C</strong> — 같은 대상 + 속성이지만 다른 시점/관할. 모순 아님 — 둘 다 보존 (타임라인).</li>
+    </ul>
+    
+    <h4 data-lang-block="en">When detection runs</h4>
+    <h4 data-lang-block="kr">언제 감지가 작동하나</h4>
+    <ul data-lang-block="en">
+      <li>Immediately after Accept (synchronous quick check)</li>
+      <li>Background daily scan (full graph sweep)</li>
+      <li>Whenever a new fact connects to an existing Subject node</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>Accept 직후 (동기 빠른 체크)</li>
+      <li>매일 백그라운드 스캔 (전체 그래프)</li>
+      <li>새 사실이 기존 Subject 노드에 연결될 때마다</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Four resolution options</h4>
+    <h4 data-lang-block="kr">4가지 해소 옵션</h4>
+    <ul data-lang-block="en">
+      <li><strong>Keep one, drop the other</strong> — Clear choice when one source is clearly stronger</li>
+      <li><strong>Keep both with context note</strong> — When difference is due to jurisdiction, scope, or interpretation</li>
+      <li><strong>Demote both</strong> — Send back to Pending for fresh re-review</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><strong>하나 유지, 다른 것 폐기</strong> — 한쪽 출처가 명확히 강할 때</li>
+      <li><strong>맥락 메모와 함께 둘 다 유지</strong> — 차이가 관할/범위/해석 때문일 때</li>
+      <li><strong>둘 다 강등</strong> — 다시 신선하게 재검토</li>
+    </ul>
+    
+    <h4 data-lang-block="en">No intrusive toast alerts</h4>
+    <h4 data-lang-block="kr">방해적 토스트 알림 없음</h4>
+    <p data-lang-block="en">Contradictions are surfaced via sidebar badge (Insights → Contradictions) and visual signal in Stellar View (red tension lines), but never as a popup interrupting the user's flow.</p>
+    <p data-lang-block="kr">모순은 사이드바 배지 (Insights → Contradictions)와 Stellar View 시각 신호 (붉은 긴장선)로 표시되며, 사용자 흐름을 끊는 팝업은 절대 없습니다.</p>
+  </div>
+</div>
+
+<!-- S-5: Gatekeeping Warning -->
+<div class="screen" id="screen-s5">
+  <div class="screen-header">
+    <div class="screen-id">S-5</div>
+    <div class="screen-title">
+      <span data-lang="en">Gatekeeping Warning — Disputed Claim Detected</span>
+      <span data-lang="kr">Gatekeeping 경고 — 반박된 주장 감지</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User tries to save a claim that strongly conflicts with multiple stronger sources in the graph. Lucid warns but doesn't block — user can override. The override is recorded for transparency.</span>
+      <span data-lang="kr">사용자가 그래프 내 더 강한 다수 출처와 강하게 충돌하는 주장을 저장하려 함. Lucid는 경고하되 차단하지 않음 — 사용자가 강제 진행 가능. 강제 진행은 투명성을 위해 기록.</span>
+    </div>
+  </div>
+  
+  <div class="gatekeep-card">
+    <div class="gatekeep-header">
+      <div class="gatekeep-icon">!</div>
+      <div>
+        <div class="gatekeep-title">
+          <span data-lang="en">This claim conflicts with stronger evidence in your graph</span>
+          <span data-lang="kr">이 주장은 그래프 내 더 강한 근거와 충돌합니다</span>
+        </div>
+        <div class="gatekeep-subtitle">
+          <span data-lang="en">Lucid recommends review before saving. You can override if you believe the claim is correct.</span>
+          <span data-lang="kr">저장 전 검토를 권장합니다. 주장이 옳다고 판단되면 강제 저장 가능합니다.</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="gatekeep-body">
+      <div class="gatekeep-claim-box">
+        <div class="gatekeep-claim-label" data-lang="en">You're trying to save</div>
+        <div class="gatekeep-claim-label" data-lang="kr">저장하려는 주장</div>
+        <div class="gatekeep-claim-text" data-lang="en">"<span class="em em-resource">U.S. beef imports</span> cause <span class="em em-person">Korean people</span> to easily develop <span class="em em-problem">mad cow disease</span>."</div>
+        <div class="gatekeep-claim-text" data-lang="kr">"<span class="em em-resource">미국산 쇠고기 수입</span>은 <span class="em em-person">한국인</span>을 <span class="em em-problem">광우병</span>에 쉽게 걸리게 한다."</div>
+        <div class="gatekeep-claim-source">
+          <span data-lang="en">source: anonymous blog post · 2024</span>
+          <span data-lang="kr">출처: 익명 블로그 게시물 · 2024</span>
+        </div>
+      </div>
+      
+      <div class="gatekeep-evidence-label" data-lang="en">Counter-evidence in your graph</div>
+      <div class="gatekeep-evidence-label" data-lang="kr">그래프 내 반대 증거</div>
+      
+      <div class="gatekeep-evidence">
+        <div class="gatekeep-evidence-item">
+          <div class="gatekeep-evidence-claim" data-lang="en">"0 confirmed cases of <span class="em em-problem">variant CJD</span> in <span class="em em-place">Korea</span> since beef import resumption (2008–present)."</div>
+          <div class="gatekeep-evidence-claim" data-lang="kr">"수입 재개(2008년) 이후 현재까지 <span class="em em-place">국내</span> <span class="em em-problem">변종 vCJD</span> 확진 0건."</div>
+          <div class="gatekeep-evidence-meta">
+            <span class="gatekeep-evidence-source">Korea Disease Control Agency</span>
+            <span>·</span>
+            <span class="gatekeep-evidence-fnid">fn-501</span>
+            <span>·</span>
+            <span>2024</span>
+          </div>
+        </div>
+        <div class="gatekeep-evidence-item">
+          <div class="gatekeep-evidence-claim" data-lang="en">"<span class="em em-procedure">Epidemiological investigation</span> found no causal link between <span class="em em-resource">U.S. beef</span> and human disease in <span class="em em-place">Korea</span>."</div>
+          <div class="gatekeep-evidence-claim" data-lang="kr">"<span class="em em-procedure">역학 조사</span>에서 <span class="em em-resource">미국산 쇠고기</span>와 <span class="em em-place">국내</span> 인체 질환 사이 인과 관계 발견되지 않음."</div>
+          <div class="gatekeep-evidence-meta">
+            <span class="gatekeep-evidence-source">Korea National Institute of Health</span>
+            <span>·</span>
+            <span class="gatekeep-evidence-fnid">fn-502</span>
+          </div>
+        </div>
+        <div class="gatekeep-evidence-item">
+          <div class="gatekeep-evidence-claim" data-lang="en">"No documented cases of <span class="em em-problem">vCJD</span> transmission via <span class="em em-resource">processed food products</span>."</div>
+          <div class="gatekeep-evidence-claim" data-lang="kr">"<span class="em em-resource">가공식품</span>을 통한 <span class="em em-problem">vCJD</span> 전파 사례 보고된 바 없음."</div>
+          <div class="gatekeep-evidence-meta">
+            <span class="gatekeep-evidence-source">World Health Organization</span>
+            <span>·</span>
+            <span class="gatekeep-evidence-fnid">fn-503</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="gatekeep-conditions">
+        <div class="gatekeep-conditions-title" data-lang="en">Why this warning</div>
+        <div class="gatekeep-conditions-title" data-lang="kr">경고 발동 사유</div>
+        <ul data-lang-block="en">
+          <li>3 existing facts directly contradict this claim</li>
+          <li>Counter-evidence sources (KDCA, KNIH, WHO) are more authoritative than the source</li>
+          <li>Counter-evidence is as recent or more recent than this claim</li>
+        </ul>
+        <ul data-lang-block="kr">
+          <li>3건의 기존 사실이 이 주장과 직접 충돌</li>
+          <li>반대 증거 출처 (질병청, 보건연구원, WHO)가 출처보다 권위 있음</li>
+          <li>반대 증거가 동등하거나 더 최근의 검증</li>
+        </ul>
+      </div>
+    </div>
+    
+    <div class="gatekeep-footer">
+      <button class="gatekeep-btn primary">
+        <span data-lang="en">Cancel save</span>
+        <span data-lang="kr">저장 취소</span>
+      </button>
+      <button class="gatekeep-btn override">
+        <span data-lang="en">Save anyway</span>
+        <span data-lang="kr">그래도 저장</span>
+      </button>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">When does Gatekeeping warn?</h4>
+    <h4 data-lang-block="kr">언제 Gatekeeping이 경고하나</h4>
+    <p data-lang-block="en">Only when ALL three conditions are met:</p>
+    <p data-lang-block="kr">다음 세 조건이 모두 충족될 때만:</p>
+    <ul data-lang-block="en">
+      <li>Multiple existing facts (≥2) contradict the new claim</li>
+      <li>The new claim's source is weaker than counter-evidence sources</li>
+      <li>Counter-evidence is at least as recent as the new claim</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>여러 기존 사실 (2건 이상)이 새 주장과 충돌</li>
+      <li>새 주장의 출처가 반대 증거 출처보다 약함</li>
+      <li>반대 증거가 새 주장만큼 또는 더 최근</li>
+    </ul>
+    <p data-lang-block="en">Conservative threshold — most contradictions go to the Contradiction Queue (S-4) for normal review. Gatekeeping only triggers on cases that look like potential misinformation or strongly debunked claims.</p>
+    <p data-lang-block="kr">보수적 임계값 — 대부분의 모순은 Contradiction Queue (S-4)로 가서 일반 검토. Gatekeeping은 가능한 가짜 정보나 강하게 반박된 주장 케이스에만 발동.</p>
+    
+    <h4 data-lang-block="en">Warn, never block</h4>
+    <h4 data-lang-block="kr">경고만, 차단 없음</h4>
+    <p data-lang-block="en">Lucid does not block saves. The user can always override. If they do, the saved fact is marked <code>override_warning: true</code> in metadata, and is visually distinct in the graph (yellow border). This preserves user autonomy while maintaining transparency.</p>
+    <p data-lang-block="kr">Lucid는 저장을 차단하지 않습니다. 사용자는 언제든 강제 저장 가능. 강제 저장한 사실은 메타데이터에 <code>override_warning: true</code>로 표시되고, 그래프에서 시각적으로 구분됨 (노란 테두리). 사용자 자율성을 유지하면서 투명성 보장.</p>
+    
+    <h4 data-lang-block="en">Beta scope — self-graph only</h4>
+    <h4 data-lang-block="kr">베타 범위 — 자기 그래프만</h4>
+    <p data-lang-block="en">In beta, Gatekeeping compares only against the user's own validated facts. Phase 1 will add comparison against followed experts' graphs. Phase 2 may add external fact-check databases. This keeps the user in control of what counts as authoritative.</p>
+    <p data-lang-block="kr">베타에서는 사용자 자신의 검증된 사실만 비교. Phase 1에서는 팔로우한 전문가의 그래프 비교 추가. Phase 2에서는 외부 팩트체크 DB 추가 가능. 사용자가 권위의 기준을 통제하도록 유지.</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+  document.querySelectorAll('.screen-nav button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const screenId = btn.dataset.screen;
+      document.querySelectorAll('.screen-nav button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById('screen-' + screenId).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+  
+  document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lang = btn.dataset.langBtn;
+      document.querySelectorAll('[data-lang-btn]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.body.classList.remove('lang-en', 'lang-kr');
+      document.body.classList.add('lang-' + lang);
+    });
+  });
+  
+  document.querySelectorAll('.panel-filter-pill').forEach(p => {
+    p.addEventListener('click', () => {
+      p.parentElement.querySelectorAll('.panel-filter-pill').forEach(x => x.classList.remove('active'));
+      p.classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>

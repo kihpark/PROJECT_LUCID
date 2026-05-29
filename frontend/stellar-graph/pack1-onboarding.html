@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lucid Wireframes — Pack 1: Onboarding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Pretendard:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-base: #0a0a0a; --bg-elevated: #141414; --bg-card: #1a1a1a; --bg-hover: #242424;
+    --border-subtle: #2a2a2a; --border-medium: #3a3a3a;
+    --text-primary: #f5f5f5; --text-secondary: #a0a0a0; --text-tertiary: #707070;
+    --accent-warm: #ffd966; --accent-cool: #6db4f5;
+    --success: #4ecdc4; --warning: #ffd966; --danger: #ff6b6b;
+    --font-sans: 'Inter', 'Pretendard', sans-serif;
+    --font-kr: 'Pretendard', 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  body { font-family: var(--font-sans); background: var(--bg-base); color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased; line-height: 1.5; }
+  body.lang-kr { font-family: var(--font-kr); }
+  
+  .top-bar { position: fixed; top: 0; left: 0; right: 0; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+  .brand { font-weight: 600; font-size: 16px; color: var(--accent-warm); }
+  .brand-tag { font-size: 11px; color: var(--text-tertiary); margin-left: 8px; font-family: var(--font-mono); }
+  .controls { display: flex; align-items: center; gap: 16px; }
+  .lang-toggle { display: flex; background: var(--bg-card); border-radius: 4px; padding: 2px; border: 1px solid var(--border-subtle); }
+  .lang-toggle button { background: transparent; border: none; color: var(--text-secondary); padding: 4px 10px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); border-radius: 3px; }
+  .lang-toggle button.active { background: var(--accent-warm); color: var(--bg-base); }
+  .screen-nav { display: flex; gap: 4px; }
+  .screen-nav button { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 6px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); }
+  .screen-nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .screen-nav button.active { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  
+  .main { margin-top: 60px; padding: 32px; min-height: calc(100vh - 60px); }
+  .screen { display: none; max-width: 1200px; margin: 0 auto; }
+  .screen.active { display: block; }
+  .screen-header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
+  .screen-id { font-family: var(--font-mono); font-size: 11px; color: var(--accent-warm); letter-spacing: 0.1em; text-transform: uppercase; }
+  .screen-title { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .screen-desc { color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+  
+  .screen-doc { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 20px; margin-top: 32px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .screen-doc h4 { color: var(--text-primary); font-size: 14px; margin-bottom: 8px; margin-top: 12px; }
+  .screen-doc h4:first-child { margin-top: 0; }
+  .screen-doc ul { padding-left: 20px; margin-bottom: 8px; }
+  .screen-doc code { font-family: var(--font-mono); background: var(--bg-card); padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--accent-warm); }
+  
+  /* ====================
+     O-1: Landing Page
+  ==================== */
+  
+  .landing-frame { background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); position: relative; }
+  
+  .landing-hero { padding: 100px 60px 80px; background: radial-gradient(ellipse at 50% 0%, #18181f 0%, #0a0a0a 60%); position: relative; text-align: center; overflow: hidden; }
+  
+  /* Decorative star field background for hero */
+  .hero-stars { position: absolute; inset: 0; pointer-events: none; opacity: 0.4; }
+  .hero-stars circle { fill: #ffffff; }
+  
+  .landing-nav { position: absolute; top: 0; left: 0; right: 0; padding: 20px 40px; display: flex; align-items: center; justify-content: space-between; z-index: 5; }
+  .landing-logo { color: var(--accent-warm); font-weight: 600; font-size: 20px; }
+  .landing-nav-links { display: flex; gap: 28px; align-items: center; }
+  .landing-nav-link { font-size: 13px; color: var(--text-secondary); cursor: pointer; }
+  .landing-nav-link:hover { color: var(--text-primary); }
+  
+  .hero-eyebrow { font-family: var(--font-mono); font-size: 11px; color: var(--accent-warm); text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 24px; position: relative; z-index: 2; }
+  
+  .hero-headline { font-size: 56px; font-weight: 600; line-height: 1.1; color: var(--text-primary); margin-bottom: 24px; position: relative; z-index: 2; max-width: 880px; margin-left: auto; margin-right: auto; letter-spacing: -0.02em; }
+  
+  .hero-headline em { color: var(--accent-warm); font-style: normal; font-weight: 600; }
+  
+  .hero-subhead { font-size: 18px; color: var(--text-secondary); max-width: 640px; margin: 0 auto 36px; position: relative; z-index: 2; line-height: 1.55; }
+  
+  .hero-cta-row { display: flex; gap: 12px; justify-content: center; position: relative; z-index: 2; margin-bottom: 32px; }
+  .hero-btn { padding: 14px 28px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: var(--font-sans); }
+  .hero-btn.primary { background: var(--accent-warm); color: var(--bg-base); border: 1px solid var(--accent-warm); }
+  .hero-btn.primary:hover { background: #ffe488; }
+  .hero-btn.ghost { background: transparent; color: var(--text-primary); border: 1px solid var(--border-medium); }
+  .hero-btn.ghost:hover { border-color: var(--accent-warm); color: var(--accent-warm); }
+  
+  .hero-tagline { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); position: relative; z-index: 2; }
+  
+  /* Three pillars section */
+  .pillars-section { padding: 80px 60px; background: var(--bg-base); border-top: 1px solid var(--border-subtle); }
+  .pillars-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; max-width: 1000px; margin: 0 auto; }
+  .pillar { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 28px 24px; }
+  .pillar-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 14px; }
+  .pillar-icon.save { background: rgba(255, 217, 102, 0.12); color: var(--accent-warm); border: 1px solid rgba(255, 217, 102, 0.25); }
+  .pillar-icon.decide { background: rgba(78, 205, 196, 0.12); color: var(--success); border: 1px solid rgba(78, 205, 196, 0.25); }
+  .pillar-icon.surface { background: rgba(109, 180, 245, 0.12); color: var(--accent-cool); border: 1px solid rgba(109, 180, 245, 0.25); }
+  
+  .pillar-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+  .pillar-text { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+  
+  /* Compare section */
+  .compare-section { padding: 80px 60px; background: var(--bg-elevated); border-top: 1px solid var(--border-subtle); }
+  .compare-title { text-align: center; font-size: 28px; font-weight: 600; margin-bottom: 12px; max-width: 700px; margin-left: auto; margin-right: auto; }
+  .compare-subtitle { text-align: center; font-size: 14px; color: var(--text-secondary); margin-bottom: 40px; max-width: 580px; margin-left: auto; margin-right: auto; }
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 920px; margin: 0 auto; }
+  .compare-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 28px; }
+  .compare-card.lucid { border: 1px solid rgba(255, 217, 102, 0.3); background: linear-gradient(180deg, rgba(255, 217, 102, 0.03) 0%, var(--bg-card) 60%); }
+  .compare-card-eyebrow { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-tertiary); margin-bottom: 8px; }
+  .compare-card.lucid .compare-card-eyebrow { color: var(--accent-warm); }
+  .compare-card-quote { font-size: 16px; color: var(--text-primary); line-height: 1.55; margin-bottom: 14px; font-weight: 400; }
+  .compare-card-quote em { color: var(--text-secondary); font-style: normal; }
+  .compare-card-note { font-size: 12px; color: var(--text-tertiary); line-height: 1.55; }
+  
+  /* Final CTA */
+  .final-cta { padding: 80px 60px; text-align: center; background: var(--bg-base); border-top: 1px solid var(--border-subtle); }
+  
+  /* Philosophy strip — Confucius 知之為知之 */
+  .philosophy-strip { padding: 56px 60px; background: var(--bg-base); border-top: 1px solid var(--border-subtle); text-align: center; }
+  .philosophy-hanja { font-family: 'STSong', 'Songti SC', 'Apple SD Gothic Neo', serif; font-size: 32px; color: var(--text-primary); letter-spacing: 0.25em; margin-bottom: 16px; font-weight: 400; }
+  .philosophy-pronunciation { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.15em; margin-bottom: 20px; text-transform: uppercase; }
+  .philosophy-translation { font-size: 14px; color: var(--text-secondary); line-height: 1.7; max-width: 540px; margin: 0 auto 12px; font-style: italic; }
+  .philosophy-attribution { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.1em; }
+  .final-cta-title { font-size: 32px; font-weight: 600; margin-bottom: 14px; max-width: 640px; margin-left: auto; margin-right: auto; line-height: 1.25; }
+  .final-cta-sub { font-size: 14px; color: var(--text-secondary); margin-bottom: 28px; }
+  
+  .landing-footer { padding: 28px 40px; background: var(--bg-elevated); border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  
+  /* ====================
+     O-2: Sign Up + Archetype Survey
+  ==================== */
+  
+  .auth-frame { max-width: 480px; margin: 40px auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .auth-header { padding: 32px 36px 16px; }
+  .auth-logo { color: var(--accent-warm); font-weight: 600; font-size: 22px; margin-bottom: 24px; }
+  .auth-stepbar { display: flex; gap: 6px; margin-bottom: 20px; }
+  .step-pip { flex: 1; height: 3px; background: var(--border-subtle); border-radius: 2px; }
+  .step-pip.done { background: var(--success); }
+  .step-pip.active { background: var(--accent-warm); }
+  .auth-step-label { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .auth-title { font-size: 22px; font-weight: 600; margin-bottom: 6px; line-height: 1.3; }
+  .auth-subtitle { font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; line-height: 1.5; }
+  
+  .auth-body { padding: 0 36px 28px; }
+  
+  .field-group { margin-bottom: 16px; }
+  .field-label { display: block; font-size: 11px; color: var(--text-tertiary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); }
+  .field-input { width: 100%; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px; color: var(--text-primary); font-family: inherit; font-size: 14px; }
+  .field-input:focus { outline: none; border-color: var(--accent-warm); }
+  
+  .field-divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; }
+  .field-divider::before, .field-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-subtle); }
+  .field-divider-text { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  
+  .social-btn { width: 100%; background: var(--bg-elevated); border: 1px solid var(--border-subtle); color: var(--text-primary); padding: 11px; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px; }
+  .social-btn:hover { background: var(--bg-hover); }
+  
+  .primary-full { width: 100%; background: var(--accent-warm); color: var(--bg-base); border: none; padding: 12px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; font-family: inherit; }
+  .primary-full:hover { background: #ffe488; }
+  
+  .ghost-full { width: 100%; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-medium); padding: 12px; border-radius: 6px; font-size: 13px; cursor: pointer; margin-top: 8px; font-family: inherit; }
+  .ghost-full:hover { border-color: var(--accent-warm); color: var(--accent-warm); }
+  
+  .auth-foot-text { text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 16px; }
+  .auth-foot-text a { color: var(--accent-cool); cursor: pointer; }
+  
+  /* Survey */
+  .survey-q { margin-bottom: 22px; }
+  .survey-q-label { display: block; font-size: 13px; color: var(--text-primary); margin-bottom: 10px; font-weight: 500; }
+  .survey-q-help { font-size: 11px; color: var(--text-tertiary); margin-bottom: 12px; }
+  .survey-options { display: flex; flex-direction: column; gap: 8px; }
+  .survey-option { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 11px 14px; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: border-color 0.15s; }
+  .survey-option:hover { border-color: var(--border-medium); }
+  .survey-option.selected { border-color: var(--accent-warm); background: rgba(255, 217, 102, 0.05); }
+  .survey-radio { width: 16px; height: 16px; border: 2px solid var(--border-medium); border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .survey-option.selected .survey-radio { border-color: var(--accent-warm); }
+  .survey-option.selected .survey-radio::after { content: ''; width: 7px; height: 7px; background: var(--accent-warm); border-radius: 50%; }
+  .survey-option-text { font-size: 13px; color: var(--text-primary); flex: 1; }
+  .survey-option-meta { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  
+  .survey-skip-note { font-size: 11px; color: var(--text-tertiary); margin-top: 12px; text-align: center; }
+  
+  /* ====================
+     O-3: First Save Tutorial
+  ==================== */
+  
+  .tutorial-frame { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); display: flex; min-height: 640px; }
+  
+  .tutorial-side { width: 360px; background: var(--bg-card); border-right: 1px solid var(--border-subtle); padding: 36px 32px; display: flex; flex-direction: column; }
+  
+  .tutorial-step-pips { display: flex; gap: 6px; margin-bottom: 28px; }
+  .tutorial-pip { flex: 1; height: 3px; background: var(--border-subtle); border-radius: 2px; }
+  .tutorial-pip.done { background: var(--success); }
+  .tutorial-pip.active { background: var(--accent-warm); }
+  
+  .tutorial-step-label { font-family: var(--font-mono); font-size: 10px; color: var(--accent-warm); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+  .tutorial-title { font-size: 22px; font-weight: 600; margin-bottom: 10px; line-height: 1.3; }
+  .tutorial-text { font-size: 13px; color: var(--text-secondary); line-height: 1.65; margin-bottom: 18px; }
+  
+  .tutorial-checklist { margin-bottom: 24px; }
+  .tutorial-check-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+  .tutorial-check { width: 16px; height: 16px; border: 1px solid var(--border-medium); border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+  .tutorial-check.done { background: var(--success); border-color: var(--success); color: var(--bg-base); font-size: 11px; font-weight: 700; }
+  
+  .tutorial-tip { background: rgba(109, 180, 245, 0.06); border: 1px solid rgba(109, 180, 245, 0.2); border-radius: 6px; padding: 12px 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.55; margin-bottom: 20px; }
+  .tutorial-tip strong { color: var(--accent-cool); }
+  
+  .tutorial-actions { margin-top: auto; display: flex; gap: 8px; }
+  .tut-btn { padding: 10px 18px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .tut-btn.primary { background: var(--accent-warm); color: var(--bg-base); border: 1px solid var(--accent-warm); font-weight: 500; flex: 1; }
+  .tut-btn.ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-medium); }
+  .tut-btn.ghost:hover { color: var(--text-primary); border-color: var(--border-medium); }
+  
+  .tutorial-main { flex: 1; padding: 36px; background: radial-gradient(ellipse at 50% 30%, #18181f 0%, #0a0a0a 60%); display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+  
+  .browser-demo { background: #2a2a2a; border-radius: 8px; width: 100%; max-width: 540px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); overflow: hidden; }
+  .browser-chrome { background: #1a1a1a; padding: 8px 10px; display: flex; align-items: center; gap: 6px; }
+  .browser-dots { display: flex; gap: 5px; }
+  .browser-dots span { width: 10px; height: 10px; border-radius: 50%; }
+  .browser-dots span:nth-child(1) { background: #ff5f56; }
+  .browser-dots span:nth-child(2) { background: #ffbd2e; }
+  .browser-dots span:nth-child(3) { background: #27c93f; }
+  .browser-url { flex: 1; background: #2a2a2a; padding: 3px 10px; border-radius: 3px; color: var(--text-secondary); font-size: 11px; font-family: var(--font-mono); }
+  .browser-ext { width: 22px; height: 22px; background: var(--bg-elevated); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--accent-warm); font-weight: 700; font-family: var(--font-mono); border: 1px solid var(--border-medium); }
+  
+  .demo-page { background: white; padding: 24px 28px; color: #333; min-height: 280px; }
+  .demo-page h2 { font-size: 18px; margin-bottom: 12px; font-weight: 700; }
+  .demo-page p { font-size: 13px; line-height: 1.65; margin-bottom: 12px; color: #444; }
+  
+  .demo-pointer { position: absolute; pointer-events: none; }
+  .demo-pointer-circle { width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 217, 102, 0.2); border: 2px solid var(--accent-warm); animation: pulse-ring 1.8s ease-in-out infinite; }
+  @keyframes pulse-ring {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.5; }
+  }
+  
+  .demo-context-menu { position: absolute; background: white; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); min-width: 200px; padding: 4px 0; }
+  .demo-cm-item { padding: 7px 14px; font-size: 12px; color: #333; display: flex; align-items: center; gap: 8px; }
+  .demo-cm-item.hi { background: #fff8e1; color: #a06000; font-weight: 500; }
+  .demo-cm-sep { height: 1px; background: #e0e0e0; margin: 3px 0; }
+  .demo-cm-short { margin-left: auto; font-size: 10px; color: #999; font-family: var(--font-mono); }
+  
+  /* ====================
+     O-4: Initial Settings (recommended defaults)
+  ==================== */
+  
+  .setup-frame { max-width: 720px; margin: 32px auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .setup-header { padding: 32px 40px 24px; border-bottom: 1px solid var(--border-subtle); }
+  .setup-logo { color: var(--accent-warm); font-weight: 600; font-size: 18px; margin-bottom: 20px; }
+  .setup-title { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+  .setup-subtitle { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+  
+  .setup-body { padding: 24px 40px; }
+  .setup-section { margin-bottom: 26px; }
+  .setup-section-title { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+  
+  .setup-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border-subtle); }
+  .setup-row:last-child { border-bottom: none; }
+  .setup-row-info { flex: 1; padding-right: 16px; }
+  .setup-row-label { font-size: 13px; color: var(--text-primary); margin-bottom: 2px; }
+  .setup-row-help { font-size: 11px; color: var(--text-tertiary); line-height: 1.5; }
+  
+  .toggle { position: relative; width: 36px; height: 20px; background: var(--border-medium); border-radius: 10px; cursor: pointer; flex-shrink: 0; }
+  .toggle.on { background: var(--accent-warm); }
+  .toggle::after { content: ''; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: white; top: 2px; left: 2px; transition: left 0.2s; }
+  .toggle.on::after { left: 18px; }
+  
+  .seg-control { display: flex; background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 2px; flex-shrink: 0; }
+  .seg-btn { background: transparent; border: none; color: var(--text-secondary); padding: 5px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); }
+  .seg-btn.active { background: var(--accent-warm); color: var(--bg-base); font-weight: 500; }
+  
+  .setup-trusted-suggestions { background: rgba(78, 205, 196, 0.05); border: 1px solid rgba(78, 205, 196, 0.2); border-radius: 6px; padding: 14px 16px; margin-top: 8px; }
+  .setup-suggestion-title { font-size: 12px; color: var(--success); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+  .setup-suggestion-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .setup-suggestion-chip { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-primary); padding: 5px 11px; border-radius: 14px; font-size: 12px; font-family: var(--font-mono); cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .setup-suggestion-chip:hover { border-color: var(--accent-warm); }
+  .setup-suggestion-chip .x { color: var(--text-tertiary); font-size: 11px; }
+  
+  .setup-footer { padding: 20px 40px; background: var(--bg-elevated); border-top: 1px solid var(--border-subtle); display: flex; gap: 10px; justify-content: space-between; align-items: center; }
+  .setup-skip-text { font-size: 11px; color: var(--text-tertiary); }
+  .setup-actions { display: flex; gap: 10px; }
+  
+  [data-lang] { display: none; }
+  body.lang-en [data-lang="en"] { display: inline; }
+  body.lang-en [data-lang-block="en"] { display: block; }
+  body.lang-en li[data-lang="en"] { display: list-item; }
+  body.lang-kr [data-lang="kr"] { display: inline; }
+  body.lang-kr [data-lang-block="kr"] { display: block; }
+  body.lang-kr li[data-lang="kr"] { display: list-item; }
+</style>
+</head>
+<body class="lang-en">
+
+<div class="top-bar">
+  <div>
+    <span class="brand">Lucid</span>
+    <span class="brand-tag">WIREFRAMES // PACK 1: ONBOARDING</span>
+  </div>
+  <div class="controls">
+    <div class="screen-nav">
+      <button class="active" data-screen="o1">O-1</button>
+      <button data-screen="o2">O-2</button>
+      <button data-screen="o3">O-3</button>
+      <button data-screen="o4">O-4</button>
+    </div>
+    <div class="lang-toggle">
+      <button class="active" data-lang-btn="en">EN</button>
+      <button data-lang-btn="kr">KR</button>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- O-1: Landing Page -->
+<div class="screen active" id="screen-o1">
+  <div class="screen-header">
+    <div class="screen-id">O-1</div>
+    <div class="screen-title">
+      <span data-lang="en">Landing — First Impression</span>
+      <span data-lang="kr">랜딩 — 첫인상</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Where prospects arrive. The headline carries the whole product in one breath. Then three pillars, then the contrast against general LLMs, then CTA.</span>
+      <span data-lang="kr">잠재 사용자가 도착하는 곳. 헤드라인이 제품 전체를 한 호흡에 전달. 그 다음 3개 기둥, 그 다음 일반 LLM과의 대비, 그 다음 CTA.</span>
+    </div>
+  </div>
+  
+  <div class="landing-frame">
+    <!-- Hero -->
+    <div class="landing-hero">
+      <div class="landing-nav">
+        <div class="landing-logo">Lucid</div>
+        <div class="landing-nav-links">
+          <span class="landing-nav-link" data-lang="en">Product</span>
+          <span class="landing-nav-link" data-lang="kr">제품</span>
+          <span class="landing-nav-link" data-lang="en">Philosophy</span>
+          <span class="landing-nav-link" data-lang="kr">철학</span>
+          <span class="landing-nav-link" data-lang="en">Pricing</span>
+          <span class="landing-nav-link" data-lang="kr">가격</span>
+          <span class="landing-nav-link" data-lang="en">Sign in</span>
+          <span class="landing-nav-link" data-lang="kr">로그인</span>
+        </div>
+      </div>
+      
+      <svg class="hero-stars" viewBox="0 0 1000 400" preserveAspectRatio="none">
+        <circle cx="80" cy="60" r="0.8"/>
+        <circle cx="180" cy="120" r="0.6"/>
+        <circle cx="300" cy="40" r="1"/>
+        <circle cx="420" cy="200" r="0.7"/>
+        <circle cx="550" cy="80" r="0.9"/>
+        <circle cx="680" cy="160" r="0.6"/>
+        <circle cx="820" cy="50" r="0.8"/>
+        <circle cx="920" cy="180" r="0.5"/>
+        <circle cx="120" cy="280" r="0.7"/>
+        <circle cx="280" cy="340" r="0.6"/>
+        <circle cx="450" cy="320" r="0.9"/>
+        <circle cx="620" cy="290" r="0.5"/>
+        <circle cx="780" cy="350" r="0.7"/>
+        <circle cx="880" cy="270" r="0.6"/>
+        <circle cx="40" cy="220" r="0.5"/>
+        <circle cx="960" cy="100" r="0.8"/>
+        <circle cx="200" cy="200" r="0.5"/>
+        <circle cx="720" cy="240" r="0.6"/>
+      </svg>
+      
+      <div class="hero-eyebrow">
+        <span data-lang="en">Verified second brain · Now in beta</span>
+        <span data-lang="kr">검증된 두뇌 · 베타 진행 중</span>
+      </div>
+      <h1 class="hero-headline">
+        <span data-lang-block="en">Own what you <em>know</em>.</span>
+        <span data-lang-block="kr"><em>아는 것</em>을 소유하세요.</span>
+      </h1>
+      <p class="hero-subhead">
+        <span data-lang="en">Lucid saves your reading to a personal knowledge graph — verified, searchable, yours.</span>
+        <span data-lang="kr">당신이 읽은 것을 Lucid가 지식 그래프로 만듭니다. 검증되고 검색이 가능하면 이 지식은 온전히 당신의 것이 됩니다.</span>
+      </p>
+      <div class="hero-cta-row">
+        <button class="hero-btn primary">
+          <span data-lang="en">Join the beta</span>
+          <span data-lang="kr">베타 참여</span>
+        </button>
+        <button class="hero-btn ghost">
+          <span data-lang="en">See how it works</span>
+          <span data-lang="kr">작동 방식 보기</span>
+        </button>
+      </div>
+      <div class="hero-tagline">
+        <span data-lang="en">Free during beta · No credit card · Your data stays yours</span>
+        <span data-lang="kr">베타 무료 · 신용카드 불요 · 데이터는 사용자 소유</span>
+      </div>
+    </div>
+    
+    <!-- Three pillars -->
+    <div class="pillars-section">
+      <div class="pillars-grid">
+        <div class="pillar">
+          <div class="pillar-icon save">📥</div>
+          <div class="pillar-title">
+            <span data-lang="en">Save anything</span>
+            <span data-lang="kr">무엇이든 저장</span>
+          </div>
+          <div class="pillar-text">
+            <span data-lang="en">Right-click any web page. Share from any mobile app. Lucid analyzes in the background and extracts the factual claims.</span>
+            <span data-lang="kr">웹 페이지 우클릭, 모바일 앱에서 공유. Lucid가 백그라운드에서 분석하고 사실 주장을 추출합니다.</span>
+          </div>
+        </div>
+        <div class="pillar">
+          <div class="pillar-icon decide">✓</div>
+          <div class="pillar-title">
+            <span data-lang="en">Decide what counts</span>
+            <span data-lang="kr">받아들일 것을 결정</span>
+          </div>
+          <div class="pillar-text">
+            <span data-lang="en">Review extracted facts. Accept, edit, or reject. Trusted sources can auto-accept. Your graph contains only what you've validated.</span>
+            <span data-lang="kr">추출된 사실 검토. 승인, 수정, 폐기. 신뢰 출처는 자동 수락. 그래프에는 사용자가 검증한 것만.</span>
+          </div>
+        </div>
+        <div class="pillar">
+          <div class="pillar-icon surface">⌬</div>
+          <div class="pillar-title">
+            <span data-lang="en">Surface when needed</span>
+            <span data-lang="kr">필요할 때 떠오름</span>
+          </div>
+          <div class="pillar-text">
+            <span data-lang="en">Write an email — relevant facts surface. Ask a question — only validated answers, with citations. Conflicts in your knowledge get flagged.</span>
+            <span data-lang="kr">이메일 작성 — 관련 사실 자동 등장. 질문 — 검증된 답변에 인용 첨부. 지식 내 충돌은 자동 플래그.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Compare -->
+    <div class="compare-section">
+      <div class="compare-title">
+        <span data-lang="en">Same question. Very different answer.</span>
+        <span data-lang="kr">같은 질문, 매우 다른 답변.</span>
+      </div>
+      <div class="compare-subtitle">
+        <span data-lang="en">General chatbots speak from training data. Lucid speaks from what you've personally validated.</span>
+        <span data-lang="kr">일반 챗봇은 학습 데이터에서 답합니다. Lucid는 사용자가 직접 검증한 것에서 답합니다.</span>
+      </div>
+      <div class="compare-grid">
+        <div class="compare-card">
+          <div class="compare-card-eyebrow">
+            <span data-lang="en">General LLM</span>
+            <span data-lang="kr">일반 LLM</span>
+          </div>
+          <div class="compare-card-quote">
+            <span data-lang="en">"Fasted cardio can be effective for fat loss because <em>your body taps into fat stores when glycogen is low</em>. Some studies support it…"</span>
+            <span data-lang="kr">"공복 유산소는 <em>글리코겐이 낮을 때 지방 저장소를 활용하기 때문에</em> 지방 감량에 효과적일 수 있습니다. 일부 연구는…"</span>
+          </div>
+          <div class="compare-card-note">
+            <span data-lang="en">Confident-sounding answer averaged from training data. No way to know which studies, what your views are, or whether it's stale.</span>
+            <span data-lang="kr">학습 데이터에서 평균낸 자신감 있어 보이는 답변. 어떤 연구인지, 당신의 견해와 맞는지, 오래된 정보인지 알 수 없음.</span>
+          </div>
+        </div>
+        <div class="compare-card lucid">
+          <div class="compare-card-eyebrow">Lucid</div>
+          <div class="compare-card-quote">
+            <span data-lang="en">"<em>According to your knowledge graph,</em> the claim that fasted cardio is superior for fat loss is not supported by your validated facts. You have fn-410 (no 24h difference) and fn-411 (post-meal exercise reduces muscle loss)."</span>
+            <span data-lang="kr">"<em>그래프 기준으로,</em> 공복 유산소가 지방 감량에 우월하다는 주장은 검증된 사실로 뒷받침되지 않습니다. fn-410(24시간 차이 없음)과 fn-411(식후 운동이 근손실 감소)이 있습니다."</span>
+          </div>
+          <div class="compare-card-note">
+            <span data-lang="en">Anchored in your own validated evidence. Every claim cites a fact. If there's nothing, Lucid says so honestly.</span>
+            <span data-lang="kr">사용자 자신의 검증된 증거에 정착. 모든 주장에 사실 인용. 없으면 정직하게 모른다고 답.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Final CTA -->
+    <div class="final-cta">
+      <div class="final-cta-title">
+        <span data-lang="en">Start owning what you know.</span>
+        <span data-lang="kr">아는 것을 소유하기 시작하세요.</span>
+      </div>
+      <div class="final-cta-sub">
+        <span data-lang="en">Beta launching now. 30 spots remaining.</span>
+        <span data-lang="kr">베타 진행 중. 30석 남음.</span>
+      </div>
+      <button class="hero-btn primary">
+        <span data-lang="en">Join the beta →</span>
+        <span data-lang="kr">베타 참여 →</span>
+      </button>
+    </div>
+    
+    <!-- Philosophy strip — 知之為知之 -->
+    <div class="philosophy-strip">
+      <div class="philosophy-hanja">知之為知之 不知為不知 是知也</div>
+      <div class="philosophy-pronunciation">Zhī zhī wéi zhī zhī · bù zhī wéi bù zhī · shì zhī yě</div>
+      <div class="philosophy-translation">
+        <span data-lang="en">"To know what you know, and to know what you do not know — this is true knowledge."</span>
+        <span data-lang="kr">"아는 것을 안다고 하고, 모르는 것을 모른다고 하는 것 — 이것이 진정한 앎이다."</span>
+      </div>
+      <div class="philosophy-attribution">Confucius 孔子 · 論語 為政 — c. 500 BCE</div>
+    </div>
+    
+    <div class="landing-footer">
+      <div>© 2026 Lucid</div>
+      <div style="display: flex; gap: 20px">
+        <span data-lang="en">Privacy</span>
+        <span data-lang="kr">개인정보</span>
+        <span data-lang="en">Terms</span>
+        <span data-lang="kr">약관</span>
+        <span data-lang="en">Contact</span>
+        <span data-lang="kr">문의</span>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Headline does one job</h4>
+    <h4 data-lang-block="kr">헤드라인은 한 가지 일을 한다</h4>
+    <p data-lang-block="en">"Own what you know" — three words, imperative, double meaning (possess + acknowledge). Sub-headline carries the product mechanics with three adjectives compressed by commas: verified, searchable, yours. The final "yours" echoes the headline.</p>
+    <p data-lang-block="kr">"아는 것을 소유하세요" — 3단어, 명령형, 이중 의미 (소유 + 인정). 부제는 제품 메커니즘을 압축해 전달. 마지막 "온전히 당신의 것"이 헤드라인을 다시 반향.</p>
+    
+    <h4 data-lang-block="en">Philosophy strip — Confucius as deep DNA</h4>
+    <h4 data-lang-block="kr">철학 띠 — 공자, 깊은 DNA</h4>
+    <p data-lang-block="en">Below the CTA, before the footer, a quiet strip carries the philosophical root: 知之為知之 不知為不知 是知也. Beta users skip past it; deep readers see the 2,500-year-old origin of Lucid's identity protocol. "As far as I know" is the code implementation of 不知為不知. This is the philosophical bedrock — not marketing copy, but the founding question of the product.</p>
+    <p data-lang-block="kr">CTA 아래, footer 위에 조용한 띠로 철학적 뿌리: 知之為知之 不知為不知 是知也. 베타 사용자는 그냥 지나가도 되고, 깊이 읽는 사람은 Lucid 정체성 규약의 2,500년 전 기원을 본다. "As far as I know" 는 不知為不知의 코드 구현. 마케팅 카피가 아니라 제품의 창립 질문.</p>
+    
+    <h4 data-lang-block="en">Three pillars = CSVS loop, simplified</h4>
+    <h4 data-lang-block="kr">3 기둥 = CSVS 루프, 단순화</h4>
+    <p data-lang-block="en">Save / Decide / Surface — the four stages of CSVS (Capture, Structure, Validate, Surface) collapsed to three user-facing actions. Structure happens invisibly. The user only sees their three moves: save it, decide on it, summon it.</p>
+    <p data-lang-block="kr">Save / Decide / Surface — CSVS 4단계 (Capture, Structure, Validate, Surface)를 사용자가 보는 3가지 행동으로 압축. Structure는 보이지 않게. 사용자는 자기 3개 행동만 봄: 저장, 결정, 소환.</p>
+    
+    <h4 data-lang-block="en">Direct comparison without naming competitors</h4>
+    <h4 data-lang-block="kr">경쟁사 이름 없이 직접 대비</h4>
+    <p data-lang-block="en">"General LLM" vs Lucid, same question, side by side. Doesn't say ChatGPT or Claude by name. Lets the user infer. The Lucid answer demonstrates the identity protocol and citation behavior — they see the product in action before signing up.</p>
+    <p data-lang-block="kr">"일반 LLM" 대 Lucid, 같은 질문, 좌우. ChatGPT나 Claude를 이름으로 부르지 않음. 사용자가 추론. Lucid 답변은 정체성 규약과 인용 동작을 시연 — 가입 전에 제품을 실제로 봄.</p>
+    
+    <h4 data-lang-block="en">Scarcity in CTA — honest, not manufactured</h4>
+    <h4 data-lang-block="kr">CTA의 희소성 — 정직한, 조작 아닌</h4>
+    <p data-lang-block="en">"30 spots remaining" — beta is genuinely capped at 30-40 (per beta backlog wedge discovery strategy). The number updates as people join. Honest urgency, not fake scarcity.</p>
+    <p data-lang-block="kr">"30석 남음" — 베타는 실제로 30-40명 제한 (베타 백로그 wedge discovery 전략 기준). 가입에 따라 숫자 갱신. 정직한 긴급성, 가짜 희소성 아님.</p>
+  </div>
+</div>
+
+<!-- O-2: Sign Up + Archetype Survey -->
+<div class="screen" id="screen-o2">
+  <div class="screen-header">
+    <div class="screen-id">O-2</div>
+    <div class="screen-title">
+      <span data-lang="en">Archetype Survey — 5 quick questions</span>
+      <span data-lang="kr">Archetype 설문 — 5문항</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Step 1 (create account: email or Google) completes silently in seconds. The user lands on this Step 2 — a 5-question survey measuring the dimensions from beta backlog (consumption intensity, validation frequency, surface preference, domain diversity, device environment). Skippable, but framed as helping shape beta.</span>
+      <span data-lang="kr">1단계(이메일 또는 Google로 계정 생성)는 몇 초 만에 조용히 완료. 사용자는 이 2단계로 도착 — 베타 백로그의 5차원 (소비 강도, 검증 빈도, surface 선호, 도메인 다양성, 디바이스 환경)을 측정하는 5문항 설문. 건너뛰기 가능하지만 베타 형성에 도움 요청.</span>
+    </div>
+  </div>
+  
+  <div class="auth-frame">
+    <div class="auth-header">
+      <div class="auth-logo">Lucid</div>
+      <div class="auth-stepbar">
+        <div class="step-pip done"></div>
+        <div class="step-pip active"></div>
+        <div class="step-pip"></div>
+        <div class="step-pip"></div>
+      </div>
+      <div class="auth-step-label">
+        <span data-lang="en">Step 2 of 4 · About your habits</span>
+        <span data-lang="kr">2단계 / 4 · 습관에 대해</span>
+      </div>
+      <div class="auth-title">
+        <span data-lang="en">Help us shape the beta</span>
+        <span data-lang="kr">베타 형성에 도움을 주세요</span>
+      </div>
+      <div class="auth-subtitle">
+        <span data-lang="en">Five quick questions. Your answers help us understand who uses Lucid and how, so we can build the right things next.</span>
+        <span data-lang="kr">짧은 5문항. 응답은 누가 Lucid를 어떻게 쓰는지 이해해 다음에 적합한 것을 만드는 데 사용됩니다.</span>
+      </div>
+    </div>
+    
+    <div class="auth-body" style="max-height: 540px; overflow-y: auto;">
+      
+      <div class="survey-q">
+        <div class="survey-q-label">
+          <span data-lang="en">1. How much content do you save per week on average?</span>
+          <span data-lang="kr">1. 주 평균 얼마나 콘텐츠를 저장하시나요?</span>
+        </div>
+        <div class="survey-options">
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">A few items (5–10)</div>
+            <div class="survey-option-text" data-lang="kr">소수 (5–10개)</div>
+            <div class="survey-option-meta">light</div>
+          </div>
+          <div class="survey-option selected">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">A handful most days (20–50)</div>
+            <div class="survey-option-text" data-lang="kr">매일 몇 개씩 (20–50)</div>
+            <div class="survey-option-meta">moderate</div>
+          </div>
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Heavy reader (100+)</div>
+            <div class="survey-option-text" data-lang="kr">많이 (100+)</div>
+            <div class="survey-option-meta">heavy</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="survey-q">
+        <div class="survey-q-label">
+          <span data-lang="en">2. How do you prefer to handle saved items?</span>
+          <span data-lang="kr">2. 저장한 항목을 어떻게 처리하길 선호하나요?</span>
+        </div>
+        <div class="survey-options">
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Review each one carefully, right away</div>
+            <div class="survey-option-text" data-lang="kr">하나씩 신중히, 즉시</div>
+            <div class="survey-option-meta">careful</div>
+          </div>
+          <div class="survey-option selected">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Save now, review in batches later</div>
+            <div class="survey-option-text" data-lang="kr">일단 저장, 나중에 일괄 검토</div>
+            <div class="survey-option-meta">deferred</div>
+          </div>
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Mostly trust the source, skip review</div>
+            <div class="survey-option-text" data-lang="kr">대부분 출처 신뢰, 검토 생략</div>
+            <div class="survey-option-meta">trusting</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="survey-q">
+        <div class="survey-q-label">
+          <span data-lang="en">3. When would Lucid be most useful to you?</span>
+          <span data-lang="kr">3. Lucid가 가장 유용할 시점은?</span>
+        </div>
+        <div class="survey-options">
+          <div class="survey-option selected">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">While writing — surfacing facts I've saved</div>
+            <div class="survey-option-text" data-lang="kr">글 쓸 때 — 저장한 사실이 떠오를 때</div>
+            <div class="survey-option-meta">active</div>
+          </div>
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Asking questions — querying my own knowledge</div>
+            <div class="survey-option-text" data-lang="kr">질문할 때 — 내 지식 조회</div>
+            <div class="survey-option-meta">passive</div>
+          </div>
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Mostly as a structured personal archive</div>
+            <div class="survey-option-text" data-lang="kr">주로 구조화된 개인 아카이브로</div>
+            <div class="survey-option-meta">archive</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="survey-q">
+        <div class="survey-q-label">
+          <span data-lang="en">4. What topics do you typically save? (pick the closest)</span>
+          <span data-lang="kr">4. 주로 어떤 주제를 저장하나요? (가까운 쪽)</span>
+        </div>
+        <div class="survey-options">
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">One main area (e.g., my research field)</div>
+            <div class="survey-option-text" data-lang="kr">주력 영역 하나 (예: 내 연구 분야)</div>
+            <div class="survey-option-meta">narrow</div>
+          </div>
+          <div class="survey-option selected">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">A few related areas (work + interests)</div>
+            <div class="survey-option-text" data-lang="kr">2–3개 관련 영역 (업무 + 관심사)</div>
+            <div class="survey-option-meta">medium</div>
+          </div>
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Wide range, curious about many things</div>
+            <div class="survey-option-text" data-lang="kr">넓게, 많은 것에 호기심</div>
+            <div class="survey-option-meta">broad</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="survey-q">
+        <div class="survey-q-label">
+          <span data-lang="en">5. Where do you mostly consume content?</span>
+          <span data-lang="kr">5. 주로 어디서 콘텐츠를 소비하나요?</span>
+        </div>
+        <div class="survey-options">
+          <div class="survey-option selected">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Desktop / laptop browser</div>
+            <div class="survey-option-text" data-lang="kr">데스크탑 / 노트북 브라우저</div>
+            <div class="survey-option-meta">desktop</div>
+          </div>
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Phone / mobile apps</div>
+            <div class="survey-option-text" data-lang="kr">스마트폰 / 모바일 앱</div>
+            <div class="survey-option-meta">mobile</div>
+          </div>
+          <div class="survey-option">
+            <div class="survey-radio"></div>
+            <div class="survey-option-text" data-lang="en">Both equally</div>
+            <div class="survey-option-text" data-lang="kr">둘 다 비슷하게</div>
+            <div class="survey-option-meta">mixed</div>
+          </div>
+        </div>
+      </div>
+      
+      <button class="primary-full">
+        <span data-lang="en">Continue →</span>
+        <span data-lang="kr">계속 →</span>
+      </button>
+      <button class="ghost-full">
+        <span data-lang="en">Skip — I'll fill this out later</span>
+        <span data-lang="kr">건너뛰기 — 나중에 작성</span>
+      </button>
+      <div class="survey-skip-note">
+        <span data-lang="en">No data is shared with third parties. Used only to improve Lucid.</span>
+        <span data-lang="kr">제3자와 공유하지 않음. Lucid 개선에만 사용.</span>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">5 questions, 5 archetype dimensions</h4>
+    <h4 data-lang-block="kr">5문항, 5 archetype 차원</h4>
+    <p data-lang-block="en">Each question maps directly to one dimension from the beta backlog's wedge-discovery framework:</p>
+    <p data-lang-block="kr">각 문항은 베타 백로그의 wedge discovery 프레임워크 차원에 직접 매핑:</p>
+    <ul data-lang-block="en">
+      <li>Q1 — consumption intensity (light / moderate / heavy)</li>
+      <li>Q2 — validation frequency (careful / deferred / trusting)</li>
+      <li>Q3 — surface usage (active / passive / archive)</li>
+      <li>Q4 — domain diversity (narrow / medium / broad)</li>
+      <li>Q5 — device environment (desktop / mobile / mixed)</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>Q1 — 소비 강도 (light / moderate / heavy)</li>
+      <li>Q2 — 검증 빈도 (careful / deferred / trusting)</li>
+      <li>Q3 — surface 사용 (active / passive / archive)</li>
+      <li>Q4 — 도메인 다양성 (narrow / medium / broad)</li>
+      <li>Q5 — 디바이스 환경 (desktop / mobile / mixed)</li>
+    </ul>
+    <p data-lang-block="en">After beta, comparing self-reported answers vs actual usage tells us how predictive intent is — and which archetype combinations have the strongest retention.</p>
+    <p data-lang-block="kr">베타 종료 후 자기 응답 대 실제 사용을 비교하면 의도가 얼마나 예측적인지, 어떤 archetype 조합이 가장 강한 retention을 보이는지 알 수 있음.</p>
+    
+    <h4 data-lang-block="en">Skippable on purpose</h4>
+    <h4 data-lang-block="kr">의도적으로 건너뛰기 가능</h4>
+    <p data-lang-block="en">Forcing the survey would inflate completion but distort answers (people would click anything to proceed). Letting users skip filters for genuine respondents. Expected skip rate: 20–30%.</p>
+    <p data-lang-block="kr">설문 강제는 완료율은 높이지만 응답이 왜곡됨 (진행 위해 아무거나 클릭). 건너뛰기 허용은 진성 응답자 필터링. 예상 건너뛰기율: 20–30%.</p>
+  </div>
+</div>
+
+<!-- O-3: First Save Tutorial -->
+<div class="screen" id="screen-o3">
+  <div class="screen-header">
+    <div class="screen-id">O-3</div>
+    <div class="screen-title">
+      <span data-lang="en">First Save — Interactive Tutorial</span>
+      <span data-lang="kr">첫 저장 — 인터랙티브 튜토리얼</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">After sign-up + survey, user lands on a guided first-save experience. Left panel walks them through. Right panel shows a sample article they can right-click to save. Tutorial completes when they make their first real save.</span>
+      <span data-lang="kr">가입 + 설문 후, 사용자가 안내된 첫 저장 경험으로. 좌측 패널이 단계 안내. 우측 패널에 샘플 기사 — 우클릭으로 저장. 첫 실제 저장 완료 시 튜토리얼 끝.</span>
+    </div>
+  </div>
+  
+  <div class="tutorial-frame">
+    <div class="tutorial-side">
+      <div class="tutorial-step-pips">
+        <div class="tutorial-pip done"></div>
+        <div class="tutorial-pip done"></div>
+        <div class="tutorial-pip active"></div>
+        <div class="tutorial-pip"></div>
+      </div>
+      <div class="tutorial-step-label">
+        <span data-lang="en">Step 3 of 4 · Your first save</span>
+        <span data-lang="kr">3단계 / 4 · 첫 저장</span>
+      </div>
+      <div class="tutorial-title">
+        <span data-lang="en">Try it: save your first article</span>
+        <span data-lang="kr">해보세요: 첫 기사 저장</span>
+      </div>
+      <div class="tutorial-text">
+        <span data-lang="en">We've loaded a sample article on the right. Right-click anywhere on it and pick "Save to Lucid" — or use the shortcut.</span>
+        <span data-lang="kr">우측에 샘플 기사를 띄웠습니다. 아무 곳이나 우클릭하고 "Save to Lucid" 선택 — 또는 단축키 사용.</span>
+      </div>
+      
+      <div class="tutorial-checklist">
+        <div class="tutorial-check-item">
+          <div class="tutorial-check done">✓</div>
+          <span data-lang="en">Chrome extension installed</span>
+          <span data-lang="kr">Chrome 확장 설치 완료</span>
+        </div>
+        <div class="tutorial-check-item">
+          <div class="tutorial-check done">✓</div>
+          <span data-lang="en">Signed in to Lucid</span>
+          <span data-lang="kr">Lucid 로그인 완료</span>
+        </div>
+        <div class="tutorial-check-item">
+          <div class="tutorial-check"></div>
+          <span data-lang="en">Right-click the sample article →</span>
+          <span data-lang="kr">샘플 기사 우클릭 →</span>
+        </div>
+        <div class="tutorial-check-item">
+          <div class="tutorial-check"></div>
+          <span data-lang="en">Pick "Save to Lucid"</span>
+          <span data-lang="kr">"Save to Lucid" 선택</span>
+        </div>
+        <div class="tutorial-check-item">
+          <div class="tutorial-check"></div>
+          <span data-lang="en">Watch the analysis complete</span>
+          <span data-lang="kr">분석 완료 확인</span>
+        </div>
+      </div>
+      
+      <div class="tutorial-tip">
+        <strong data-lang="en">Shortcut:</strong>
+        <strong data-lang="kr">단축키:</strong>
+        <span data-lang="en"> Press <code style="font-family: var(--font-mono); background: var(--bg-base); padding: 1px 5px; border-radius: 3px;">⌘ ⇧ L</code> anywhere on a web page to save it instantly.</span>
+        <span data-lang="kr"> 웹 페이지에서 <code style="font-family: var(--font-mono); background: var(--bg-base); padding: 1px 5px; border-radius: 3px;">⌘ ⇧ L</code> 누르면 즉시 저장.</span>
+      </div>
+      
+      <div class="tutorial-actions">
+        <button class="tut-btn ghost">
+          <span data-lang="en">Skip tour</span>
+          <span data-lang="kr">건너뛰기</span>
+        </button>
+        <button class="tut-btn primary">
+          <span data-lang="en">I'll try later →</span>
+          <span data-lang="kr">나중에 해볼게요 →</span>
+        </button>
+      </div>
+    </div>
+    
+    <div class="tutorial-main">
+      <div class="browser-demo">
+        <div class="browser-chrome">
+          <div class="browser-dots"><span></span><span></span><span></span></div>
+          <div class="browser-url">sample.lucid.app/article</div>
+          <div class="browser-ext">L</div>
+        </div>
+        <div class="demo-page">
+          <h2>EU AI Act Enters Into Force</h2>
+          <p>The European Union's Artificial Intelligence Act took effect on August 1, 2024, capping a 36-month legislative journey that began with the European Commission's initial proposal in April 2021.</p>
+          <p>The regulation establishes a risk-based framework with four risk tiers, covering high-risk systems, general-purpose AI models, and prohibited practices.</p>
+        </div>
+      </div>
+      
+      <!-- Pulsing pointer indicating where to right-click -->
+      <div class="demo-pointer" style="top: 47%; left: 56%;">
+        <div class="demo-pointer-circle"></div>
+      </div>
+      
+      <!-- Context menu shown as preview -->
+      <div class="demo-context-menu" style="top: 53%; left: 60%;">
+        <div class="demo-cm-item">
+          <span>↶</span>
+          <span data-lang="en">Back</span>
+          <span data-lang="kr">뒤로</span>
+        </div>
+        <div class="demo-cm-item">
+          <span>↻</span>
+          <span data-lang="en">Reload</span>
+          <span data-lang="kr">새로고침</span>
+        </div>
+        <div class="demo-cm-sep"></div>
+        <div class="demo-cm-item hi">
+          <span>⭐</span>
+          <span data-lang="en">Save to Lucid</span>
+          <span data-lang="kr">Save to Lucid</span>
+          <span class="demo-cm-short">⌘⇧L</span>
+        </div>
+        <div class="demo-cm-sep"></div>
+        <div class="demo-cm-item">
+          <span>🖨</span>
+          <span data-lang="en">Print</span>
+          <span data-lang="kr">인쇄</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Learn by doing, not by reading</h4>
+    <h4 data-lang-block="kr">읽지 말고 직접 해보기</h4>
+    <p data-lang-block="en">The tutorial doesn't describe how to save — it makes the user do it once, on a sample article we control. Pulsing pointer + open context menu visual = no ambiguity. User makes their first real save, sees the toast + Decide overlay, and the concept clicks.</p>
+    <p data-lang-block="kr">튜토리얼은 저장 방법을 설명하지 않습니다 — 우리가 제공하는 샘플 기사에서 한 번 직접 하게 만듭니다. 맥동 포인터 + 열린 컨텍스트 메뉴 시각 = 모호함 없음. 사용자가 실제 첫 저장하고, toast + Decide 오버레이를 보면, 개념이 자리잡음.</p>
+    
+    <h4 data-lang-block="en">Sample article is curated</h4>
+    <h4 data-lang-block="kr">샘플 기사는 큐레이션</h4>
+    <p data-lang-block="en">Pre-chosen: simple, clear factual claims (EU AI Act dates, 36-month process). Guarantees a clean extraction so the user's first Decide overlay shows good results. First impression = the product works.</p>
+    <p data-lang-block="kr">미리 선정: 단순하고 명확한 사실 주장 (EU AI Act 날짜, 36개월 과정). 깔끔한 추출 보장 — 사용자의 첫 Decide 오버레이가 좋은 결과를 보이도록. 첫인상 = 제품이 작동.</p>
+    
+    <h4 data-lang-block="en">Skip is honest</h4>
+    <h4 data-lang-block="kr">건너뛰기는 정직</h4>
+    <p data-lang-block="en">"Skip tour" and "I'll try later" both lead to the final settings screen. Don't lock the user in. People who skip the tutorial can still discover the product on their own time.</p>
+    <p data-lang-block="kr">"건너뛰기"와 "나중에 해볼게요" 모두 최종 설정 화면으로 진행. 사용자를 가두지 않음. 튜토리얼 건너뛴 사람도 자기 시간에 제품을 발견할 수 있음.</p>
+  </div>
+</div>
+
+<!-- O-4: Initial Settings -->
+<div class="screen" id="screen-o4">
+  <div class="screen-header">
+    <div class="screen-id">O-4</div>
+    <div class="screen-title">
+      <span data-lang="en">Initial Settings — Recommended Defaults</span>
+      <span data-lang="kr">초기 설정 — 권장 기본값</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Final onboarding screen. Suggested defaults are pre-selected. User can adjust 3 things they're most likely to care about, then start. Everything is changeable later in Settings.</span>
+      <span data-lang="kr">마지막 온보딩 화면. 권장 기본값 미리 선택. 사용자가 가장 관심 가질 3가지 조정 후 시작. 모든 것은 Settings에서 나중에 변경 가능.</span>
+    </div>
+  </div>
+  
+  <div class="setup-frame">
+    <div class="setup-header">
+      <div class="setup-logo">Lucid</div>
+      <div class="auth-stepbar" style="margin-bottom: 16px;">
+        <div class="step-pip done"></div>
+        <div class="step-pip done"></div>
+        <div class="step-pip done"></div>
+        <div class="step-pip active"></div>
+      </div>
+      <div class="auth-step-label">
+        <span data-lang="en">Step 4 of 4 · Quick setup</span>
+        <span data-lang="kr">4단계 / 4 · 빠른 설정</span>
+      </div>
+      <div class="setup-title">
+        <span data-lang="en">Three quick choices, then you're in</span>
+        <span data-lang="kr">3가지 선택 후 시작</span>
+      </div>
+      <div class="setup-subtitle">
+        <span data-lang="en">We've picked sensible defaults. Adjust if you want — or accept and start saving. You can change all of this anytime in Settings.</span>
+        <span data-lang="kr">합리적 기본값을 골랐습니다. 원하면 조정 — 또는 그대로 두고 저장 시작. 모든 것은 Settings에서 언제든 변경 가능.</span>
+      </div>
+    </div>
+    
+    <div class="setup-body">
+      
+      <div class="setup-section">
+        <div class="setup-section-title">
+          <span data-lang="en">① Surface — how much Lucid helps while you work</span>
+          <span data-lang="kr">① Surface — 작업 중 Lucid가 도와주는 정도</span>
+        </div>
+        <div class="setup-row">
+          <div class="setup-row-info">
+            <div class="setup-row-label">
+              <span data-lang="en">Active Recall</span>
+              <span data-lang="kr">Active Recall</span>
+            </div>
+            <div class="setup-row-help">
+              <span data-lang="en">Show dotted underlines on text while you write, when Lucid recognizes related facts.</span>
+              <span data-lang="kr">글 쓸 때 Lucid가 관련 사실을 인식하면 텍스트에 점선 밑줄 표시.</span>
+            </div>
+          </div>
+          <div class="toggle on"></div>
+        </div>
+        <div class="setup-row">
+          <div class="setup-row-info">
+            <div class="setup-row-label">
+              <span data-lang="en">Response style</span>
+              <span data-lang="kr">응답 스타일</span>
+            </div>
+            <div class="setup-row-help">
+              <span data-lang="en">How verbose Ask Lucid's answers should be.</span>
+              <span data-lang="kr">Ask Lucid 응답의 상세 정도.</span>
+            </div>
+          </div>
+          <div class="seg-control">
+            <button class="seg-btn active">
+              <span data-lang="en">Concise</span>
+              <span data-lang="kr">간결</span>
+            </button>
+            <button class="seg-btn">
+              <span data-lang="en">Standard</span>
+              <span data-lang="kr">표준</span>
+            </button>
+            <button class="seg-btn">
+              <span data-lang="en">Detailed</span>
+              <span data-lang="kr">상세</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="setup-section">
+        <div class="setup-section-title">
+          <span data-lang="en">② Default save policy</span>
+          <span data-lang="kr">② 기본 저장 정책</span>
+        </div>
+        <div class="setup-row">
+          <div class="setup-row-info">
+            <div class="setup-row-label">
+              <span data-lang="en">New sources start as</span>
+              <span data-lang="kr">새 출처 시작 정책</span>
+            </div>
+            <div class="setup-row-help">
+              <span data-lang="en">Careful = facts go to review queue. Trusted = facts auto-accept. You can promote individual sources later.</span>
+              <span data-lang="kr">신중 = 사실이 검토 큐로. 신뢰 = 사실 자동 수락. 개별 출처는 나중에 승격 가능.</span>
+            </div>
+          </div>
+          <div class="seg-control">
+            <button class="seg-btn active">
+              <span data-lang="en">Careful</span>
+              <span data-lang="kr">신중</span>
+            </button>
+            <button class="seg-btn">
+              <span data-lang="en">Trusted</span>
+              <span data-lang="kr">신뢰</span>
+            </button>
+          </div>
+        </div>
+        
+        <div class="setup-trusted-suggestions">
+          <div class="setup-suggestion-title">
+            <span data-lang="en">Suggested trusted sources to pre-register</span>
+            <span data-lang="kr">미리 등록할 권장 신뢰 출처</span>
+          </div>
+          <div class="setup-suggestion-list">
+            <div class="setup-suggestion-chip">wsj.com <span class="x">+</span></div>
+            <div class="setup-suggestion-chip">law.go.kr <span class="x">+</span></div>
+            <div class="setup-suggestion-chip">nature.com <span class="x">+</span></div>
+            <div class="setup-suggestion-chip">europa.eu <span class="x">+</span></div>
+            <div class="setup-suggestion-chip">scholar.google.com <span class="x">+</span></div>
+            <div class="setup-suggestion-chip">nytimes.com <span class="x">+</span></div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="setup-section">
+        <div class="setup-section-title">
+          <span data-lang="en">③ Notifications</span>
+          <span data-lang="kr">③ 알림</span>
+        </div>
+        <div class="setup-row">
+          <div class="setup-row-info">
+            <div class="setup-row-label">
+              <span data-lang="en">Pending decision reminders</span>
+              <span data-lang="kr">결정 대기 알림</span>
+            </div>
+            <div class="setup-row-help">
+              <span data-lang="en">Periodic nudge when saves are waiting for your decision.</span>
+              <span data-lang="kr">결정 기다리는 저장이 쌓일 때 주기적 알림.</span>
+            </div>
+          </div>
+          <div class="seg-control">
+            <button class="seg-btn">
+              <span data-lang="en">Off</span>
+              <span data-lang="kr">끔</span>
+            </button>
+            <button class="seg-btn active">
+              <span data-lang="en">Daily</span>
+              <span data-lang="kr">매일</span>
+            </button>
+            <button class="seg-btn">
+              <span data-lang="en">Weekly</span>
+              <span data-lang="kr">매주</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="setup-footer">
+      <div class="setup-skip-text">
+        <span data-lang="en">All defaults are sensible — you don't have to change anything.</span>
+        <span data-lang="kr">기본값이 합리적입니다 — 변경 안 해도 됩니다.</span>
+      </div>
+      <div class="setup-actions">
+        <button class="ghost-full" style="width: auto; margin-top: 0; padding: 10px 18px;">
+          <span data-lang="en">Customize later</span>
+          <span data-lang="kr">나중에 설정</span>
+        </button>
+        <button class="primary-full" style="width: auto; margin-top: 0; padding: 10px 22px;">
+          <span data-lang="en">Start using Lucid →</span>
+          <span data-lang="kr">Lucid 사용 시작 →</span>
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Three sections, three minutes</h4>
+    <h4 data-lang-block="kr">세 섹션, 3분</h4>
+    <p data-lang-block="en">Settings has many more options (see SET-1) but the onboarding flow surfaces only the three the user is most likely to care about on day one: how visible Lucid should be while working, what to do with new sources, and how often to be reminded.</p>
+    <p data-lang-block="kr">Settings에는 더 많은 옵션이 있지만 (SET-1 참고), 온보딩에서는 사용자가 첫날 가장 관심 가질 3가지만 표시: 작업 중 Lucid 가시성, 새 출처 처리 방식, 알림 빈도.</p>
+    
+    <h4 data-lang-block="en">Pre-registered trusted sources — sensible starter list</h4>
+    <h4 data-lang-block="kr">미리 등록된 신뢰 출처 — 합리적 출발 목록</h4>
+    <p data-lang-block="en">Suggesting 6 commonly-trusted sources (peer-reviewed press, government primary, academic) gives the user a non-empty starting graph quickly. Click + to add. They can remove or add others anytime in SET-2.</p>
+    <p data-lang-block="kr">흔히 신뢰되는 출처 6개 제안 (peer-reviewed press, 정부 1차, 학술) — 사용자 그래프를 비어 있지 않은 상태로 빠르게 시작. + 클릭으로 추가. SET-2에서 언제든 제거·추가.</p>
+    
+    <h4 data-lang-block="en">"All defaults are sensible" — pressure relief</h4>
+    <h4 data-lang-block="kr">"기본값이 합리적" — 압박 해소</h4>
+    <p data-lang-block="en">Explicitly telling the user "you don't have to change anything" removes the implicit pressure to make decisions during onboarding. Most users will just hit "Start using Lucid" and that's fine.</p>
+    <p data-lang-block="kr">"변경 안 해도 됩니다"라고 명시 — 온보딩 중 결정에 대한 암묵적 압박 제거. 대부분의 사용자는 그냥 "Lucid 사용 시작" 누를 것이고, 그것으로 충분.</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+  document.querySelectorAll('.screen-nav button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const screenId = btn.dataset.screen;
+      document.querySelectorAll('.screen-nav button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById('screen-' + screenId).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+  
+  document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lang = btn.dataset.langBtn;
+      document.querySelectorAll('[data-lang-btn]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.body.classList.remove('lang-en', 'lang-kr');
+      document.body.classList.add('lang-' + lang);
+    });
+  });
+  
+  document.querySelectorAll('.toggle').forEach(t => {
+    t.addEventListener('click', () => t.classList.toggle('on'));
+  });
+  
+  document.querySelectorAll('.seg-control').forEach(seg => {
+    seg.querySelectorAll('.seg-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        seg.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  });
+  
+  document.querySelectorAll('.survey-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      opt.parentElement.querySelectorAll('.survey-option').forEach(o => o.classList.remove('selected'));
+      opt.classList.add('selected');
+    });
+  });
+  
+  document.querySelectorAll('.setup-suggestion-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      chip.style.opacity = chip.style.opacity === '0.4' ? '1' : '0.4';
+    });
+  });
+</script>
+
+</body>
+</html>

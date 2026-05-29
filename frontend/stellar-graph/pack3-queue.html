@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lucid Wireframes — Pack 3: Queue & Auto-accepted</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Pretendard:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-base: #0a0a0a; --bg-elevated: #141414; --bg-card: #1a1a1a; --bg-hover: #242424;
+    --border-subtle: #2a2a2a; --border-medium: #3a3a3a;
+    --text-primary: #f5f5f5; --text-secondary: #a0a0a0; --text-tertiary: #707070;
+    --accent-warm: #ffd966; --accent-cool: #6db4f5;
+    --success: #4ecdc4; --warning: #ffd966; --danger: #ff6b6b;
+    --font-sans: 'Inter', 'Pretendard', sans-serif;
+    --font-kr: 'Pretendard', 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  body { font-family: var(--font-sans); background: var(--bg-base); color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased; line-height: 1.5; }
+  body.lang-kr { font-family: var(--font-kr); }
+  
+  .top-bar { position: fixed; top: 0; left: 0; right: 0; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+  .brand { font-weight: 600; font-size: 16px; color: var(--accent-warm); }
+  .brand-tag { font-size: 11px; color: var(--text-tertiary); margin-left: 8px; font-family: var(--font-mono); }
+  .controls { display: flex; align-items: center; gap: 16px; }
+  .lang-toggle { display: flex; background: var(--bg-card); border-radius: 4px; padding: 2px; border: 1px solid var(--border-subtle); }
+  .lang-toggle button { background: transparent; border: none; color: var(--text-secondary); padding: 4px 10px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); border-radius: 3px; }
+  .lang-toggle button.active { background: var(--accent-warm); color: var(--bg-base); }
+  .screen-nav { display: flex; gap: 4px; }
+  .screen-nav button { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 6px 12px; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); }
+  .screen-nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .screen-nav button.active { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  
+  .main { margin-top: 60px; padding: 32px; min-height: calc(100vh - 60px); }
+  .screen { display: none; max-width: 1200px; margin: 0 auto; }
+  .screen.active { display: block; }
+  .screen-header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
+  .screen-id { font-family: var(--font-mono); font-size: 11px; color: var(--accent-warm); letter-spacing: 0.1em; text-transform: uppercase; }
+  .screen-title { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .screen-desc { color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+  
+  /* LUCID APP FRAME */
+  .app-frame { background: var(--bg-elevated); border-radius: 12px; border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); display: flex; min-height: 720px; }
+  
+  .app-sidebar { width: 220px; background: var(--bg-base); border-right: 1px solid var(--border-subtle); padding: 20px 0; flex-shrink: 0; }
+  .sidebar-brand { padding: 0 20px 20px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .sidebar-logo { color: var(--accent-warm); font-weight: 600; font-size: 18px; }
+  .sidebar-section { padding: 0 12px; margin-bottom: 16px; }
+  .sidebar-section-title { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-mono); padding: 0 8px 8px; }
+  .sidebar-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 4px; cursor: pointer; color: var(--text-secondary); font-size: 13px; margin-bottom: 2px; }
+  .sidebar-item:hover { background: var(--bg-card); color: var(--text-primary); }
+  .sidebar-item.active { background: rgba(255, 217, 102, 0.1); color: var(--accent-warm); }
+  .sidebar-item-icon { width: 16px; text-align: center; font-size: 14px; }
+  .sidebar-item-text { flex: 1; }
+  .sidebar-item-badge { background: var(--accent-warm); color: var(--bg-base); font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 5px; font-family: var(--font-mono); }
+  .sidebar-item-badge.danger { background: var(--danger); color: white; }
+  
+  .app-content { flex: 1; padding: 28px 32px; overflow: hidden; }
+  .content-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
+  .content-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .content-subtitle { font-size: 13px; color: var(--text-secondary); }
+  .content-actions { display: flex; gap: 8px; }
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
+  .tab { padding: 10px 16px; font-size: 13px; cursor: pointer; color: var(--text-secondary); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--text-primary); }
+  .tab.active { color: var(--accent-warm); border-bottom-color: var(--accent-warm); }
+  .tab-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); margin-left: 6px; }
+  .tab.active .tab-count { color: var(--accent-warm); }
+  
+  /* QUEUE GROUP CARDS */
+  .queue-list { display: flex; flex-direction: column; gap: 10px; }
+  .group-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 16px 18px; cursor: pointer; transition: border-color 0.15s; }
+  .group-card:hover { border-color: var(--border-medium); }
+  .group-card.has-contradiction { border-left: 3px solid var(--danger); }
+  
+  .group-card-top { display: flex; align-items: flex-start; gap: 14px; }
+  .group-card-icon { width: 36px; height: 36px; background: var(--bg-elevated); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; border: 1px solid var(--border-subtle); }
+  .group-card-main { flex: 1; min-width: 0; }
+  .group-card-title { font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .group-card-meta { display: flex; gap: 12px; font-size: 11px; color: var(--text-tertiary); align-items: center; flex-wrap: wrap; }
+  .group-card-meta .dot-sep { color: var(--text-tertiary); }
+  .group-card-source { font-family: var(--font-mono); }
+  .group-card-counts { display: flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: 11px; }
+  .group-card-counts .count-pill { background: var(--bg-elevated); padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border-subtle); color: var(--text-secondary); }
+  .group-card-counts .count-pill.warn { color: var(--danger); border-color: rgba(255, 107, 107, 0.3); }
+  .group-card-arrow { color: var(--text-tertiary); font-size: 16px; align-self: center; }
+  
+  .group-card-facts { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+  .group-fact-preview { display: block; font-size: 12px; color: var(--text-secondary); line-height: 1.5; padding: 3px 0; }
+  .group-fact-more { font-size: 11px; color: var(--text-tertiary); padding-left: 14px; font-family: var(--font-mono); margin-top: 4px; }
+  
+  /* SORT/FILTER BAR */
+  .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .filter-label { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
+  .filter-pills { display: flex; gap: 6px; }
+  .filter-pill { background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 5px 11px; border-radius: 12px; font-size: 11px; cursor: pointer; font-family: var(--font-mono); }
+  .filter-pill:hover { color: var(--text-primary); }
+  .filter-pill.active { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  
+  .search-input { margin-left: auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 12px; font-size: 12px; color: var(--text-primary); font-family: inherit; width: 220px; }
+  .search-input:focus { outline: none; border-color: var(--accent-warm); }
+  
+  /* DECIDE OVERLAY (re-opened) */
+  .decide-overlay-app { background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 12px; width: 100%; max-width: 540px; margin: 24px auto; box-shadow: 0 10px 40px rgba(0,0,0,0.5); overflow: hidden; }
+  .overlay-header { padding: 14px 18px; background: var(--bg-elevated); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); }
+  .overlay-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); font-weight: 500; }
+  .check-mini { width: 14px; height: 14px; background: var(--success); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--bg-base); font-weight: 700; font-size: 9px; }
+  .overlay-close { background: transparent; border: none; color: var(--text-tertiary); cursor: pointer; font-size: 18px; padding: 0 4px; }
+  .overlay-body { padding: 18px 20px; }
+  .source-info { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 14px; }
+  .source-icon { width: 32px; height: 32px; background: var(--bg-elevated); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; border: 1px solid var(--border-subtle); }
+  .source-meta { flex: 1; min-width: 0; }
+  .source-title { font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 2px; }
+  .source-url { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+  .deferred-badge { font-size: 10px; background: rgba(255, 217, 102, 0.1); color: var(--accent-warm); padding: 2px 8px; border-radius: 10px; font-family: var(--font-mono); margin-top: 4px; display: inline-block; }
+  
+  .facts-label { font-size: 11px; color: var(--text-tertiary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); }
+  .facts-bullet-list { list-style: none; padding: 0; margin: 0 0 14px 0; }
+  .facts-bullet-list li { display: block; padding: 6px 0; font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; }
+  
+  .tags-input { margin-bottom: 16px; }
+  .tags-input label { font-size: 11px; color: var(--text-tertiary); display: block; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); }
+  .tags-area { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 4px; min-height: 36px; align-items: center; }
+  .tag-chip { background: var(--bg-card); border: 1px solid var(--border-medium); color: var(--text-primary); padding: 4px 10px; border-radius: 10px; font-size: 11px; font-family: var(--font-mono); cursor: pointer; }
+  .tag-chip:hover { border-color: var(--accent-warm); color: var(--accent-warm); }
+  .tag-chip:last-child { background: transparent; border: 1px dashed var(--border-medium); color: var(--text-tertiary); }
+  
+  .decide-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .action-btn { padding: 11px 14px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .action-btn:hover { background: var(--bg-hover); }
+  .action-btn.primary { background: var(--accent-warm); color: var(--bg-base); border-color: var(--accent-warm); }
+  .action-btn.danger { color: var(--danger); border-color: var(--border-subtle); }
+  .action-btn-hint { font-size: 11px; color: var(--text-tertiary); font-weight: 400; }
+  .action-btn.primary .action-btn-hint { color: rgba(10,10,10,0.6); }
+  
+  /* AUTO-ACCEPTED TAB */
+  .auto-stats-bar { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; gap: 32px; align-items: center; }
+  .auto-stat { display: flex; flex-direction: column; gap: 2px; }
+  .auto-stat-value { font-size: 22px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); }
+  .auto-stat-value.warn { color: var(--danger); }
+  .auto-stat-label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); }
+  .auto-stat-divider { width: 1px; height: 40px; background: var(--border-subtle); }
+  
+  .auto-list { display: flex; flex-direction: column; gap: 8px; }
+  .fact-row { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 14px 16px; display: flex; align-items: flex-start; gap: 14px; }
+  .fact-row.flagged { border-left: 3px solid var(--danger); }
+  .fact-row-icon { width: 28px; height: 28px; background: var(--bg-elevated); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; border: 1px solid var(--border-subtle); }
+  .fact-row-main { flex: 1; min-width: 0; }
+  .fact-row-claim { font-size: 13px; color: var(--text-primary); line-height: 1.5; margin-bottom: 8px; }
+  .fact-row-meta { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); flex-wrap: wrap; }
+  .fact-row-meta .pill { background: var(--bg-elevated); padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border-subtle); }
+  .fact-row-meta .pill.warn { color: var(--danger); border-color: rgba(255, 107, 107, 0.3); }
+  .fact-row-actions { display: flex; gap: 4px; align-items: flex-start; }
+  .fact-action { background: transparent; border: 1px solid var(--border-subtle); color: var(--text-secondary); padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: var(--font-sans); }
+  .fact-action:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-medium); }
+  .fact-action.danger { color: var(--danger); }
+  .fact-action.danger:hover { background: rgba(255, 107, 107, 0.08); border-color: var(--danger); }
+  
+  /* ALERT BANNER */
+  .alert-banner { background: rgba(255, 107, 107, 0.06); border: 1px solid rgba(255, 107, 107, 0.2); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+  .alert-banner-icon { color: var(--danger); font-size: 18px; }
+  .alert-banner-text { flex: 1; font-size: 13px; color: var(--text-primary); }
+  .alert-banner-text strong { color: var(--danger); }
+  .alert-banner-action { background: transparent; border: 1px solid var(--danger); color: var(--danger); padding: 5px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: var(--font-sans); }
+  .alert-banner-action:hover { background: var(--danger); color: white; }
+  
+  /* EMPTY STATE */
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text-tertiary); }
+  .empty-state-icon { font-size: 40px; opacity: 0.5; margin-bottom: 16px; }
+  .empty-state-title { font-size: 15px; color: var(--text-secondary); margin-bottom: 6px; }
+  .empty-state-desc { font-size: 13px; color: var(--text-tertiary); max-width: 320px; margin: 0 auto; line-height: 1.5; }
+  
+  /* SCREEN DOC */
+  .screen-doc { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 20px; margin-top: 32px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .screen-doc h4 { color: var(--text-primary); font-size: 14px; margin-bottom: 8px; margin-top: 12px; }
+  .screen-doc h4:first-child { margin-top: 0; }
+  .screen-doc ul { padding-left: 20px; margin-bottom: 8px; }
+  .screen-doc code { font-family: var(--font-mono); background: var(--bg-card); padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--accent-warm); }
+  
+  [data-lang] { display: none; }
+  body.lang-en [data-lang="en"] { display: inline; }
+  body.lang-en [data-lang-block="en"] { display: block; }
+  body.lang-en li[data-lang="en"] { display: list-item; }
+  body.lang-kr [data-lang="kr"] { display: inline; }
+  body.lang-kr [data-lang-block="kr"] { display: block; }
+  body.lang-kr li[data-lang="kr"] { display: list-item; }
+</style>
+</head>
+<body class="lang-en">
+
+<div class="top-bar">
+  <div>
+    <span class="brand">Lucid</span>
+    <span class="brand-tag">WIREFRAMES // PACK 3: QUEUE &amp; AUTO-ACCEPTED</span>
+  </div>
+  <div class="controls">
+    <div class="screen-nav">
+      <button class="active" data-screen="q1">Q-1</button>
+      <button data-screen="q2">Q-2</button>
+      <button data-screen="q3">Q-3</button>
+    </div>
+    <div class="lang-toggle">
+      <button class="active" data-lang-btn="en">EN</button>
+      <button data-lang-btn="kr">KR</button>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- Q-1: Pending Queue List -->
+<div class="screen active" id="screen-q1">
+  <div class="screen-header">
+    <div class="screen-id">Q-1</div>
+    <div class="screen-title">
+      <span data-lang="en">Pending Queue — Deferred Decisions</span>
+      <span data-lang="kr">Pending 큐 — 미뤄둔 결정</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Captures the user deferred (ESC during Decide overlay). Grouped by source. Each card shows extracted facts. Click to re-open the Decide overlay (Q-2). Sort/filter at top.</span>
+      <span data-lang="kr">사용자가 미뤄둔 캡처들 (Decide 오버레이에서 ESC). 출처별로 그룹화. 각 카드는 추출된 사실 표시. 클릭하면 Decide 오버레이 재오픈 (Q-2). 상단에 정렬·필터.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand">
+        <span class="sidebar-logo">Lucid</span>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">⏳</span>
+          <span class="sidebar-item-text" data-lang="en">Pending</span>
+          <span class="sidebar-item-text" data-lang="kr">대기</span>
+          <span class="sidebar-item-badge">7</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">✓</span>
+          <span class="sidebar-item-text" data-lang="en">Auto-accepted</span>
+          <span class="sidebar-item-text" data-lang="kr">자동 수락</span>
+          <span class="sidebar-item-badge">142</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">💬</span>
+          <span class="sidebar-item-text" data-lang="en">Ask Lucid</span>
+          <span class="sidebar-item-text" data-lang="kr">Lucid에게 묻기</span>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title" data-lang="en">Insights</div>
+        <div class="sidebar-section-title" data-lang="kr">인사이트</div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⚠</span>
+          <span class="sidebar-item-text" data-lang="en">Contradictions</span>
+          <span class="sidebar-item-text" data-lang="kr">모순</span>
+          <span class="sidebar-item-badge danger">2</span>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⚙</span>
+          <span class="sidebar-item-text" data-lang="en">Settings</span>
+          <span class="sidebar-item-text" data-lang="kr">설정</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="app-content">
+      <div class="content-header">
+        <div>
+          <div class="content-title">
+            <span data-lang="en">Pending decisions</span>
+            <span data-lang="kr">결정 대기</span>
+          </div>
+          <div class="content-subtitle">
+            <span data-lang="en">7 captures awaiting decision · 18 facts total</span>
+            <span data-lang="kr">결정 대기 7건 · 사실 총 18개</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="filter-bar">
+        <span class="filter-label" data-lang="en">Sort:</span>
+        <span class="filter-label" data-lang="kr">정렬:</span>
+        <div class="filter-pills">
+          <div class="filter-pill active" data-lang="en">Recent</div>
+          <div class="filter-pill active" data-lang="kr">최근</div>
+          <div class="filter-pill" data-lang="en">By source</div>
+          <div class="filter-pill" data-lang="kr">출처별</div>
+          <div class="filter-pill" data-lang="en">By size</div>
+          <div class="filter-pill" data-lang="kr">크기별</div>
+        </div>
+        <input type="text" class="search-input" placeholder="Search captures…" />
+      </div>
+      
+      <div class="queue-list">
+        
+        <div class="group-card has-contradiction">
+          <div class="group-card-top">
+            <div class="group-card-icon">📰</div>
+            <div class="group-card-main">
+              <div class="group-card-title" data-lang="en">EU AI Act Enters Into Force After 36-Month Process</div>
+              <div class="group-card-title" data-lang="kr">EU AI Act, 36개월 입법 과정 거쳐 발효</div>
+              <div class="group-card-meta">
+                <span class="group-card-source">wsj.com</span>
+                <span class="dot-sep">·</span>
+                <span data-lang="en">2 hours ago</span>
+                <span data-lang="kr">2시간 전</span>
+                <span class="dot-sep">·</span>
+                <div class="group-card-counts">
+                  <span class="count-pill">3 facts</span>
+                  <span class="count-pill warn" data-lang="en">1 contradicts existing</span>
+                  <span class="count-pill warn" data-lang="kr">기존 사실과 1건 충돌</span>
+                </div>
+              </div>
+            </div>
+            <span class="group-card-arrow">›</span>
+          </div>
+          <div class="group-card-facts">
+            <span class="group-fact-preview" data-lang="en">EU AI Act took effect on August 1, 2024, after a legislative process initiated in April 2021.</span>
+            <span class="group-fact-preview" data-lang="kr">EU AI Act는 2024년 8월 1일 발효됐다. 2021년 4월에 처음 제안됐다.</span>
+            <span class="group-fact-preview" data-lang="en">The legislative process took 36 months in total.</span>
+            <span class="group-fact-preview" data-lang="kr">입법 과정에 총 36개월이 소요됐다.</span>
+            <span class="group-fact-more">+ 1 more</span>
+          </div>
+        </div>
+        
+        <div class="group-card">
+          <div class="group-card-top">
+            <div class="group-card-icon">📹</div>
+            <div class="group-card-main">
+              <div class="group-card-title" data-lang="en">Andrew Huberman — How to Optimize Your Workout</div>
+              <div class="group-card-title" data-lang="kr">Andrew Huberman — 운동 최적화하는 법</div>
+              <div class="group-card-meta">
+                <span class="group-card-source">youtube.com</span>
+                <span class="dot-sep">·</span>
+                <span data-lang="en">1 day ago</span>
+                <span data-lang="kr">1일 전</span>
+                <span class="dot-sep">·</span>
+                <div class="group-card-counts">
+                  <span class="count-pill">8 facts</span>
+                </div>
+              </div>
+            </div>
+            <span class="group-card-arrow">›</span>
+          </div>
+          <div class="group-card-facts">
+            <span class="group-fact-preview" data-lang="en">Resistance training causes muscle hypertrophy through mechanical tension and metabolic stress.</span>
+            <span class="group-fact-preview" data-lang="kr">저항 운동은 기계적 긴장과 대사 스트레스를 통해 근비대를 일으킨다.</span>
+            <span class="group-fact-preview" data-lang="en">Compound movements activate more muscle groups than isolation exercises.</span>
+            <span class="group-fact-preview" data-lang="kr">복합 운동이 고립 운동보다 더 많은 근육군을 활성화한다.</span>
+            <span class="group-fact-more">+ 6 more</span>
+          </div>
+        </div>
+        
+        <div class="group-card">
+          <div class="group-card-top">
+            <div class="group-card-icon">📄</div>
+            <div class="group-card-main">
+              <div class="group-card-title" data-lang="en">Korean AI Basic Act Comparative Analysis</div>
+              <div class="group-card-title" data-lang="kr">한국 AI 기본법 비교 분석</div>
+              <div class="group-card-meta">
+                <span class="group-card-source">prosperous.kr/research</span>
+                <span class="dot-sep">·</span>
+                <span data-lang="en">2 days ago</span>
+                <span data-lang="kr">2일 전</span>
+                <span class="dot-sep">·</span>
+                <div class="group-card-counts">
+                  <span class="count-pill">4 facts</span>
+                </div>
+              </div>
+            </div>
+            <span class="group-card-arrow">›</span>
+          </div>
+          <div class="group-card-facts">
+            <span class="group-fact-preview" data-lang="en">Korea's AI Basic Act passed the National Assembly in December 2024.</span>
+            <span class="group-fact-preview" data-lang="kr">한국 AI 기본법은 2024년 12월 국회 본회의를 통과했다.</span>
+            <span class="group-fact-preview" data-lang="en">The Korean approach emphasizes promotion over restriction.</span>
+            <span class="group-fact-preview" data-lang="kr">한국 접근법은 규제보다 진흥에 가중치를 둔다.</span>
+            <span class="group-fact-more">+ 2 more</span>
+          </div>
+        </div>
+        
+        <div class="group-card">
+          <div class="group-card-top">
+            <div class="group-card-icon">🔖</div>
+            <div class="group-card-main">
+              <div class="group-card-title" data-lang="en">Highlight from Foreign Affairs article</div>
+              <div class="group-card-title" data-lang="kr">Foreign Affairs 기사에서 하이라이트</div>
+              <div class="group-card-meta">
+                <span class="group-card-source">foreignaffairs.com</span>
+                <span class="dot-sep">·</span>
+                <span data-lang="en">3 days ago</span>
+                <span data-lang="kr">3일 전</span>
+                <span class="dot-sep">·</span>
+                <div class="group-card-counts">
+                  <span class="count-pill">1 fact</span>
+                </div>
+              </div>
+            </div>
+            <span class="group-card-arrow">›</span>
+          </div>
+          <div class="group-card-facts">
+            <span class="group-fact-preview" data-lang="en">Semiconductor export restrictions to China expanded to include 14 additional chip categories in October 2024.</span>
+            <span class="group-fact-preview" data-lang="kr">대중국 반도체 수출 규제가 2024년 10월에 14개 추가 칩 카테고리로 확대됐다.</span>
+          </div>
+        </div>
+        
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">How items arrive here</h4>
+    <h4 data-lang-block="kr">여기로 들어오는 경로</h4>
+    <ul data-lang-block="en">
+      <li>User pressed ESC on the Decide overlay during save (deferred decision)</li>
+      <li>User closed the overlay without choosing Accept/Review/Discard</li>
+      <li>Auto-accepted facts that triggered contradictions (re-entered as a group for review)</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>저장 시 Decide 오버레이에서 ESC를 누름 (결정 미루기)</li>
+      <li>Accept/Review/Discard 선택 없이 오버레이를 닫음</li>
+      <li>모순이 감지된 자동 수락 사실들 (그룹으로 재진입)</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Visual signals</h4>
+    <h4 data-lang-block="kr">시각 신호</h4>
+    <ul data-lang-block="en">
+      <li>Red left border — contradiction detected with existing graph facts</li>
+      <li>Grey left border — capture is getting old (3+ days)</li>
+      <li>Warn pill — count of facts that conflict with what's already in the graph</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>붉은 좌측 테두리 — 기존 그래프 사실과 모순 감지</li>
+      <li>회색 좌측 테두리 — 캡처가 오래됨 (3일 이상)</li>
+      <li>경고 pill — 그래프 기존 사실과 충돌하는 사실 수</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Sort and filter</h4>
+    <h4 data-lang-block="kr">정렬과 필터</h4>
+    <ul data-lang-block="en">
+      <li><code>Recent</code> — most recent capture first (default)</li>
+      <li><code>By source</code> — group together captures from same source</li>
+      <li><code>By size</code> — captures with most facts first (clear those in one pass)</li>
+      <li>Search filters by title, source, or fact content</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>최근</code> — 최근 캡처 먼저 (기본)</li>
+      <li><code>출처별</code> — 같은 출처 캡처를 묶음</li>
+      <li><code>크기별</code> — 사실 수 많은 캡처 먼저 (한 번에 많이 처리)</li>
+      <li>검색은 제목, 출처, 사실 내용으로 필터링</li>
+    </ul>
+  </div>
+</div>
+
+<!-- Q-2: Group reopened — Decide overlay inside app -->
+<div class="screen" id="screen-q2">
+  <div class="screen-header">
+    <div class="screen-id">Q-2</div>
+    <div class="screen-title">
+      <span data-lang="en">Group Reopened — Decide Overlay in App</span>
+      <span data-lang="kr">그룹 재오픈 — 앱 안에서 Decide 오버레이</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">User clicked a queue card. Same Decide UI as Pack 2 C-3, but inside the Lucid app instead of on the source page. Same three options. Contradiction info shown inline.</span>
+      <span data-lang="kr">사용자가 큐 카드 클릭. Pack 2 C-3와 동일한 Decide UI, 단 출처 페이지가 아닌 Lucid 앱 안에서. 동일한 3가지 옵션. 모순 정보 인라인 표시.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand">
+        <span class="sidebar-logo">Lucid</span>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">⏳</span>
+          <span class="sidebar-item-text" data-lang="en">Pending</span>
+          <span class="sidebar-item-text" data-lang="kr">대기</span>
+          <span class="sidebar-item-badge">7</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">✓</span>
+          <span class="sidebar-item-text" data-lang="en">Auto-accepted</span>
+          <span class="sidebar-item-text" data-lang="kr">자동 수락</span>
+          <span class="sidebar-item-badge">142</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">💬</span>
+          <span class="sidebar-item-text" data-lang="en">Ask Lucid</span>
+          <span class="sidebar-item-text" data-lang="kr">Lucid에게 묻기</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="app-content">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+        <a style="color: var(--text-secondary); font-size: 12px; cursor: pointer; font-family: var(--font-mono);">
+          <span data-lang="en">← Back to Pending</span>
+          <span data-lang="kr">← Pending으로</span>
+        </a>
+      </div>
+      
+      <div class="alert-banner">
+        <span class="alert-banner-icon">⚠</span>
+        <div class="alert-banner-text">
+          <span data-lang="en"><strong>1 fact contradicts</strong> existing knowledge in your graph. Reviewing recommended.</span>
+          <span data-lang="kr"><strong>1건의 사실이 모순</strong> 됨 — 그래프의 기존 지식과 충돌. 검토 권장.</span>
+        </div>
+        <button class="alert-banner-action">
+          <span data-lang="en">View conflict</span>
+          <span data-lang="kr">충돌 보기</span>
+        </button>
+      </div>
+      
+      <div class="decide-overlay-app">
+        <div class="overlay-header">
+          <div class="overlay-status">
+            <div class="check-mini">✓</div>
+            <span data-lang="en">Analysis complete · deferred 2h ago</span>
+            <span data-lang="kr">분석 완료 · 2시간 전 미뤄둠</span>
+          </div>
+          <button class="overlay-close">×</button>
+        </div>
+        <div class="overlay-body">
+          <div class="source-info">
+            <div class="source-icon">📰</div>
+            <div class="source-meta">
+              <div class="source-title" data-lang="en">EU AI Act Enters Into Force...</div>
+              <div class="source-title" data-lang="kr">EU AI Act, 36개월 입법 과정 거쳐 발효</div>
+              <div class="source-url">wsj.com · Aug 1, 2024</div>
+              <span class="deferred-badge" data-lang="en">deferred</span>
+              <span class="deferred-badge" data-lang="kr">미뤄둠</span>
+            </div>
+          </div>
+          
+          <div class="facts-label" data-lang="en">3 facts extracted</div>
+          <div class="facts-label" data-lang="kr">사실 3개 추출됨</div>
+          <ul class="facts-bullet-list">
+            <li data-lang="en">EU AI Act took effect on August 1, 2024, after a legislative process initiated by the European Commission in April 2021.</li>
+            <li data-lang="kr">EU AI Act는 2024년 8월 1일 발효됐다. 유럽위원회가 2021년 4월 처음 제안한 후 입법 과정이 진행됐다.</li>
+            <li data-lang="en">The legislative process from initial proposal to enforcement took 36 months in total.</li>
+            <li data-lang="kr">최초 제안부터 시행까지 입법 과정에 총 36개월이 소요됐다.</li>
+            <li data-lang="en">⚠ The regulation prohibits all forms of facial recognition by 2026. <span style="color: var(--danger); font-size: 11px;">(conflicts with fn-187)</span></li>
+            <li data-lang="kr">⚠ 이 규제는 2026년까지 모든 형태의 얼굴 인식을 금지한다. <span style="color: var(--danger); font-size: 11px;">(fn-187과 충돌)</span></li>
+          </ul>
+          
+          <div class="tags-input">
+            <label data-lang="en">Tags</label>
+            <label data-lang="kr">태그</label>
+            <div class="tags-area">
+              <span class="tag-chip">ai-governance</span>
+              <span class="tag-chip">eu</span>
+              <span class="tag-chip">+</span>
+            </div>
+          </div>
+          
+          <div class="decide-actions">
+            <button class="action-btn primary">
+              <span>
+                <span data-lang="en">Accept all</span>
+                <span data-lang="kr">모두 승인</span>
+              </span>
+              <span class="action-btn-hint" data-lang="en">→ all 3 enter graph (1 will be flagged)</span>
+              <span class="action-btn-hint" data-lang="kr">→ 3개 모두 그래프 진입 (1개는 플래그)</span>
+            </button>
+            <button class="action-btn">
+              <span>
+                <span data-lang="en">Review one-by-one</span>
+                <span data-lang="kr">개별 검토</span>
+              </span>
+              <span class="action-btn-hint" data-lang="en">→ decide each fact (recommended)</span>
+              <span class="action-btn-hint" data-lang="kr">→ 사실별 결정 (권장)</span>
+            </button>
+            <button class="action-btn danger">
+              <span>
+                <span data-lang="en">Discard all</span>
+                <span data-lang="kr">모두 폐기</span>
+              </span>
+              <span class="action-btn-hint" data-lang="en">→ remove from queue</span>
+              <span class="action-btn-hint" data-lang="kr">→ 큐에서 제거</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">Same UI as Pack 2 C-3 — by design</h4>
+    <h4 data-lang-block="kr">Pack 2 C-3와 동일한 UI — 의도된 설계</h4>
+    <p data-lang-block="en">The Decide overlay is the same component whether opened on the source page (Pack 2) or from the queue (here). Same three options, same data. The only differences:</p>
+    <p data-lang-block="kr">Decide 오버레이는 출처 페이지에서 열리든(Pack 2) 큐에서 열리든(여기) 같은 컴포넌트. 같은 3가지 옵션, 같은 데이터. 차이는:</p>
+    <ul data-lang-block="en">
+      <li>Banner at top showing time deferred and any contradictions detected since</li>
+      <li>Contradiction-conflicting facts highlighted inline with reference to fn-ID</li>
+      <li>"Back to Pending" navigation to return to queue list</li>
+      <li>Discard all here removes from queue (instead of "nothing saved")</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li>상단 배너에 미뤄둔 시간과 그 이후 감지된 모순 표시</li>
+      <li>모순 사실은 fn-ID 참조와 함께 인라인 강조</li>
+      <li>"Pending으로" 네비게이션으로 큐 목록 복귀</li>
+      <li>여기서 모두 폐기는 큐에서 제거 (Pack 2의 "저장 안 됨"과 다름)</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Why contradictions get detected even before Accept</h4>
+    <h4 data-lang-block="kr">왜 Accept 전에도 모순이 감지되는가</h4>
+    <p data-lang-block="en">Lucid compares pending facts against the graph as soon as analysis completes. This protects the graph: if a deferred capture sat for 3 weeks and the graph evolved, the user sees fresh contradiction warnings when they finally come back. The fn-187 reference lets the user click through to the conflicting fact and decide which is right.</p>
+    <p data-lang-block="kr">Lucid는 분석 완료 직후 그래프와 pending 사실들을 대조함. 그래프 보호를 위해: 캡처를 3주간 미뤄두고 그동안 그래프가 진화했다면, 사용자가 돌아왔을 때 새로운 모순 경고를 봄. fn-187 참조를 클릭하면 충돌 사실로 이동해서 어느 쪽이 맞는지 결정 가능.</p>
+  </div>
+</div>
+
+<!-- Q-3: Auto-accepted Tab -->
+<div class="screen" id="screen-q3">
+  <div class="screen-header">
+    <div class="screen-id">Q-3</div>
+    <div class="screen-title">
+      <span data-lang="en">Auto-accepted Tab — Trusted Source Audit</span>
+      <span data-lang="kr">자동 수락 탭 — 신뢰 출처 감사</span>
+    </div>
+    <div class="screen-desc">
+      <span data-lang="en">Facts that entered the graph directly from trusted sources, without manual review. Editable, demotable, or droppable. Items flagged for re-review when contradictions are detected.</span>
+      <span data-lang="kr">신뢰 출처에서 수동 검토 없이 그래프에 직접 진입한 사실들. 수정·강등·폐기 가능. 모순이 감지되면 재검토 플래그.</span>
+    </div>
+  </div>
+  
+  <div class="app-frame">
+    <div class="app-sidebar">
+      <div class="sidebar-brand">
+        <span class="sidebar-logo">Lucid</span>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">📥</span>
+          <span class="sidebar-item-text" data-lang="en">Save</span>
+          <span class="sidebar-item-text" data-lang="kr">저장</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⏳</span>
+          <span class="sidebar-item-text" data-lang="en">Pending</span>
+          <span class="sidebar-item-text" data-lang="kr">대기</span>
+          <span class="sidebar-item-badge">7</span>
+        </div>
+        <div class="sidebar-item active">
+          <span class="sidebar-item-icon">✓</span>
+          <span class="sidebar-item-text" data-lang="en">Auto-accepted</span>
+          <span class="sidebar-item-text" data-lang="kr">자동 수락</span>
+          <span class="sidebar-item-badge">142</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">⭐</span>
+          <span class="sidebar-item-text" data-lang="en">Knowledge graph</span>
+          <span class="sidebar-item-text" data-lang="kr">지식 그래프</span>
+        </div>
+        <div class="sidebar-item">
+          <span class="sidebar-item-icon">💬</span>
+          <span class="sidebar-item-text" data-lang="en">Ask Lucid</span>
+          <span class="sidebar-item-text" data-lang="kr">Lucid에게 묻기</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="app-content">
+      <div class="content-header">
+        <div>
+          <div class="content-title">
+            <span data-lang="en">Auto-accepted facts</span>
+            <span data-lang="kr">자동 수락된 사실</span>
+          </div>
+          <div class="content-subtitle">
+            <span data-lang="en">Facts from trusted sources that entered the graph automatically.</span>
+            <span data-lang="kr">신뢰 출처에서 자동으로 그래프에 진입한 사실들.</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="auto-stats-bar">
+        <div class="auto-stat">
+          <div class="auto-stat-value">142</div>
+          <div class="auto-stat-label" data-lang="en">Auto-accepted</div>
+          <div class="auto-stat-label" data-lang="kr">자동 수락</div>
+        </div>
+        <div class="auto-stat-divider"></div>
+        <div class="auto-stat">
+          <div class="auto-stat-value">5</div>
+          <div class="auto-stat-label" data-lang="en">Trusted sources</div>
+          <div class="auto-stat-label" data-lang="kr">신뢰 출처</div>
+        </div>
+        <div class="auto-stat-divider"></div>
+        <div class="auto-stat">
+          <div class="auto-stat-value warn">2</div>
+          <div class="auto-stat-label" data-lang="en">Flagged for review</div>
+          <div class="auto-stat-label" data-lang="kr">검토 플래그</div>
+        </div>
+      </div>
+      
+      <div class="alert-banner">
+        <span class="alert-banner-icon">⚠</span>
+        <div class="alert-banner-text">
+          <span data-lang="en"><strong>2 facts</strong> from trusted sources now conflict with newly-saved facts. Review recommended.</span>
+          <span data-lang="kr"><strong>신뢰 출처에서 자동 수락된 사실 2건</strong>이 새로 저장된 사실과 충돌. 검토 권장.</span>
+        </div>
+        <button class="alert-banner-action">
+          <span data-lang="en">Review now</span>
+          <span data-lang="kr">지금 검토</span>
+        </button>
+      </div>
+      
+      <div class="filter-bar">
+        <span class="filter-label" data-lang="en">Filter:</span>
+        <span class="filter-label" data-lang="kr">필터:</span>
+        <div class="filter-pills">
+          <div class="filter-pill active" data-lang="en">All</div>
+          <div class="filter-pill active" data-lang="kr">전체</div>
+          <div class="filter-pill" data-lang="en">Flagged (2)</div>
+          <div class="filter-pill" data-lang="kr">플래그 (2)</div>
+          <div class="filter-pill" data-lang="en">By source</div>
+          <div class="filter-pill" data-lang="kr">출처별</div>
+        </div>
+        <input type="text" class="search-input" placeholder="Search facts…" />
+      </div>
+      
+      <div class="auto-list">
+        
+        <div class="fact-row flagged">
+          <div class="fact-row-icon">📰</div>
+          <div class="fact-row-main">
+            <div class="fact-row-claim" data-lang="en">"EU AI Act prohibits all forms of facial recognition by 2026." (fn-187)</div>
+            <div class="fact-row-claim" data-lang="kr">"EU AI Act는 2026년까지 모든 형태의 얼굴 인식을 금지한다." (fn-187)</div>
+            <div class="fact-row-meta">
+              <span class="pill">wsj.com</span>
+              <span class="pill" data-lang="en">added 2 weeks ago</span>
+              <span class="pill" data-lang="kr">2주 전 추가</span>
+              <span class="pill warn" data-lang="en">⚠ contradicts new save</span>
+              <span class="pill warn" data-lang="kr">⚠ 새 저장과 충돌</span>
+            </div>
+          </div>
+          <div class="fact-row-actions">
+            <button class="fact-action">
+              <span data-lang="en">Edit</span>
+              <span data-lang="kr">수정</span>
+            </button>
+            <button class="fact-action">
+              <span data-lang="en">Demote</span>
+              <span data-lang="kr">강등</span>
+            </button>
+            <button class="fact-action danger">
+              <span data-lang="en">Drop</span>
+              <span data-lang="kr">폐기</span>
+            </button>
+          </div>
+        </div>
+        
+        <div class="fact-row">
+          <div class="fact-row-icon">🏛</div>
+          <div class="fact-row-main">
+            <div class="fact-row-claim" data-lang="en">"Bank of Korea base rate was 3.5% as of December 2024." (fn-203)</div>
+            <div class="fact-row-claim" data-lang="kr">"한국은행 기준금리는 2024년 12월 기준 3.5%였다." (fn-203)</div>
+            <div class="fact-row-meta">
+              <span class="pill">law.go.kr</span>
+              <span class="pill" data-lang="en">added 5 months ago</span>
+              <span class="pill" data-lang="kr">5개월 전 추가</span>
+              <span class="pill">L1 · auto</span>
+            </div>
+          </div>
+          <div class="fact-row-actions">
+            <button class="fact-action">
+              <span data-lang="en">Edit</span>
+              <span data-lang="kr">수정</span>
+            </button>
+            <button class="fact-action">
+              <span data-lang="en">Demote</span>
+              <span data-lang="kr">강등</span>
+            </button>
+            <button class="fact-action danger">
+              <span data-lang="en">Drop</span>
+              <span data-lang="kr">폐기</span>
+            </button>
+          </div>
+        </div>
+        
+        <div class="fact-row">
+          <div class="fact-row-icon">📰</div>
+          <div class="fact-row-main">
+            <div class="fact-row-claim" data-lang="en">"US Federal Reserve maintained the federal funds rate at 4.25–4.50% in May 2026." (fn-241)</div>
+            <div class="fact-row-claim" data-lang="kr">"미국 연방준비제도는 2026년 5월에 연방기금금리를 4.25–4.50%로 유지." (fn-241)</div>
+            <div class="fact-row-meta">
+              <span class="pill">wsj.com</span>
+              <span class="pill" data-lang="en">added 5 hours ago</span>
+              <span class="pill" data-lang="kr">5시간 전 추가</span>
+              <span class="pill">L1 · auto</span>
+            </div>
+          </div>
+          <div class="fact-row-actions">
+            <button class="fact-action">
+              <span data-lang="en">Edit</span>
+              <span data-lang="kr">수정</span>
+            </button>
+            <button class="fact-action">
+              <span data-lang="en">Demote</span>
+              <span data-lang="kr">강등</span>
+            </button>
+            <button class="fact-action danger">
+              <span data-lang="en">Drop</span>
+              <span data-lang="kr">폐기</span>
+            </button>
+          </div>
+        </div>
+        
+        <div class="fact-row">
+          <div class="fact-row-icon">📚</div>
+          <div class="fact-row-main">
+            <div class="fact-row-claim" data-lang="en">"Loss aversion coefficient averages 2.25 across Kahneman & Tversky's original studies." (fn-156)</div>
+            <div class="fact-row-claim" data-lang="kr">"Kahneman & Tversky 원전 연구들에서 손실 회피 계수는 평균 2.25." (fn-156)</div>
+            <div class="fact-row-meta">
+              <span class="pill">nature.com</span>
+              <span class="pill" data-lang="en">added 1 month ago</span>
+              <span class="pill" data-lang="kr">1개월 전 추가</span>
+              <span class="pill">L1 · auto</span>
+            </div>
+          </div>
+          <div class="fact-row-actions">
+            <button class="fact-action">
+              <span data-lang="en">Edit</span>
+              <span data-lang="kr">수정</span>
+            </button>
+            <button class="fact-action">
+              <span data-lang="en">Demote</span>
+              <span data-lang="kr">강등</span>
+            </button>
+            <button class="fact-action danger">
+              <span data-lang="en">Drop</span>
+              <span data-lang="kr">폐기</span>
+            </button>
+          </div>
+        </div>
+        
+      </div>
+    </div>
+  </div>
+  
+  <div class="screen-doc">
+    <h4 data-lang-block="en">What "auto-accepted" means</h4>
+    <h4 data-lang-block="kr">"자동 수락"의 의미</h4>
+    <p data-lang-block="en">These facts entered the graph without the user reviewing each one — because the source was registered as trusted in Settings. Each fact carries an L1 auto mark indicating no manual validation, but trusted source provenance. The user retains full control to edit, demote, or drop any of them.</p>
+    <p data-lang-block="kr">이 사실들은 사용자가 하나씩 검토하지 않고 그래프에 진입했다 — 출처가 Settings에서 신뢰 등록되어 있었기 때문. 각 사실에는 L1 auto 마크가 붙어, 수동 검증은 없지만 신뢰 출처에서 왔음을 표시. 사용자는 언제든 수정·강등·폐기 가능.</p>
+    
+    <h4 data-lang-block="en">Three actions per fact</h4>
+    <h4 data-lang-block="kr">사실당 3가지 액션</h4>
+    <ul data-lang-block="en">
+      <li><code>Edit</code> — Inline edit the claim or tags. Alias history preserved.</li>
+      <li><code>Demote</code> — Move fact back to Pending queue for explicit review. Useful when you want to double-check before relying on it.</li>
+      <li><code>Drop</code> — Remove fact from graph entirely. Cannot be undone (only recoverable via re-capture from source).</li>
+    </ul>
+    <ul data-lang-block="kr">
+      <li><code>수정</code> — 주장 또는 태그를 인라인 편집. Alias 이력 보존.</li>
+      <li><code>강등</code> — 사실을 Pending 큐로 되돌려 명시적 검토. 신뢰하기 전에 한 번 더 확인하고 싶을 때.</li>
+      <li><code>폐기</code> — 그래프에서 완전 제거. 되돌릴 수 없음 (출처에서 다시 캡처해야 복구 가능).</li>
+    </ul>
+    
+    <h4 data-lang-block="en">Time-stamped facts are permanent</h4>
+    <h4 data-lang-block="kr">시점 사실은 영구 보존</h4>
+    <p data-lang-block="en">Lucid does not expire facts. A fact like "BoK base rate was 3.5% in December 2024" is true forever — the time context is part of the fact itself. When new facts arrive ("3.0% in March 2025"), both stay in the graph; together they form the timeline. Surface answers prioritize the most recent matching fact when relevant.</p>
+    <p data-lang-block="kr">Lucid는 사실을 만료시키지 않습니다. "2024년 12월 기준 한국 금리 3.5%" 같은 사실은 영원히 진실 — 시점 컨텍스트가 사실의 일부. 새 사실("2025년 3월 3.0%")이 들어오면 양쪽 모두 그래프에 보존되어 함께 타임라인을 형성. Surface 응답은 관련된 경우 최신 일치 사실을 우선 표시.</p>
+    
+    <h4 data-lang-block="en">Why audit auto-accepted at all?</h4>
+    <h4 data-lang-block="kr">왜 자동 수락된 사실을 감사하는가</h4>
+    <p data-lang-block="en">Trusted means "I trust this source's editorial process" — not "everything from this source is correct." Sources publish corrections, change positions, get reanalyzed. Auto-accepted tab gives the user a single audit surface to catch issues without manually reviewing every save.</p>
+    <p data-lang-block="kr">신뢰는 "이 출처의 편집 절차를 신뢰한다"는 뜻 — "이 출처에서 나온 모든 것이 맞다"는 뜻이 아님. 출처는 정정 발행, 입장 변경, 재분석될 수 있음. 자동 수락 탭은 매번 수동 검토 없이도 문제를 잡을 수 있는 감사 화면.</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+  document.querySelectorAll('.screen-nav button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const screenId = btn.dataset.screen;
+      document.querySelectorAll('.screen-nav button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById('screen-' + screenId).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+  
+  document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lang = btn.dataset.langBtn;
+      document.querySelectorAll('[data-lang-btn]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.body.classList.remove('lang-en', 'lang-kr');
+      document.body.classList.add('lang-' + lang);
+    });
+  });
+  
+  document.querySelectorAll('.filter-pill').forEach(p => {
+    p.addEventListener('click', () => {
+      p.parentElement.querySelectorAll('.filter-pill').forEach(x => x.classList.remove('active'));
+      p.classList.add('active');
+    });
+  });
+  
+  document.querySelectorAll('.tag-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      if (chip.textContent.trim() === '+') return;
+      chip.style.opacity = chip.style.opacity === '0.4' ? '1' : '0.4';
+    });
+  });
+</script>
+
+</body>
+</html>
