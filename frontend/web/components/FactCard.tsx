@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ActionButton } from './ActionButton';
+import { GraphNoteEditor } from './GraphNoteEditor';
 import type { FactAction, FactSummary } from '@/lib/types';
 import type { Lang } from './LangToggle';
 
@@ -11,6 +12,10 @@ interface Props {
   action?: FactAction;
   editedClaim?: string;
   onChange: (next: { action: FactAction; editedClaim?: string }) => void;
+  // PR-4A-2: when reviewMode + spaceId provided, render the inline
+  // GraphNoteEditor below the action row.
+  reviewMode?: boolean;
+  spaceId?: string;
 }
 
 function displayClaim(fact: FactSummary, lang: Lang): string {
@@ -26,6 +31,8 @@ export function FactCard({
   action,
   editedClaim,
   onChange,
+  reviewMode = false,
+  spaceId,
 }: Props) {
   const factUid = fact.fact_uid || fact.uid || '?';
   const [draft, setDraft] = useState(editedClaim ?? '');
@@ -118,6 +125,9 @@ export function FactCard({
           Discard
         </ActionButton>
       </div>
+      {reviewMode && spaceId && (
+        <GraphNoteEditor spaceId={spaceId} factUid={factUid} />
+      )}
     </article>
   );
 }

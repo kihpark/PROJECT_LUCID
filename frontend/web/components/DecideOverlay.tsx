@@ -33,11 +33,19 @@ interface Props {
   spaceId: string;
   jobId: string;
   initial: PendingJobDetail;
+  // PR-4A-2: when set, the Review tab renders an inline GraphNoteEditor
+  // under every FactCard. /pending/[jobId]/review passes this.
+  reviewMode?: boolean;
 }
 
-export function DecideOverlay({ spaceId, jobId, initial }: Props) {
+export function DecideOverlay({
+  spaceId,
+  jobId,
+  initial,
+  reviewMode = false,
+}: Props) {
   const [lang, setLang] = useState<Lang>('en');
-  const [tab, setTab] = useState<TabValue>('accept_all');
+  const [tab, setTab] = useState<TabValue>(reviewMode ? 'review' : 'accept_all');
   const [factDecisions, setFactDecisions] = useState<
     Record<string, FactDecisionDraft>
   >({});
@@ -252,6 +260,8 @@ export function DecideOverlay({ spaceId, jobId, initial }: Props) {
                       [uid]: next,
                     }))
                   }
+                  reviewMode={reviewMode}
+                  spaceId={spaceId}
                 />
               );
             })}
