@@ -95,3 +95,63 @@ export interface DecideResponse {
   skipped_objects: string[];
   validation_log_count: number;
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 4A PR-4A-2 — Pending Queue / Graph notes / Login
+// ---------------------------------------------------------------------------
+
+export interface PendingJobSummary {
+  job_id: string;
+  source_url: string;
+  source_type: string;
+  captured_at: string;
+  captured_from: string;
+  fact_count: number;
+  object_count: number;
+  has_negation: boolean;
+  has_disambiguation: boolean;
+}
+
+export interface PendingPage {
+  items: PendingJobSummary[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface PendingListFilters {
+  source_url?: string;
+  source_type?: string;
+  captured_after?: string;
+  captured_before?: string;
+  has_negation_flag?: boolean;
+  has_disambiguation?: boolean;
+  offset?: number;
+  limit?: number;
+}
+
+export interface GraphNote {
+  id: string;
+  fact_uid: string;
+  note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: 'bearer';
+  expires_in: number;
+}
+
+export interface KnowledgeSpacePublic {
+  id: string;
+  type: string;
+  name: string | null;
+  user_id: string;
+}
