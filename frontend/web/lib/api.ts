@@ -5,7 +5,13 @@ import { getToken, clearToken } from './auth';
 import type {
   DecideRequest,
   DecideResponse,
+  GraphNote,
+  KnowledgeSpacePublic,
+  LoginRequest,
+  LoginResponse,
   PendingJobDetail,
+  PendingListFilters,
+  PendingPage,
 } from './types';
 
 const API_BASE =
@@ -96,5 +102,67 @@ export function discardJob(
   return request<DecideResponse>(
     `/api/spaces/${spaceId}/pending/${jobId}/discard`,
     { method: 'POST' },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 4A PR-4A-2 — Auth, Pending list, Graph notes
+// ---------------------------------------------------------------------------
+
+export function loginUser(payload: LoginRequest): Promise<LoginResponse> {
+  return request<LoginResponse>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getMySpaces(): Promise<KnowledgeSpacePublic[]> {
+  return request<KnowledgeSpacePublic[]>('/api/spaces/me');
+}
+
+function buildPendingQuery(filters: PendingListFilters): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v === undefined || v === null || v === '') continue;
+    params.append(k, String(v));
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+export function listPending(
+  spaceId: string,
+  filters: PendingListFilters = {},
+): Promise<PendingPage> {
+  return request<PendingPage>(
+    `/api/spaces/${spaceId}/pending${buildPendingQuery(filters)}`,
+  );
+}
+
+export function listNotes(spaceId: string, factUid: string): Promise<GraphNote[]> {
+  return request<GraphNote[]>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/notes`,
+  );
+}
+
+export function createNote(
+  spaceId: string,
+  factUid: string,
+  note: string,
+): Promise<GraphNote> {
+  return request<GraphNote>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/notes`,
+    { method: 'POST', body: JSON.stringify({ note }) },
+  );
+}
+
+export function deleteNote(
+  spaceId: string,
+  factUid: string,
+  noteId: string,
+): Promise<void> {
+  return request<void>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/notes/${noteId}`,
+    { method: 'DELETE' },
   );
 }
