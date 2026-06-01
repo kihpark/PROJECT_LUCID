@@ -5,6 +5,11 @@ import { vi } from 'vitest';
 type AnyFn = (...args: unknown[]) => unknown;
 
 interface FakeChrome {
+  contextMenus: {
+    create: AnyFn;
+    removeAll: AnyFn;
+    onClicked: { addListener: AnyFn; removeListener: AnyFn };
+  };
   cookies: {
     get: AnyFn;
     set: AnyFn;
@@ -27,6 +32,11 @@ interface FakeChrome {
 }
 
 const fakeChrome: FakeChrome = {
+  contextMenus: {
+    create: vi.fn(),
+    removeAll: vi.fn((cb?: () => void) => cb && cb()),
+    onClicked: { addListener: vi.fn(), removeListener: vi.fn() },
+  },
   cookies: {
     get: vi.fn(),
     set: vi.fn(),
