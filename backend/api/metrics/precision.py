@@ -27,6 +27,7 @@ from api.storage.postgres.orm import (
     NegationLog,
     PrecisionLog,
     StructureMetricsLog,
+    ValidationLog,
 )
 
 logger = logging.getLogger("lucid.metrics")
@@ -142,6 +143,52 @@ def record_structure_metrics(
         negates_count=negates_count,
         decomposer_model=decomposer_model,
         latency_ms=latency_ms,
+    )
+    session.add(row)
+    session.flush()
+    return row.id
+
+
+ValidationActionLiteral = Literal[
+    "accept", "edit", "discard",
+    "merge_with", "create_new", "skip",
+    "accept_all", "discard_job",
+]
+
+
+def record_validation_decision(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    validator_id: uuid.UUID,
+    source_job_id: uuid.UUID | None,
+    fact_uid: str | None,
+    object_uid: str | None,
+    action: ValidationActionLiteral,
+    edited_claim_len: int | None = None,
+    decision_metadata: dict | None = None,
+) -> uuid.UUID:
+    """Sprint 4B PR-4B-1 — log one Validate decision.
+
+    Privacy invariants:
+      - DOES NOT store full claim text — only `edited_claim_len`
+        (an integer) when action='edit'. The full edited claim lives
+        in lucid_facts.edit_history under the user's own KS only.
+      - `decision_metadata` is small (link_type list / disambig
+        candidate count) — DO NOT pass user-visible text here.
+
+    Called from every Validate endpoint after the corresponding ES /
+    Postgres mutation commits.
+    """
+    row = ValidationLog(
+        user_id=user_id,
+        validator_id=validator_id,
+        source_job_id=source_job_id,
+        fact_uid=fact_uid,
+        object_uid=object_uid,
+        action=action,
+        edited_claim_len=edited_claim_len,
+        decision_metadata=decision_metadata,
     )
     session.add(row)
     session.flush()
