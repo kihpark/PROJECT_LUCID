@@ -493,13 +493,19 @@ extension/
 └── tests/
     ├── setup.ts                installs fake chrome.* globals onto
     │                           globalThis before any module imports
-    ├── auth.test.ts            3 cases (cookie missing, both present,
-    │                           reads from WEB_BASE)
-    ├── storage.test.ts         3 cases (read, merge-patch, clear)
-    ├── popup.test.ts           3 cases (logged-out render, logged-in
-    │                           render, Save dispatches a capture msg)
-    └── api.test.ts             3 cases (no JWT rejects, Bearer +
-                                JSON body, backend detail surfaced)
+    ├── auth.test.ts            3 cases
+    ├── storage.test.ts         3 cases
+    ├── popup.test.ts           3 cases
+    ├── api.test.ts             3 cases
+    ├── context-menu.test.ts    PR-2A-2 — 3 cases (3 items created,
+    │                           page click dispatches web_article
+    │                           capture, selection click dispatches
+    │                           highlighted_text + base64 payload)
+    └── toast.test.ts           PR-2A-2 — 4 cases (Saving... initial
+                                render, Save failed render with the
+                                error string, polling stops on
+                                terminal status, polling stops after
+                                60 attempts with "Still working")
 ```
 
 **12 Vitest cases.** Stack: Vite + @crxjs/vite-plugin v2 (manifest
