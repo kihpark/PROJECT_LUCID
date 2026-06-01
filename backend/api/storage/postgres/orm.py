@@ -25,6 +25,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -480,5 +481,41 @@ class StructureMetricsLog(Base):
     decomposer_model: Mapped[str | None] = mapped_column(String, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     logged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class UnderstandingDepthLog(Base):
+    """DCR-002 v2 — anonymized per-KS aggregate understanding-depth.
+
+    Privacy invariants (DCR-001):
+      - NO fact UIDs
+      - NO claim text, no source urls, no object names
+      - aggregate ratios only: average / max / isolated count / total
+    """
+
+    __tablename__ = "understanding_depth_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "average_depth >= 0 AND max_depth >= 0 "
+            "AND isolated_facts_count >= 0 AND total_facts >= 0",
+            name="ck_understanding_depth_nonneg",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    knowledge_space_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True,
+    )
+    average_depth: Mapped[float] = mapped_column(Float, nullable=False)
+    max_depth: Mapped[int] = mapped_column(Integer, nullable=False)
+    isolated_facts_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_facts: Mapped[int] = mapped_column(Integer, nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
