@@ -454,6 +454,69 @@ Auth: JWT carried by `lucid_jwt` cookie (set client-side by
 `NEXT_PUBLIC_API_URL=http://backend:8000` so the SSR fetch from
 `pending/[jobId]/page.tsx` reaches the Validate API inside the network.
 
+### extension/ — Sprint 2A PR-2A-1 (Chrome Extension Manifest V3)
+
+```
+extension/
+├── manifest.config.ts          crxjs typed manifest -> dist/manifest.json
+├── vite.config.ts              @crxjs/vite-plugin + jsdom test env
+├── vitest.config.ts            standalone vitest config (no crxjs)
+├── package.json                pnpm@9; Vite 5 + crxjs 2 beta + Vitest 2
+├── tsconfig.json               strict + noUncheckedIndexedAccess
+├── src/
+│   ├── background/
+│   │   └── service-worker.ts   MV3 background module. onMessage handler
+│   │                           for {type:'capture'} -> postCapture;
+│   │                           {type:'ping'} -> {ok:true}. Caches the
+│   │                           last 10 job_ids in chrome.storage.local.
+│   ├── popup/
+│   │   ├── popup.html          350×480 dark popup; references popup.css
+│   │   ├── popup.css           wireframe parity (IBM Plex Mono + the
+│   │   │                       same --bg-base / --accent-cool tokens
+│   │   │                       as the web app)
+│   │   └── popup.ts            boot() reads lucid_jwt + lucid_space_id
+│   │                           via getAuth() -> renders logged-in or
+│   │                           logged-out tree. Save button reads the
+│   │                           active tab URL + dispatches a capture
+│   │                           message.
+│   └── lib/
+│       ├── auth.ts             chrome.cookies bridge (DR-068).
+│       │                       getAuth() returns {token, spaceId} or null.
+│       │                       openLogin() opens WEB_BASE/login.
+│       ├── api.ts              postCapture() with Bearer header. Throws
+│       │                       on missing auth / non-2xx (surfaces
+│       │                       backend detail).
+│       └── storage.ts          chrome.storage.local wrapper —
+│                               readState / writeState / clearState.
+├── public/icons/               16/48/128 px solid-teal placeholder PNGs
+│                               (#7be0e0). Real icons are design work.
+└── tests/
+    ├── setup.ts                installs fake chrome.* globals onto
+    │                           globalThis before any module imports
+    ├── auth.test.ts            3 cases (cookie missing, both present,
+    │                           reads from WEB_BASE)
+    ├── storage.test.ts         3 cases (read, merge-patch, clear)
+    ├── popup.test.ts           3 cases (logged-out render, logged-in
+    │                           render, Save dispatches a capture msg)
+    └── api.test.ts             3 cases (no JWT rejects, Bearer +
+                                JSON body, backend detail surfaced)
+```
+
+**12 Vitest cases.** Stack: Vite + @crxjs/vite-plugin v2 (manifest
+compiles to MV3 standalone bundle) + TypeScript strict + jsdom-backed
+Vitest with a hand-rolled chrome.* mock layer.
+
+**Auth bridge (DR-068):** the extension reads the web app's
+non-httpOnly `lucid_jwt` + `lucid_space_id` cookies via
+`chrome.cookies.get` against `host_permissions: http://localhost:3000`.
+No extension-side login flow. Phase 1+ moves to httpOnly cookies +
+OAuth-style handoff.
+
+**Capture flow:** popup `Save current page` -> active tab URL ->
+`chrome.runtime.sendMessage({type:'capture', source_url, source_type})`
+-> service worker `postCapture` against backend
+`POST /api/capture` with `captured_from: 'chrome_ext'`.
+
 ## 4. Core Data Model
 
 The canonical models live in **code**, not in this file. Inline
