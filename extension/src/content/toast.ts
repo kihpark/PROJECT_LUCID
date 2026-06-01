@@ -16,8 +16,11 @@
  *      shows "Still working — check the Pending Queue".
  *   7. fade-out 5 s after a terminal state lands (or hard timeout).
  *
- * CSS lives in toast.css. We mount under a unique class prefix
- * (.lucid-toast-*) + z-index 2147483647 to survive page resets.
+ * CSS is inlined into a single <style data-lucid-toast="1"> element
+ * injected on first render (see ensureStyle()). We mount under a unique
+ * class prefix (.lucid-toast-*) + z-index 2147483647 to survive page
+ * resets. Inline injection sidesteps the @crxjs/vite-plugin v2 beta
+ * bug that leaves the source-tree CSS path in dist/manifest.json.
  *
  * This file imports nothing from @/lib/api directly — every backend
  * call is mediated by the service worker so the host page's CORS
@@ -63,6 +66,67 @@ interface SummaryResponse {
   error?: string;
 }
 
+const STYLE_ID = 'lucid-toast-styles';
+const INLINE_CSS = `
+.lucid-toast-root {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483647;
+  font-family:
+    'IBM Plex Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #e8e8f0;
+  background: #16161e;
+  border: 1px solid #262633;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 240px;
+  max-width: 360px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 240ms ease, transform 240ms ease;
+}
+.lucid-toast-root[data-state='hide'] {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+.lucid-toast-status {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.lucid-toast-detail {
+  color: #9999b3;
+  font-size: 11px;
+  font-family:
+    'IBM Plex Mono', 'SF Mono', Monaco, ui-monospace, monospace;
+}
+.lucid-toast-link {
+  color: #7be0e0;
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+}
+.lucid-toast-error {
+  color: #ef5b5b;
+}
+`;
+
+function ensureStyle(): void {
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.setAttribute('data-lucid-toast', '1');
+  style.textContent = INLINE_CSS;
+  (document.head || document.documentElement).appendChild(style);
+}
+
 let rootEl: HTMLElement | null = null;
 let statusEl: HTMLElement | null = null;
 let detailEl: HTMLElement | null = null;
@@ -72,6 +136,7 @@ let attempts = 0;
 let activeJobId: string | undefined;
 
 function ensureRoot(): HTMLElement {
+  ensureStyle();
   if (rootEl) return rootEl;
   rootEl = document.createElement('div');
   rootEl.className = 'lucid-toast-root';
@@ -295,6 +360,8 @@ export const __test__ = {
     detailEl = null;
     activeJobId = undefined;
     attempts = 0;
+    const style = document.getElementById(STYLE_ID);
+    if (style?.parentNode) style.parentNode.removeChild(style);
   },
   get rootEl() {
     return rootEl;

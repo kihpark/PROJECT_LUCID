@@ -28,7 +28,11 @@ export default defineManifest({
     {
       matches: ['<all_urls>'],
       js: ['src/content/toast.ts'],
-      css: ['src/content/toast.css'],
+      // CSS is injected by toast.ts via an inline <style> tag because
+      // @crxjs/vite-plugin v2 beta leaves the source-tree path in the
+      // emitted manifest (`src/content/toast.css`), which Chrome can't
+      // resolve in dist/. Inline injection also eliminates the
+      // unstyled-flash race at document_end.
       run_at: 'document_end',
     },
   ],
