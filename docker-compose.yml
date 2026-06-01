@@ -58,6 +58,16 @@ services:
       - ./backend:/app
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
+  web:
+    build: ./frontend/web
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://backend:8000"
+      NODE_ENV: production
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
   es_data:

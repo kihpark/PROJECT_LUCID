@@ -361,6 +361,58 @@ Lucid/
 
 ---
 
+### frontend/web/ — Sprint 4A PR-4A-1 (Decide Overlay UI)
+
+```
+frontend/web/
+├── app/
+│   ├── layout.tsx              IBM Plex (next/font) + dark theme via globals.css
+│   ├── page.tsx                placeholder; Pending Queue lands in PR-4A-2
+│   ├── globals.css             design tokens (--bg-base / --accent-cool / etc)
+│   └── pending/
+│       └── [jobId]/
+│           ├── page.tsx        Decide Overlay (server component;
+│           │                   reads JWT + space_id cookies, fetches
+│           │                   GET /api/spaces/{sid}/pending/{job_id})
+│           ├── loading.tsx
+│           └── error.tsx
+├── components/
+│   ├── ActionButton.tsx        primary / secondary / danger / ghost variants
+│   ├── LangToggle.tsx          KR / EN claim toggle
+│   ├── FactCard.tsx            one PendingFact; Accept / Edit / Discard;
+│   │                           shows negation_flag warning; edit mode
+│   │                           shows "Original preserved as alias (DR-036)"
+│   ├── DisambigCard.tsx        one PendingDisambig; pick candidate to
+│   │                           merge_with OR Create new OR Skip
+│   └── DecideOverlay.tsx       client component; Accept all / Review tabs;
+│                               calls /accept-all, /discard, /decide
+├── lib/
+│   ├── types.ts                hand-mirrored from api/models/validate.py
+│   ├── auth.ts                 JWT via localStorage + cookie mirror
+│   └── api.ts                  fetch wrapper + Authorization header
+├── middleware.ts               gates /pending/* on the lucid_jwt cookie
+├── tests/
+│   ├── setup.ts                @testing-library/jest-dom for Vitest
+│   ├── FactCard.test.tsx       5 cases
+│   ├── DisambigCard.test.tsx   3 cases
+│   ├── LangToggle.test.tsx     1 case
+│   └── DecideOverlay.test.tsx  3 cases (mocks lib/api)
+├── next.config.mjs             output: standalone (Docker-friendly)
+├── tailwind.config.ts          wireframe-parity color/font tokens
+├── tsconfig.json               strict + noUncheckedIndexedAccess
+├── vitest.config.ts            jsdom env, @ alias for relative-import sanity
+├── package.json                pnpm@9; Next 15 + React 19 + Vitest 2
+└── Dockerfile                  3-stage multi-arch build (deps -> build -> run)
+```
+
+Stack: Next.js 15 App Router + TypeScript strict + Tailwind + IBM Plex.
+Auth: JWT carried by `lucid_jwt` cookie (set client-side by
+`lib/auth.setToken`). Phase 1+ swaps for httpOnly + refresh rotation.
+
+`docker-compose.yml` mounts the web service at port 3000 with
+`NEXT_PUBLIC_API_URL=http://backend:8000` so the SSR fetch from
+`pending/[jobId]/page.tsx` reaches the Validate API inside the network.
+
 ## 4. Core Data Model
 
 The canonical models live in **code**, not in this file. Inline

@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --bg-base: #050507;
+  --bg-elevated: #0d0d12;
+  --bg-card: #16161e;
+  --bg-card-hover: #1c1c26;
+  --border-subtle: #262633;
+  --border-strong: #3a3a4d;
+  --text-primary: #e8e8f0;
+  --text-secondary: #9999b3;
+  --text-muted: #6b6b80;
+  --accent-cool: #7be0e0;
+  --accent-warm: #ffd166;
+  --accent-error: #ef5b5b;
+  --accent-success: #83e577;
+}
+
+html,
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+
+body {
+  font-family:
+    var(--font-ibm-plex-sans),
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-feature-settings:
+    'ss01' on,
+    'cv11' on;
+}
+
+.font-mono,
+code,
+pre,
+kbd {
+  font-family: var(--font-ibm-plex-mono), 'SF Mono', Monaco, monospace;
+}
