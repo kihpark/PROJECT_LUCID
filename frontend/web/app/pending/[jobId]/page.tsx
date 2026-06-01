@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { DecideOverlay } from '@/components/DecideOverlay';
+import { apiBase, ssrJson } from '@/lib/server-fetch';
 import type { PendingJobDetail } from '@/lib/types';
 
 interface Props {
@@ -9,34 +10,11 @@ interface Props {
 
 export const dynamic = 'force-dynamic';
 
-async function loadDetail(
-  jobId: string,
-  spaceId: string,
-  token: string,
-): Promise<PendingJobDetail | null> {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  const resp = await fetch(
-    `${apiBase}/api/spaces/${spaceId}/pending/${jobId}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    },
-  );
-  if (resp.status === 404) return null;
-  if (!resp.ok) {
-    throw new Error(`Failed to load job: HTTP ${resp.status}`);
-  }
-  return (await resp.json()) as PendingJobDetail;
-}
-
 export default async function PendingDetailPage({ params }: Props) {
   const { jobId } = await params;
 
-  // Beta scope: PR-4A-2 lands /spaces/me. For PR-4A-1 the user's
-  // current space_id is carried on a cookie set after registration.
-  // If unset, the middleware would have already bounced us.
-  const cookieStore = headers();
-  const cookieHdr = (await cookieStore).get('cookie') || '';
+  const h = await headers();
+  const cookieHdr = h.get('cookie') || '';
   const tokenMatch = cookieHdr.match(/(?:^|;\s*)lucid_jwt=([^;]+)/);
   const spaceMatch = cookieHdr.match(/(?:^|;\s*)lucid_space_id=([^;]+)/);
   const token = tokenMatch ? decodeURIComponent(tokenMatch[1]!) : '';
@@ -46,7 +24,7 @@ export default async function PendingDetailPage({ params }: Props) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16">
         <p className="text-text-secondary">
-          Sign in to view this Decide Overlay. (Auth UI lands in PR-4A-2.)
+          Sign in to view this Decide Overlay.
         </p>
       </main>
     );
@@ -54,11 +32,24 @@ export default async function PendingDetailPage({ params }: Props) {
 
   let detail: PendingJobDetail | null = null;
   try {
-    detail = await loadDetail(jobId, spaceId, token);
+    detail = await ssrJson<PendingJobDetail>(
+      `/api/spaces/${spaceId}/pending/${jobId}`,
+      { token },
+    );
   } catch (err) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16">
-        <p className="text-accent-error">{(err as Error).message}</p>
+        <h2 className="text-lg font-light text-accent-error mb-3">
+          Could not load the Decide Overlay
+        </h2>
+        <p className="text-sm text-text-secondary mb-2">
+          {(err as Error).message}
+        </p>
+        <p className="text-xxs text-text-muted font-mono">
+          API base: <code>{apiBase()}</code> — override with
+          <code className="ml-1">NEXT_PUBLIC_API_URL</code> in
+          .env.local if the backend lives elsewhere.
+        </p>
       </main>
     );
   }

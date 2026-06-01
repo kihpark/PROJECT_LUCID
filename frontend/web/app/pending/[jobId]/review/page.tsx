@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { DecideOverlay } from '@/components/DecideOverlay';
+import { apiBase, ssrJson } from '@/lib/server-fetch';
 import type { PendingJobDetail } from '@/lib/types';
 
 interface Props {
@@ -8,26 +9,6 @@ interface Props {
 }
 
 export const dynamic = 'force-dynamic';
-
-async function loadDetail(
-  jobId: string,
-  spaceId: string,
-  token: string,
-): Promise<PendingJobDetail | null> {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  const resp = await fetch(
-    `${apiBase}/api/spaces/${spaceId}/pending/${jobId}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    },
-  );
-  if (resp.status === 404) return null;
-  if (!resp.ok) {
-    throw new Error(`Failed to load job: HTTP ${resp.status}`);
-  }
-  return (await resp.json()) as PendingJobDetail;
-}
 
 export default async function PendingReviewPage({ params }: Props) {
   const { jobId } = await params;
@@ -48,17 +29,30 @@ export default async function PendingReviewPage({ params }: Props) {
 
   let detail: PendingJobDetail | null = null;
   try {
-    detail = await loadDetail(jobId, spaceId, token);
+    detail = await ssrJson<PendingJobDetail>(
+      `/api/spaces/${spaceId}/pending/${jobId}`,
+      { token },
+    );
   } catch (err) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16">
-        <p className="text-accent-error">{(err as Error).message}</p>
+        <h2 className="text-lg font-light text-accent-error mb-3">
+          Could not load the Decide Overlay
+        </h2>
+        <p className="text-sm text-text-secondary mb-2">
+          {(err as Error).message}
+        </p>
+        <p className="text-xxs text-text-muted font-mono">
+          API base: <code>{apiBase()}</code>
+        </p>
       </main>
     );
   }
+
   if (!detail) {
     notFound();
   }
+
   return (
     <DecideOverlay spaceId={spaceId} jobId={jobId} initial={detail} reviewMode />
   );
