@@ -157,7 +157,17 @@ Lucid/
 │   │   └── routes/
 │   │       ├── spaces.py          CRUD for KnowledgeSpaces
 │   │       ├── capture.py         POST /api/spaces/{sid}/capture/*
-│   │       ├── validate.py        GET/POST /api/spaces/{sid}/validate/*
+│   │       ├── validate.py        Sprint 4B PR-4B-1 — Pending Queue +
+│   │       │                       Decide (accept/edit/discard) +
+│   │       │                       Disambig resolve + Review-mode
+│   │       │                       graph_notes CRUD. 10 endpoints,
+│   │       │                       all prefix /api/spaces/{space_id}/...
+│   │       │                       Reads source_job.extracted_metadata
+│   │       │                       ['structure'] as the canonical
+│   │       │                       PendingFact staging area; promotes
+│   │       │                       accepted facts to lucid_facts ES via
+│   │       │                       create_fact + records each action in
+│   │       │                       validation_logs (anonymized).
 │   │       ├── graph.py           GET /api/spaces/{sid}/facts|graph|stats
 │   │       ├── surface.py         POST /api/spaces/{sid}/surface
 │   │       ├── query.py           POST /api/spaces/{sid}/query
@@ -261,6 +271,13 @@ Lucid/
 │   │                              escape hatch `_STRUCTURE_INLINE_FOR_TESTS`
 │   │                              forces inline execution for deterministic
 │   │                              tests. Phase 1+: swap for Celery.
+│   ├── api/models/validate.py — Sprint 4B PR-4B-1: Pydantic request /
+│   │                              response shapes for the 10 Validate
+│   │                              endpoints (PendingFilters,
+│   │                              PendingPage, FactDecision,
+│   │                              ObjectDecision, DecideRequest /
+│   │                              Response, DisambigEntry,
+│   │                              GraphNoteCreateRequest / Response).
 │   ├── api/metrics/precision.py — extended in PR-3-3 with
 │   │                              `record_structure_metrics(session, *,
 │   │                              user_id, source_job_id, ...counts...,
@@ -279,6 +296,13 @@ Lucid/
 │   │                              `UnderstandingDepthLog` (anonymized
 │   │                              aggregate per KS).
 │   ├── alembic/versions/0012_structure_metrics_logs.py — new in PR-3-3
+│   ├── alembic/versions/0014_validation_logs.py — Sprint 4B PR-4B-1.
+│   │                              ValidationLog table — every Decide /
+│   │                              Resolve / Discard records an
+│   │                              anonymized row (action enum,
+│   │                              edited_claim_len only — no text).
+│   │                              FK cascade on users.id; FK SET NULL
+│   │                              on source_jobs.id.
 │   ├── alembic/versions/0013_understanding_depth_logs.py — DR-066
 │   ├── tests/integration/test_csvs_e2e.py — 9 PR-3-3 E2E tests:
 │   │                              capture -> extract -> structure flow,
@@ -560,6 +584,53 @@ terminal states and silently returns).
 forces the structure dispatcher to run on the calling thread so
 FastAPI's TestClient sees `status='structured'` by the time the BG
 cycle finishes (used by `tests/integration/test_csvs_e2e.py`).
+
+### Validate stage endpoints (Sprint 4B PR-4B-1)
+
+Once `status='structured'`, the Decide Overlay (wireframe C-3 / C-4)
+calls into ten endpoints under `routes/validate.py`:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET    | /api/spaces/{sid}/pending | list structured jobs (filters, paging) |
+| GET    | /api/spaces/{sid}/pending/{job_id} | full decomposition (facts + objects + links + disambig) |
+| POST   | /api/spaces/{sid}/pending/{job_id}/decide | per-fact accept/edit/discard + per-Object resolution |
+| POST   | /api/spaces/{sid}/pending/{job_id}/accept-all | quick path: accept every PendingFact |
+| POST   | /api/spaces/{sid}/pending/{job_id}/discard | mark the entire job discarded |
+| GET    | /api/spaces/{sid}/disambig | cross-job PendingDisambig queue |
+| POST   | /api/spaces/{sid}/disambig/{disambig_id}/resolve | merge_with / create_new / skip |
+| POST   | /api/spaces/{sid}/facts/{fact_uid}/notes | create a Review-mode personal note |
+| GET    | /api/spaces/{sid}/facts/{fact_uid}/notes | list notes on a fact |
+| DELETE | /api/spaces/{sid}/facts/{fact_uid}/notes/{note_id} | delete a note |
+
+**Decide → FactNode flow:**
+  1. `extracted_metadata['structure'].facts_summary` is the canonical
+     staging area. We do NOT maintain a separate `pending_facts` table.
+  2. On `action='accept'`, the route builds a `FactNode` from the
+     fact summary + `validator_id=current_user` + `validation_method='manual'`
+     and calls `api.storage.elasticsearch.facts.create_fact` to index it.
+  3. On `action='edit'`, the resulting FactNode carries the original
+     claim string in `aliases[]` (DR-036 search-robustness invariant).
+  4. On `action='discard'`, no ES write happens; the action is logged
+     to `validation_logs` and the fact_uid is appended to
+     `extracted_metadata['structure'].decided_fact_uids` so the UI can
+     hide it on the next fetch.
+
+**Disambig resolution:** when the user picks `merge_with`, the
+PendingDisambig entry is removed from `disambiguation_pending` and the
+merge target uid is recorded in the `validation_logs.decision_metadata`
+JSONB column. ES Object reconciliation (capture_count bump on the
+target) happens in PR-4A integration tests; the route delegates by
+recording the intent.
+
+**Privacy invariants on validation_logs:**
+  - NO claim text — only `edited_claim_len` (integer length)
+  - NO source URL, NO object name, NO raw payload
+  - `decision_metadata` JSONB only carries tags (link_type, candidate
+    count, merge_target_uid)
+  - FK CASCADE on users.id → deleting a user wipes their decision
+    history; FK SET NULL on source_jobs.id → deleting an old job
+    preserves the aggregate for analytics
 
 ---
 

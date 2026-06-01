@@ -519,3 +519,57 @@ class UnderstandingDepthLog(Base):
     measured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class ValidationLog(Base):
+    """Sprint 4B PR-4B-1 — per-decision validation log (DCR-001 anonymized).
+
+    Captures every Validate action on a fact / object / job (accept,
+    edit, discard, merge_with, create_new, skip). Privacy invariants:
+      - NO claim text (the edited claim is stored at most as the
+        ``edited_claim_len`` integer; the full text never enters this
+        log table — that goes to lucid_facts.edit_history per DR-036)
+      - NO source URL, NO object name, NO fact UID exposure across
+        users (fact_uid is opaque inside the user's own KS only)
+
+    The ``metadata`` JSONB carries small contextual tags (the link_type
+    list for object merges, the disambig candidate count, etc.) so the
+    M2 / M3 aggregators can compute precision / recall without
+    re-querying ES.
+    """
+
+    __tablename__ = "validation_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('accept','edit','discard','merge_with','create_new','skip','accept_all','discard_job')",
+            name="ck_validation_logs_action",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("source_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    fact_uid: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    object_uid: Mapped[str | None] = mapped_column(String, nullable=True)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    edited_claim_len: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    validator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    validated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    decision_metadata: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True,
+    )
