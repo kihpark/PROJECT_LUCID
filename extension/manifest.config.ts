@@ -22,8 +22,16 @@ export default defineManifest({
     service_worker: 'src/background/service-worker.ts',
     type: 'module',
   },
-  permissions: ['storage', 'cookies', 'contextMenus', 'activeTab', 'tabs'],
+  permissions: ['storage', 'cookies', 'contextMenus', 'activeTab', 'tabs', 'scripting'],
   host_permissions: ['http://localhost:3000/*', 'http://localhost:8000/*'],
+  content_scripts: [
+    {
+      matches: ['<all_urls>'],
+      js: ['src/content/toast.ts'],
+      css: ['src/content/toast.css'],
+      run_at: 'document_end',
+    },
+  ],
   icons: {
     '16': 'public/icons/icon-16.png',
     '48': 'public/icons/icon-48.png',

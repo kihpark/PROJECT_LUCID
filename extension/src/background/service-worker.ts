@@ -11,8 +11,16 @@
  * sendResponse callback per MV3 contract.
  */
 
-import { postCapture } from '@/lib/api';
+import {
+  getJobStatus,
+  getStructuredSummary,
+  postCapture,
+} from '@/lib/api';
 import { writeState } from '@/lib/storage';
+import {
+  installContextMenus,
+  installContextMenuListener,
+} from './context-menu';
 
 interface CaptureMessage {
   type: 'capture';
@@ -43,7 +51,9 @@ function isCaptureMessage(m: unknown): m is CaptureMessage {
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[lucid] service worker installed');
+  installContextMenus();
 });
+installContextMenuListener();
 
 chrome.runtime.onMessage.addListener(
   (msg: IncomingMessage, _sender, sendResponse) => {
@@ -71,6 +81,32 @@ chrome.runtime.onMessage.addListener(
         }
       })();
       return true; // async response
+    }
+
+    if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'get_job_status') {
+      const m = msg as { type: 'get_job_status'; job_id: string };
+      (async () => {
+        try {
+          const body = await getJobStatus(m.job_id);
+          sendResponse({ ok: true, body });
+        } catch (err) {
+          sendResponse({ ok: false, error: (err as Error).message });
+        }
+      })();
+      return true;
+    }
+
+    if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'get_structured_summary') {
+      const m = msg as { type: 'get_structured_summary'; job_id: string };
+      (async () => {
+        try {
+          const summary = await getStructuredSummary(m.job_id);
+          sendResponse({ ok: true, summary });
+        } catch (err) {
+          sendResponse({ ok: false, error: (err as Error).message });
+        }
+      })();
+      return true;
     }
 
     sendResponse({ ok: false, error: 'unknown_message' });
