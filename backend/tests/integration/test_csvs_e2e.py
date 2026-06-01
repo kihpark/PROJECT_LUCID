@@ -488,10 +488,19 @@ def test_e2e_milk_lactose_complete_flow(client, auth_headers, monkeypatch):
     """Beta demo: feed the three-statement Korean transcript through the
     full CSVS pipeline and confirm the fixture's expected shape (fact
     count, negation flag count, object count, SUPPORTS link count)
-    matches to >= 90% overall."""
+    matches to >= 90% overall.
+
+    Gated on both ANTHROPIC_API_KEY and LUCID_BETA_DEMO=1 so even with
+    the key available, CI / casual local runs do not accidentally spend
+    on the live Claude call. PO opt-in: `set LUCID_BETA_DEMO=1` (or
+    `export LUCID_BETA_DEMO=1`) before running pytest."""
     import os
     if not os.getenv("ANTHROPIC_API_KEY"):
         pytest.skip("ANTHROPIC_API_KEY unset; milk live test requires Claude")
+    if os.getenv("LUCID_BETA_DEMO") != "1":
+        pytest.skip(
+            "LUCID_BETA_DEMO!=1; live milk test is opt-in to avoid Claude spend"
+        )
 
     from sqlalchemy import select
 
