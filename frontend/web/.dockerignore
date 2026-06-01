@@ -1,0 +1,10 @@
+# Never carry host artefacts into the container build.
+node_modules
+.next
+out
+.DS_Store
+.git
+.env.local
+.env*.local
+*.log
+.pnpm-store
