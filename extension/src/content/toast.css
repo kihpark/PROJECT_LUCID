@@ -1,0 +1,53 @@
+.lucid-toast-root {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483647;
+  font-family:
+    'IBM Plex Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #e8e8f0;
+  background: #16161e;
+  border: 1px solid #262633;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 240px;
+  max-width: 360px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 240ms ease, transform 240ms ease;
+}
+
+.lucid-toast-root[data-state='hide'] {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+
+.lucid-toast-status {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.lucid-toast-detail {
+  color: #9999b3;
+  font-size: 11px;
+  font-family:
+    'IBM Plex Mono', 'SF Mono', Monaco, ui-monospace, monospace;
+}
+
+.lucid-toast-link {
+  color: #7be0e0;
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+}
+
+.lucid-toast-error {
+  color: #ef5b5b;
+}
