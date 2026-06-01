@@ -361,42 +361,75 @@ Lucid/
 
 ---
 
-### frontend/web/ — Sprint 4A PR-4A-1 (Decide Overlay UI)
+### frontend/web/ — Sprint 4A PR-4A-1 + PR-4A-2 (Decide Overlay + Queue + Review + Notes)
 
 ```
 frontend/web/
 ├── app/
 │   ├── layout.tsx              IBM Plex (next/font) + dark theme via globals.css
-│   ├── page.tsx                placeholder; Pending Queue lands in PR-4A-2
+│   ├── page.tsx                marketing placeholder; auto-redirects when signed in
 │   ├── globals.css             design tokens (--bg-base / --accent-cool / etc)
+│   ├── login/page.tsx          PR-4A-2: login form (email + password); on
+│   │                           success sets lucid_jwt + lucid_space_id
+│   │                           cookies and pushes /pending
 │   └── pending/
+│       ├── page.tsx            PR-4A-2 Q-1: Pending Queue list (server
+│       │                       component; reads space_id cookie, renders
+│       │                       PendingQueueView client component)
+│       ├── auto-accepted/      PR-4A-2 Q-3: placeholder page — the
+│       │   └── page.tsx        backing GET /facts?validation_method=auto
+│       │                       endpoint is Sprint 5 scope
 │       └── [jobId]/
-│           ├── page.tsx        Decide Overlay (server component;
-│           │                   reads JWT + space_id cookies, fetches
-│           │                   GET /api/spaces/{sid}/pending/{job_id})
+│           ├── page.tsx        PR-4A-1: Decide Overlay
 │           ├── loading.tsx
-│           └── error.tsx
+│           ├── error.tsx
+│           └── review/         PR-4A-2 Q-2: same Decide Overlay but
+│               └── page.tsx    renders with reviewMode=true so each
+│                               FactCard exposes the inline GraphNoteEditor
 ├── components/
 │   ├── ActionButton.tsx        primary / secondary / danger / ghost variants
 │   ├── LangToggle.tsx          KR / EN claim toggle
 │   ├── FactCard.tsx            one PendingFact; Accept / Edit / Discard;
 │   │                           shows negation_flag warning; edit mode
-│   │                           shows "Original preserved as alias (DR-036)"
+│   │                           shows "Original preserved as alias (DR-036)";
+│   │                           PR-4A-2: optional reviewMode + spaceId props
+│   │                           wire in <GraphNoteEditor/> below the action row
 │   ├── DisambigCard.tsx        one PendingDisambig; pick candidate to
 │   │                           merge_with OR Create new OR Skip
-│   └── DecideOverlay.tsx       client component; Accept all / Review tabs;
-│                               calls /accept-all, /discard, /decide
+│   ├── DecideOverlay.tsx       client component; Accept all / Review tabs;
+│   │                           calls /accept-all, /discard, /decide
+│   ├── LoginForm.tsx           PR-4A-2: email + password form;
+│   │                           loginUser -> getMySpaces -> setCurrentSpace
+│   ├── PendingFilters.tsx      PR-4A-2: source_type select +
+│   │                           has_negation / has_disambig checkboxes
+│   │                           + Apply / Reset buttons
+│   ├── PendingQueueList.tsx    PR-4A-2: card-per-job + totals + prev/next
+│   ├── PendingQueueView.tsx    PR-4A-2: PendingFilters + PendingQueueList
+│   │                           wrapper that calls lib/api.listPending
+│   └── GraphNoteEditor.tsx     PR-4A-2: listNotes on mount; Add textarea;
+│                               per-note Delete; max 8000 chars
 ├── lib/
 │   ├── types.ts                hand-mirrored from api/models/validate.py
-│   ├── auth.ts                 JWT via localStorage + cookie mirror
-│   └── api.ts                  fetch wrapper + Authorization header
+│   │                           + PR-4A-2 shapes (PendingPage,
+│   │                             PendingJobSummary, GraphNote,
+│   │                             LoginRequest/Response,
+│   │                             KnowledgeSpacePublic)
+│   ├── auth.ts                 JWT via localStorage + cookie mirror;
+│   │                           PR-4A-2: setCurrentSpace/getCurrentSpace
+│   │                           cookie helpers (lucid_space_id)
+│   └── api.ts                  fetch wrapper + Authorization header;
+│                               PR-4A-2: loginUser, getMySpaces,
+│                               listPending, listNotes, createNote, deleteNote
 ├── middleware.ts               gates /pending/* on the lucid_jwt cookie
 ├── tests/
 │   ├── setup.ts                @testing-library/jest-dom for Vitest
 │   ├── FactCard.test.tsx       5 cases
 │   ├── DisambigCard.test.tsx   3 cases
 │   ├── LangToggle.test.tsx     1 case
-│   └── DecideOverlay.test.tsx  3 cases (mocks lib/api)
+│   ├── DecideOverlay.test.tsx  3 cases (mocks lib/api)
+│   ├── PendingQueueList.test.tsx   PR-4A-2: 3 cases
+│   ├── PendingFilters.test.tsx     PR-4A-2: 2 cases
+│   └── GraphNoteEditor.test.tsx    PR-4A-2: 3 cases (mocks lib/api)
 ├── next.config.mjs             output: standalone (Docker-friendly)
 ├── tailwind.config.ts          wireframe-parity color/font tokens
 ├── tsconfig.json               strict + noUncheckedIndexedAccess
@@ -404,6 +437,14 @@ frontend/web/
 ├── package.json                pnpm@9; Next 15 + React 19 + Vitest 2
 └── Dockerfile                  3-stage multi-arch build (deps -> build -> run)
 ```
+
+**Total Vitest cases after PR-4A-2:** 12 + 8 = 20.
+
+**Q-3 backend gap:** `/pending/auto-accepted` is a placeholder because
+the backing endpoint (`GET /api/spaces/{sid}/facts?validation_method=auto`)
+is Sprint 5 scope (trusted-source policy). The Pending Queue header links
+to it so the route isn't a dead end, but the page itself just explains
+the gap and links back to `/pending`.
 
 Stack: Next.js 15 App Router + TypeScript strict + Tailwind + IBM Plex.
 Auth: JWT carried by `lucid_jwt` cookie (set client-side by
