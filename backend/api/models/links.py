@@ -66,10 +66,43 @@ class LinkRecord(LucidBaseModel):
     LinkRecord type covers all three axes. Routes that create LinkRecord
     instances validate `link_type` against the matching enum based on
     the from/to node types.
+
+    ``link_nuance`` (DCR-002 v2, DR-066) is an optional free-form modifier
+    that narrows the meaning of ``link_type`` without expanding the
+    canonical 15-axis ontology. The beta data model just stores the
+    string; Phase 1+ LLM decomposition will populate it and the
+    Synergy Layer will key on it.
+
+    Free-form guidance (illustrative only — link_nuance accepts any string):
+
+      DERIVED_FROM
+        - "causal"         — caused by the referenced fact
+        - "responsive"     — a market / policy / behavioural response
+        - "evolutionary"   — incremental evolution
+        - "inspirational"  — inspired by but not strictly entailed
+
+      SUPPORTS
+        - "evidence"       — empirical evidence
+        - "mechanism"      — proposed mechanism
+        - "case"           — case study / anecdote
+
+      SUPERSEDES
+        - "improved"       — better instance of the same idea
+        - "outdated"       — original is now stale
+        - "scope_shift"    — applicability changed
+
+      CONTRADICTS
+        - "direct"         — values literally inconsistent
+        - "scope"          — both can be true under different scope
+        - "temporal"       — both can be true at different times
+
+    None / unset → behave as a plain link of the named type (backward
+    compatible with everything written before DCR-002 v2).
     """
 
     from_uid: UID
     to_uid: UID
     link_type: str
+    link_nuance: str | None = None
     weight: float = 1.0
     created_at: datetime = Field(default_factory=utc_now)
