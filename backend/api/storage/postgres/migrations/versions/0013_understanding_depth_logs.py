@@ -1,7 +1,7 @@
 """understanding_depth_logs (Track A DCR-002 v2 / DR-066)
 
-Revision ID: 0013
-Revises: 0012
+Revision ID: 0013_understanding_depth_logs
+Revises: 0012_structure_metrics_logs
 Create Date: 2026-06-01
 """
 from __future__ import annotations
@@ -9,10 +9,10 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0013"
-down_revision = "0012"
-branch_labels = None
-depends_on = None
+revision: str = "0013_understanding_depth_logs"
+down_revision: str | None = "0012_structure_metrics_logs"
+branch_labels: str | tuple[str, ...] | None = None
+depends_on: str | tuple[str, ...] | None = None
 
 
 def upgrade() -> None:

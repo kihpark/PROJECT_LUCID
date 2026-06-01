@@ -1,7 +1,7 @@
 """validation_logs (Sprint 4B PR-4B-1)
 
-Revision ID: 0014
-Revises: 0013
+Revision ID: 0014_validation_logs
+Revises: 0013_understanding_depth_logs
 Create Date: 2026-06-01
 """
 from __future__ import annotations
@@ -10,10 +10,10 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision = "0014"
-down_revision = "0013"
-branch_labels = None
-depends_on = None
+revision: str = "0014_validation_logs"
+down_revision: str | None = "0013_understanding_depth_logs"
+branch_labels: str | tuple[str, ...] | None = None
+depends_on: str | tuple[str, ...] | None = None
 
 
 def upgrade() -> None:
