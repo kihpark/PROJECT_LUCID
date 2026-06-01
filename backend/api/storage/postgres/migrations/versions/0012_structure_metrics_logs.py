@@ -1,7 +1,7 @@
 """structure_metrics_logs (Sprint 3 PR-3-3)
 
-Revision ID: 0012
-Revises: 0011
+Revision ID: 0012_structure_metrics_logs
+Revises: 0011_source_status_structure
 Create Date: 2026-06-01
 """
 from __future__ import annotations
@@ -9,10 +9,10 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0012"
-down_revision = "0011"
-branch_labels = None
-depends_on = None
+revision: str = "0012_structure_metrics_logs"
+down_revision: str | None = "0011_source_status_structure"
+branch_labels: str | tuple[str, ...] | None = None
+depends_on: str | tuple[str, ...] | None = None
 
 
 def upgrade() -> None:
