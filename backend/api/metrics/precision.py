@@ -26,6 +26,7 @@ from api.storage.postgres.orm import (
     ContradictionLog,
     NegationLog,
     PrecisionLog,
+    StructureMetricsLog,
 )
 
 logger = logging.getLogger("lucid.metrics")
@@ -103,6 +104,44 @@ def record_contradiction_confirmation(
         pair_uid=pair_uid,
         pattern=pattern,
         user_confirmed=user_confirmed,
+    )
+    session.add(row)
+    session.flush()
+    return row.id
+
+
+def record_structure_metrics(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    source_job_id: uuid.UUID,
+    fact_count: int,
+    object_count_auto: int,
+    object_count_new: int,
+    object_count_disambig: int,
+    link_count: int,
+    negates_count: int,
+    decomposer_model: str | None = None,
+    latency_ms: int | None = None,
+) -> uuid.UUID:
+    """Sprint 3 PR-3-3 — log structure-stage aggregate per SourceJob.
+
+    Called from `api/structure/processor.process_extracted_job()` right
+    before committing `status='structured'`. The row carries ONLY counts +
+    the decomposer model id + latency. Claim text, object names, and
+    source URLs are NEVER persisted (DCR-001 privacy invariant).
+    """
+    row = StructureMetricsLog(
+        user_id=user_id,
+        source_job_id=source_job_id,
+        fact_count=fact_count,
+        object_count_auto=object_count_auto,
+        object_count_new=object_count_new,
+        object_count_disambig=object_count_disambig,
+        link_count=link_count,
+        negates_count=negates_count,
+        decomposer_model=decomposer_model,
+        latency_ms=latency_ms,
     )
     session.add(row)
     session.flush()

@@ -21,13 +21,16 @@ from api.storage.postgres.compression import (
 )
 
 
-def test_source_status_has_four_sprint_2c_values():
-    """Sprint 3 will add more — but PR-2C-1 ships with 4."""
+def test_source_status_has_seven_sprint_3_values():
+    """Sprint 2C shipped 4 extract values; Sprint 3 PR-3-2 added 3 structure values."""
     assert set(SourceStatus) == {
         SourceStatus.PENDING_EXTRACT,
         SourceStatus.EXTRACTING,
         SourceStatus.EXTRACTED,
         SourceStatus.EXTRACT_FAILED,
+        SourceStatus.STRUCTURING,
+        SourceStatus.STRUCTURED,
+        SourceStatus.STRUCTURE_FAILED,
     }
 
 

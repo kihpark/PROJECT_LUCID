@@ -33,12 +33,16 @@ from api.models.source import SourceType
 
 
 class SourceStatus(StrEnum):
-    """SourceJob lifecycle states. Sprint 2C scope only — Sprint 3 extends."""
+    """SourceJob lifecycle states. Sprint 2C added the extract-side states;
+    Sprint 3 PR-3-2 adds the structure-side states."""
 
     PENDING_EXTRACT = "pending_extract"
     EXTRACTING = "extracting"
     EXTRACTED = "extracted"
     EXTRACT_FAILED = "extract_failed"
+    STRUCTURING = "structuring"
+    STRUCTURED = "structured"
+    STRUCTURE_FAILED = "structure_failed"
 
 
 CapturedFrom = Literal["chrome_ext", "pwa_share", "api"]

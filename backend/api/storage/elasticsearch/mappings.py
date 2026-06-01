@@ -96,6 +96,8 @@ LUCID_OBJECTS_MAPPING: dict[str, Any] = {
                 "properties": {
                     "target_uid": {"type": "keyword"},
                     "link_type": {"type": "keyword"},
+                    # DCR-002 v2 / DR-066 — optional free-form modifier
+                    "link_nuance": {"type": "keyword"},
                 },
             },
             "embedding": {

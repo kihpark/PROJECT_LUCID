@@ -29,7 +29,11 @@ Every exception inside `extract()` is caught. We classify into:
     -> status='extract_failed', error_message='Internal error: <type>'
     -> logged at ERROR level for the dev to find in the logs
 
-A successful run does NOT enqueue the Structure step — that's Sprint 3.
+A successful run dispatches the Structure stage to a daemon thread
+(see `_enqueue_structure_async`). The extract BackgroundTask returns
+as soon as status='extracted' is committed; Structure transitions
+`extracted` -> `structuring` -> `structured` on its own thread.
+For tests, set `_STRUCTURE_INLINE_FOR_TESTS = True` to run inline.
 """
 from __future__ import annotations
 
@@ -140,7 +144,11 @@ def process_source_job(job_id: uuid.UUID | str) -> None:
 
         # Success branch
         _record_success(session, job, result)
-        # TODO Sprint 3: enqueue a structure job for this source_job_id
+        # Sprint 3 PR-3-3: dispatch the Structure stage on a sibling
+        # daemon thread so the extract BackgroundTask returns
+        # immediately. The job's status transitions
+        # extracted -> structuring -> structured on the new thread.
+        _enqueue_structure_async(job.id)
 
     finally:
         session.close()
@@ -173,3 +181,65 @@ def _record_failure(session: Any, job: SourceJobORM, message: str) -> None:
     job.extracted_at = None
     job.updated_at = _utc_now()
     session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Structure-stage dispatch (Sprint 3 PR-3-3)
+# ---------------------------------------------------------------------------
+# `_STRUCTURE_INLINE_FOR_TESTS` is monkeypatched True inside tests so that
+# the structure stage runs on the calling thread and is observable
+# synchronously. In production the default (False) spawns a daemon
+# `threading.Thread` so the extract BackgroundTask completes immediately
+# and the client's /jobs/{id} poll sees status='extracted' between
+# extract and structure. Phase 1+ swaps this for a Celery task.
+
+_STRUCTURE_INLINE_FOR_TESTS: bool = False
+
+
+def _enqueue_structure_async(job_id: uuid.UUID) -> None:
+    """Dispatch `process_extracted_job(job_id)` on a daemon thread.
+
+    Failures inside the structure stage do NOT roll back the extract
+    success. The structure stage records its own terminal state
+    (`structured` / `structure_failed`).
+    """
+    try:
+        from api.structure.processor import process_extracted_job
+    except ImportError as exc:
+        logger.warning(
+            "structure module not importable (job %s): %s; "
+            "extract succeeded but structure will not run",
+            job_id, exc,
+        )
+        return
+
+    if _STRUCTURE_INLINE_FOR_TESTS:
+        try:
+            process_extracted_job(job_id)
+        except Exception:  # noqa: BLE001 - never raise out
+            logger.exception(
+                "process_extracted_job (inline) failed for job %s", job_id,
+            )
+        return
+
+    import threading
+    t = threading.Thread(
+        target=_structure_worker_safe,
+        args=(job_id,),
+        name=f"lucid-structure-{job_id}",
+        daemon=True,
+    )
+    t.start()
+
+
+def _structure_worker_safe(job_id: uuid.UUID) -> None:
+    """Thread entry point. Swallows exceptions so the daemon thread
+    exits quietly — failures are already recorded by the structure
+    processor itself on the SourceJob row."""
+    try:
+        from api.structure.processor import process_extracted_job
+        process_extracted_job(job_id)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "structure worker thread crashed for job %s", job_id,
+        )

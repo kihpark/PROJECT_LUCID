@@ -25,7 +25,9 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
+    Integer,
     LargeBinary,
     String,
     Text,
@@ -357,7 +359,8 @@ class SourceJobORM(Base):
     __tablename__ = "source_jobs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending_extract', 'extracting', 'extracted', 'extract_failed')",
+            "status IN ('pending_extract', 'extracting', 'extracted', 'extract_failed', "
+            "'structuring', 'structured', 'structure_failed')",
             name="ck_source_job_status",
         ),
         CheckConstraint(
@@ -435,3 +438,84 @@ __all__ = [
     "ContradictionLog",
     "SourceJobORM",
 ]
+
+
+class StructureMetricsLog(Base):
+    """Sprint 3 PR-3-3 — Structure-stage aggregate telemetry per SourceJob.
+
+    Privacy invariants (DCR-001):
+      - NO claim text
+      - NO source URL or object names
+      - source_job_id + user_id give analytic joinability inside the
+        user's own KS only; user delete cascades on both FKs
+    """
+
+    __tablename__ = "structure_metrics_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "fact_count >= 0 AND object_count_auto >= 0 "
+            "AND object_count_new >= 0 AND object_count_disambig >= 0 "
+            "AND link_count >= 0 AND negates_count >= 0",
+            name="ck_structure_metrics_nonneg",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("source_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    fact_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_count_auto: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_count_new: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_count_disambig: Mapped[int] = mapped_column(Integer, nullable=False)
+    link_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    negates_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    decomposer_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    logged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class UnderstandingDepthLog(Base):
+    """DCR-002 v2 — anonymized per-KS aggregate understanding-depth.
+
+    Privacy invariants (DCR-001):
+      - NO fact UIDs
+      - NO claim text, no source urls, no object names
+      - aggregate ratios only: average / max / isolated count / total
+    """
+
+    __tablename__ = "understanding_depth_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "average_depth >= 0 AND max_depth >= 0 "
+            "AND isolated_facts_count >= 0 AND total_facts >= 0",
+            name="ck_understanding_depth_nonneg",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    knowledge_space_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True,
+    )
+    average_depth: Mapped[float] = mapped_column(Float, nullable=False)
+    max_depth: Mapped[int] = mapped_column(Integer, nullable=False)
+    isolated_facts_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_facts: Mapped[int] = mapped_column(Integer, nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

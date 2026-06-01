@@ -221,6 +221,75 @@ Lucid/
 │   │   ├── queries.py             kNN / nori text / faceted search
 │   │   ├── objects.py             Object CRUD + symmetric link + 1-hop
 │   │   └── sources.py             create_or_update_source (capture_count)
+│   ├── api/structure/              Sprint 3 (Claude decomposition + DCR-001)
+│   │   ├── models.py              StructureResult + StructureFact +
+│   │   │                          StructureObject + 5/4/7 link models (PR-3-1)
+│   │   ├── prompts.py             System prompt: 13-class ontology +
+│   │   │                          7-step DCR-001 + KO/EN negation tokens +
+│   │   │                          6 few-shot examples (PR-3-1: 3; PR-3-2: +3
+│   │   │                          KO statistic / multi-fact / homonym). PR-3-2
+│   │   │                          adds forecast/conditional triggers to
+│   │   │                          negation_ambiguous (할 수도 / perhaps not / if)
+│   │   ├── claude_client.py       Sonnet 4.5 + ephemeral prompt caching +
+│   │   │                          safe JSON parse + graceful fallbacks (PR-3-1)
+│   │   ├── decomposer.py          decompose() public entry point (PR-3-1)
+│   │   ├── object_matcher.py      Sprint 3 PR-3-2: DCR-001 match-or-create.
+│   │   │                          exact name (KS-scoped) -> kNN (lucid_objects)
+│   │   │                          -> threshold check (0.98 tight / 0.95 std /
+│   │   │                          0.70 floor; DR-065 retired 0.85-0.95 semi-auto)
+│   │   ├── link_creator.py        Sprint 3 PR-3-2: 16 link types
+│   │   │                          (5 fact_object + 4 object_object + 7 fact_fact
+│   │   │                          incl. NEGATES). Object<->Object writes call
+│   │   │                          es.objects.link_objects (PR-1A-3 symmetric).
+│   │   └── processor.py           Sprint 3 PR-3-2 (extended in PR-3-3):
+│   │                              BackgroundTask worker. extracted ->
+│   │                              structuring -> structured /
+│   │                              structure_failed. Writes M1 telemetry
+│   │                              (fact_count / object_auto / object_new /
+│   │                              disambig_pending / link counts) into
+│   │                              source_job.extracted_metadata["structure"].
+│   │                              PR-3-3: also writes an anonymized aggregate
+│   │                              row to structure_metrics_logs via
+│   │                              metrics/precision.record_structure_metrics
+│   │                              (DCR-001 invariant — no claim text, no
+│   │                              object names, no source url).
+│   ├── api/extractors/processor.py — extended in PR-3-3
+│   │                              `_enqueue_structure_async` dispatches the
+│   │                              structure stage on a daemon thread so the
+│   │                              extract BackgroundTask returns immediately
+│   │                              after committing status='extracted'. Test
+│   │                              escape hatch `_STRUCTURE_INLINE_FOR_TESTS`
+│   │                              forces inline execution for deterministic
+│   │                              tests. Phase 1+: swap for Celery.
+│   ├── api/metrics/precision.py — extended in PR-3-3 with
+│   │                              `record_structure_metrics(session, *,
+│   │                              user_id, source_job_id, ...counts...,
+│   │                              decomposer_model, latency_ms)`
+│   ├── api/metrics/understanding.py — DR-066 (DCR-002 v2):
+│   │                              `compute_understanding_depth(fact_uid,
+│   │                              ks, max_hop=2)` + per-KS average.
+│   │                              Object-mediated 2-hop traversal over
+│   │                              lucid_objects.fact_uids — beta surface
+│   │                              metric, not user-facing yet.
+│   ├── api/storage/elasticsearch/link_nuance_migration.py — DR-066
+│   │                              idempotent `ensure_link_nuance_field()`
+│   │                              put_mapping helper for existing indices.
+│   ├── api/storage/postgres/orm.py — extended in PR-3-3 with
+│   │                              `StructureMetricsLog`; DR-066 adds
+│   │                              `UnderstandingDepthLog` (anonymized
+│   │                              aggregate per KS).
+│   ├── alembic/versions/0012_structure_metrics_logs.py — new in PR-3-3
+│   ├── alembic/versions/0013_understanding_depth_logs.py — DR-066
+│   ├── tests/integration/test_csvs_e2e.py — 9 PR-3-3 E2E tests:
+│   │                              capture -> extract -> structure flow,
+│   │                              negation preservation, object auto-merge,
+│   │                              disambig logging, structure failure,
+│   │                              idempotency, + milk_lactose live demo
+│   │                              (skipped when ANTHROPIC_API_KEY unset)
+│   ├── tests/fixtures/milk_lactose_example.py — beta demo fixture:
+│   │                              KO three-statement transcript +
+│   │                              expected facts/objects/links/negation +
+│   │                              `assess_match()` aggregate scorer
 │   ├── api/extractors/             Sprint 2C PR-2C-2 (implemented)
 │   │   ├── base.py                Extractor ABC + ExtractResult +
 │   │   │                          NoTranscriptError + UnknownSourceTypeError
@@ -455,6 +524,43 @@ These rules span multiple stages and must be enforced consistently:
    been retracted; archetype emerges from beta usage data.
    See beta-backlog.md §1. (DR-053)
 
+### CSVS auto-chain — Capture → Extract → Structure (Sprint 3 PR-3-3)
+
+The SourceJob lifecycle runs as a single BackgroundTask cascade with a
+sibling daemon thread for the structure stage so the client poll observes
+clean state transitions:
+
+```
+POST /api/capture (202)
+  └─ status = pending_extract
+     └─ BackgroundTask process_source_job(job_id)
+        ├─ status = extracting
+        ├─ dispatcher.extract(...)
+        │  ├─ success → status = extracted (commit)
+        │  │            └─ _enqueue_structure_async(job_id)
+        │  │               └─ daemon thread: process_extracted_job(job_id)
+        │  │                  ├─ status = structuring
+        │  │                  ├─ decompose() → match_or_create_object() →
+        │  │                  │  create_links() → record_structure_metrics()
+        │  │                  ├─ success → status = structured + telemetry
+        │  │                  └─ failure → status = structure_failed
+        │  │                                + error_message
+        │  └─ failure → status = extract_failed + error_message
+        │              (structure stage NOT enqueued)
+        └─ exit (extract BackgroundTask returns; structure runs on its
+           own thread)
+```
+
+**Failure isolation:** a structure failure does NOT roll back the extract
+success — `extracted_text` is intact and the structure stage can be
+retried by hand (`process_extracted_job(job_id)` is idempotent against
+terminal states and silently returns).
+
+**Test escape hatch:** `api.extractors.processor._STRUCTURE_INLINE_FOR_TESTS = True`
+forces the structure dispatcher to run on the calling thread so
+FastAPI's TestClient sees `status='structured'` by the time the BG
+cycle finishes (used by `tests/integration/test_csvs_e2e.py`).
+
 ---
 
 ## 5. Synergy Layer (C1–C4)
@@ -472,11 +578,25 @@ do once they accumulate in the graph.
 Below a density floor: degrade honestly. Label response as retrieval,
 not synthesis. Never fabricate a pattern from too few facts.
 
-### Subject Resolution (for C1 and Object linking)
-Two-gate filter — strict order:
-1. Primary: exact entity name match via [:MENTIONS] edges
-2. Fallback: vector similarity ≥ 0.88 ONLY (conservative — prevents false positives)
-Never use similarity below 0.88 for subject-to-Object linking.
+### Subject Resolution (for C1 and Object linking) — DCR-001 / DR-065
+
+Three-tier policy, strict order:
+
+1. **Exact entity name match** (case-insensitive, knowledge-space-scoped) via
+   the [:MENTIONS] edges / `lucid_objects.name.keyword` term filter.
+2. **Vector kNN** over `lucid_objects.embedding`. Class-dependent
+   auto-merge floor:
+   - **Person / Organization / Service** → score ≥ **0.98** to auto-merge
+   - All other classes → score ≥ **0.95** to auto-merge
+3. **Disambiguation band** 0.70 ≤ score < auto-floor:
+   surface to the Validate UI's disambiguation queue; user picks.
+4. **Below floor** (< 0.70): create a new Object with a fresh UID.
+
+The retired 0.85–0.95 semi-auto band (DR-065) is forbidden; everything
+between 0.70 and the per-class auto-floor must go through the
+disambiguation queue rather than being silently merged.
+
+Implemented in `backend/api/structure/object_matcher.py::match_or_create_object`.
 
 ### C1 Contradiction Detection Sequencing
 ALWAYS post-commit. Never inside the write transaction.
@@ -507,6 +627,24 @@ C2 Pattern Synthesis may traverse `EXAMPLE_OF` / `SUPPORTS` edges to expand
 the candidate fact set, but at their lower edge weight and clearly labeled.
 Every pattern claim must still cite ≥ 1 `DERIVED_FROM`-grounded fact; a
 synthetic edge may never be a pattern's sole support. C2 is S2 scope.
+
+### Link Nuance Modifier (DR-066 — DCR-002 v2)
+
+`LinkRecord.link_nuance: str | None` is a free-form modifier layered on
+top of the canonical 15-axis `link_type`. The beta data model and ES
+mapping (`lucid_objects.connected_objects.link_nuance: keyword`) accept
+the field; the decomposer does NOT populate it in beta. Phase 1+ LLM
+decomposition extracts the modifier and the Synergy Layer keys on it
+(e.g. distinguishing `derived_from` causal vs evolutionary). Illustrative
+modifier values per link type live in the `LinkRecord` docstring; the
+field accepts any string so the modifier vocabulary can evolve without
+schema migrations.
+
+`api/metrics/understanding.compute_understanding_depth(fact_uid, ks)` is
+the beta-time scorer: counts distinct OTHER facts reachable within 2
+Object-mediated hops inside the KS. Stored as anonymized aggregates in
+`understanding_depth_logs` (DR-066). NOT surfaced to users in beta —
+Phase 1+ wires it into Stellar View afterglow + Dashboard.
 
 ### Multi-validator Quorum
 ```python
