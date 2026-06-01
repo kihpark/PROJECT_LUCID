@@ -276,6 +276,37 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             "disambiguation_pending": disambig_pending,
         }
         job.extracted_metadata = meta
+        # M1-style anonymized aggregate row (DCR-001 privacy invariant:
+        # counts + model + latency only — no claim text, no object names).
+        try:
+            from api.metrics.precision import record_structure_metrics
+            record_structure_metrics(
+                session,
+                user_id=job.user_id,
+                source_job_id=job.id,
+                fact_count=len(decomp.facts),
+                object_count_auto=sum(
+                    1 for m in match_per_object.values()
+                    if m.matched_object_uid is not None
+                ),
+                object_count_new=sum(
+                    1 for m in match_per_object.values() if m.created_new
+                ),
+                object_count_disambig=len(disambig_pending),
+                link_count=(
+                    link_result.fact_object_count
+                    + link_result.fact_fact_count
+                    + link_result.object_object_count
+                ),
+                negates_count=link_result.negates_count,
+                decomposer_model=decomp.model_used,
+                latency_ms=decomp.latency_ms,
+            )
+        except Exception:  # noqa: BLE001 - never fail the structure stage on telemetry
+            logger.exception(
+                "record_structure_metrics failed for job %s; success path continues",
+                job_id,
+            )
         job.status = SourceStatus.STRUCTURED.value
         job.updated_at = _utc_now()
         session.commit()

@@ -26,6 +26,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     LargeBinary,
     String,
     Text,
@@ -436,3 +437,48 @@ __all__ = [
     "ContradictionLog",
     "SourceJobORM",
 ]
+
+
+class StructureMetricsLog(Base):
+    """Sprint 3 PR-3-3 — Structure-stage aggregate telemetry per SourceJob.
+
+    Privacy invariants (DCR-001):
+      - NO claim text
+      - NO source URL or object names
+      - source_job_id + user_id give analytic joinability inside the
+        user's own KS only; user delete cascades on both FKs
+    """
+
+    __tablename__ = "structure_metrics_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "fact_count >= 0 AND object_count_auto >= 0 "
+            "AND object_count_new >= 0 AND object_count_disambig >= 0 "
+            "AND link_count >= 0 AND negates_count >= 0",
+            name="ck_structure_metrics_nonneg",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("source_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    fact_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_count_auto: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_count_new: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_count_disambig: Mapped[int] = mapped_column(Integer, nullable=False)
+    link_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    negates_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    decomposer_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    logged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
