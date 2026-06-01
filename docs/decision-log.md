@@ -104,6 +104,7 @@ New active DRs that supersede the above:
 | DR-053 | Beta is wedge discovery, not validation (PO 2026-05-21) |
 | DR-064 | v2 stack: Postgres + Elasticsearch (with nori); Neo4j + FAISS retired (Sprint 1A PR-1A-1, 2026-05-21) |
 | DR-065 | DCR-001 adoption: Negation (negation_flag + negation_scope + NEGATES link), Entity Disambiguation (user-delegated, semi-auto band retired, Person/Org/Service tightened to 0.98), Internal Metrics (M1 Extraction Precision, M2 Negation Error Rate, M3 Contradiction Recall — anonymized aggregate only) | Adopted from PO analysis of MIRAE Asset GraphRAG case (2026-05-28). See structure-stage-spec.md Appendix A and validate-stage-spec.md Appendix A. |
+| DR-066 | DCR-002 v2: Link Nuance Modifier (meta/world layer split abandoned). LinkRecord gains optional `link_nuance: str | None` carrying a free-form modifier on top of the canonical 15-axis link type. Beta data model only — Phase 1+ LLM decomposition populates it and the Synergy Layer keys on it. UnderstandingDepthLog (anonymized average / max / isolated-count / total per KS) introduced as the surface metric for Stellar afterglow + Dashboard. | Two-layer split (canonical link + nuance metadata) was rejected as cognitive overload for end users; single-layer with optional modifier delivers the same expressiveness without forcing the user to learn a second ontology. Adopted 2026-06-01 (chore/lucid-link-nuance). |
 
 ## Open
 

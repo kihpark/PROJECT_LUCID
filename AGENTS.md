@@ -265,10 +265,21 @@ Lucid/
 │   │                              `record_structure_metrics(session, *,
 │   │                              user_id, source_job_id, ...counts...,
 │   │                              decomposer_model, latency_ms)`
+│   ├── api/metrics/understanding.py — DR-066 (DCR-002 v2):
+│   │                              `compute_understanding_depth(fact_uid,
+│   │                              ks, max_hop=2)` + per-KS average.
+│   │                              Object-mediated 2-hop traversal over
+│   │                              lucid_objects.fact_uids — beta surface
+│   │                              metric, not user-facing yet.
+│   ├── api/storage/elasticsearch/link_nuance_migration.py — DR-066
+│   │                              idempotent `ensure_link_nuance_field()`
+│   │                              put_mapping helper for existing indices.
 │   ├── api/storage/postgres/orm.py — extended in PR-3-3 with
-│   │                              `StructureMetricsLog` (table
-│   │                              `structure_metrics_logs`)
+│   │                              `StructureMetricsLog`; DR-066 adds
+│   │                              `UnderstandingDepthLog` (anonymized
+│   │                              aggregate per KS).
 │   ├── alembic/versions/0012_structure_metrics_logs.py — new in PR-3-3
+│   ├── alembic/versions/0013_understanding_depth_logs.py — DR-066
 │   ├── tests/integration/test_csvs_e2e.py — 9 PR-3-3 E2E tests:
 │   │                              capture -> extract -> structure flow,
 │   │                              negation preservation, object auto-merge,
@@ -616,6 +627,24 @@ C2 Pattern Synthesis may traverse `EXAMPLE_OF` / `SUPPORTS` edges to expand
 the candidate fact set, but at their lower edge weight and clearly labeled.
 Every pattern claim must still cite ≥ 1 `DERIVED_FROM`-grounded fact; a
 synthetic edge may never be a pattern's sole support. C2 is S2 scope.
+
+### Link Nuance Modifier (DR-066 — DCR-002 v2)
+
+`LinkRecord.link_nuance: str | None` is a free-form modifier layered on
+top of the canonical 15-axis `link_type`. The beta data model and ES
+mapping (`lucid_objects.connected_objects.link_nuance: keyword`) accept
+the field; the decomposer does NOT populate it in beta. Phase 1+ LLM
+decomposition extracts the modifier and the Synergy Layer keys on it
+(e.g. distinguishing `derived_from` causal vs evolutionary). Illustrative
+modifier values per link type live in the `LinkRecord` docstring; the
+field accepts any string so the modifier vocabulary can evolve without
+schema migrations.
+
+`api/metrics/understanding.compute_understanding_depth(fact_uid, ks)` is
+the beta-time scorer: counts distinct OTHER facts reachable within 2
+Object-mediated hops inside the KS. Stored as anonymized aggregates in
+`understanding_depth_logs` (DR-066). NOT surfaced to users in beta —
+Phase 1+ wires it into Stellar View afterglow + Dashboard.
 
 ### Multi-validator Quorum
 ```python
