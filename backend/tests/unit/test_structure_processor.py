@@ -204,3 +204,110 @@ def test_invalid_uuid_string_returns_silently():
     ) as mock_sm:
         process_extracted_job("not-a-uuid")
     mock_sm.assert_not_called()
+
+
+def test_processor_persists_facts_content():
+    """chore 5 — every fact's content lands in extracted_metadata.structure.facts."""
+    job = _make_job(SourceStatus.EXTRACTED.value, text="content.")
+    session = MagicMock()
+    session.get.return_value = job
+    decomp = _make_decomp(n_facts=3, n_objects=2)
+    match_result = MatchResult(
+        matched_object_uid="obj-X", decision_reason="exact_match",
+    )
+
+    with patch(
+        "api.structure.processor.make_sessionmaker",
+        return_value=lambda: session,
+    ), patch(
+        "api.structure.processor.decompose", return_value=decomp,
+    ), patch(
+        "api.structure.processor.get_embedding",
+        return_value=[0.1] * 1536,
+    ), patch(
+        "api.structure.processor.match_or_create_object",
+        return_value=match_result,
+    ):
+        process_extracted_job(job.id)
+
+    s = job.extracted_metadata["structure"]
+    assert len(s["facts"]) == 3
+    for i, fact in enumerate(s["facts"], start=1):
+        # by_alias resolves type_ -> type
+        assert fact["type"] == "proposition"
+        assert fact["claim"].startswith("Claim ")
+        assert fact["subject_uid"] == "obj-1"
+        assert fact["predicate"] == "has_property"
+        assert fact["fact_uid"] == f"fn-{i}"
+        # The original Pydantic field also lands so the route's
+        # `facts.uid` fallback keeps working.
+        assert fact["uid"] == f"fn-{i}"
+
+
+def test_processor_persists_objects_with_class_alias():
+    """chore 5 — objects[] uses 'class' (alias of class_) for the ObjectClass enum."""
+    job = _make_job(SourceStatus.EXTRACTED.value, text="content.")
+    session = MagicMock()
+    session.get.return_value = job
+    decomp = _make_decomp(n_facts=1, n_objects=2)
+    match_result = MatchResult(
+        matched_object_uid="obj-X", decision_reason="exact_match",
+    )
+
+    with patch(
+        "api.structure.processor.make_sessionmaker",
+        return_value=lambda: session,
+    ), patch(
+        "api.structure.processor.decompose", return_value=decomp,
+    ), patch(
+        "api.structure.processor.get_embedding",
+        return_value=[0.1] * 1536,
+    ), patch(
+        "api.structure.processor.match_or_create_object",
+        return_value=match_result,
+    ):
+        process_extracted_job(job.id)
+
+    s = job.extracted_metadata["structure"]
+    assert len(s["objects"]) == 2
+    for o in s["objects"]:
+        assert o["class"] == "organization"   # alias resolved, NOT class_
+        assert o["name"].startswith("Org-")
+        assert "uid" in o
+        assert "properties" in o
+
+
+def test_processor_persists_links_detail():
+    """chore 5 — fact_object_links_detail + fact_fact_links_detail carry full records."""
+    job = _make_job(SourceStatus.EXTRACTED.value, text="content.")
+    session = MagicMock()
+    session.get.return_value = job
+    decomp = _make_decomp(n_facts=1, n_objects=1)
+    match_result = MatchResult(
+        matched_object_uid="obj-X", decision_reason="exact_match",
+    )
+
+    with patch(
+        "api.structure.processor.make_sessionmaker",
+        return_value=lambda: session,
+    ), patch(
+        "api.structure.processor.decompose", return_value=decomp,
+    ), patch(
+        "api.structure.processor.get_embedding",
+        return_value=[0.1] * 1536,
+    ), patch(
+        "api.structure.processor.match_or_create_object",
+        return_value=match_result,
+    ):
+        process_extracted_job(job.id)
+
+    s = job.extracted_metadata["structure"]
+    # _make_decomp emits exactly one fact_object_link (involves).
+    assert len(s["fact_object_links_detail"]) == 1
+    link = s["fact_object_links_detail"][0]
+    assert link["link_type"] == "involves"
+    assert link["fact_uid"] == "fn-1"
+    # Object uid is remapped via uid_map to the matched_object_uid.
+    assert link["object_uid"] == "obj-X"
+    # fact_fact_links is empty in _make_decomp by default.
+    assert s["fact_fact_links_detail"] == []
