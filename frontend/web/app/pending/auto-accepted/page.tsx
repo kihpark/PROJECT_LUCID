@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Route } from 'next';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,7 @@ export default function AutoAcceptedPage() {
           The trusted-source auto-accept flow lands in Sprint 5 — until then, every
           captured fact runs through the standard Decide path on the {' '}
           <Link
-            href={{ pathname: '/pending' } as never}
+            href={'/pending' as Route}
             className="text-accent-cool underline"
           >
             Pending Queue

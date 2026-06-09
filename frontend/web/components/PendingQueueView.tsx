@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { PendingFilters } from './PendingFilters';
 import { PendingQueueList } from './PendingQueueList';
 import { listPending, ApiError } from '@/lib/api';
@@ -44,7 +45,7 @@ export function PendingQueueView({ spaceId }: Props) {
       <header className="flex items-baseline justify-between mb-6">
         <h1 className="text-2xl font-light">Pending Queue</h1>
         <Link
-          href={{ pathname: '/pending/auto-accepted' } as never}
+          href={'/pending/auto-accepted' as Route}
           className="text-sm text-accent-cool underline hover:text-accent-cool/80"
         >
           Auto-accepted →

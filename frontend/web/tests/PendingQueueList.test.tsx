@@ -55,4 +55,17 @@ describe('PendingQueueList', () => {
     fireEvent.click(screen.getByText('Next →'));
     expect(onPage).toHaveBeenCalledWith(20);
   });
+
+  it('card href is the resolved dynamic segment, not a literal [jobId]', () => {
+    // Regression for Walking-Skeleton Iteration 2 Bug 1 — the
+    // object-form href ({ pathname: '/pending/[jobId]', query: { jobId } })
+    // does NOT substitute the dynamic segment; Next.js rendered it as
+    // `/pending/[jobId]?jobId=<UUID>` and clicks landed on NotFound.
+    render(<PendingQueueList page={page} onPage={() => {}} />);
+    const link = screen.getByTestId('pending-card-job-1').closest('a');
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute('href')).toBe('/pending/job-1');
+    expect(link!.getAttribute('href')).not.toContain('[jobId]');
+    expect(link!.getAttribute('href')).not.toContain('?jobId=');
+  });
 });

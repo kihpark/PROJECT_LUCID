@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import type { Route } from 'next';
 import { ActionButton } from './ActionButton';
 import type { PendingJobSummary, PendingPage } from '@/lib/types';
 
@@ -12,7 +13,7 @@ interface Props {
 function PendingCard({ job }: { job: PendingJobSummary }) {
   return (
     <Link
-      href={{ pathname: '/pending/[jobId]', query: { jobId: job.job_id } }}
+      href={`/pending/${job.job_id}` as Route}
       className="block rounded-lg border border-border-subtle bg-bg-card p-4 hover:bg-bg-card-hover transition-colors"
       data-testid={`pending-card-${job.job_id}`}
     >
