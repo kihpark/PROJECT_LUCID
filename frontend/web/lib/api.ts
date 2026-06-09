@@ -14,9 +14,9 @@ import type {
   PendingPage,
 } from './types';
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000');
+// Client-side fetch only — lib/api is imported by use-client components.
+// SSR fetches live in lib/server-fetch which has the INTERNAL_API_URL branch.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export class ApiError extends Error {
   status: number;

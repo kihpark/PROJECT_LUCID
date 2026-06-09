@@ -18,7 +18,33 @@ export interface ServerFetchError extends Error {
   causeCode?: string;
 }
 
+/**
+ * Return the API base URL appropriate for the current execution context.
+ *
+ *   - typeof window === 'undefined' (Next SSR / Node runtime):
+ *     prefer INTERNAL_API_URL (docker DNS name `backend:8000`) so the
+ *     fetch goes inside the container network. Fall back to
+ *     NEXT_PUBLIC_API_URL when running outside docker (pnpm dev on
+ *     the host with backend on the host's 8000), then to the local
+ *     default.
+ *
+ *   - typeof window !== 'undefined' (browser):
+ *     NEXT_PUBLIC_API_URL only. INTERNAL_API_URL is meaningless in
+ *     the browser — it points at a hostname only the docker network
+ *     can resolve.
+ *
+ * Walking-Skeleton Iteration 2 Bug 2: without this split, SSR fetched
+ * `http://localhost:8000` from inside the web container and looped
+ * back to itself (ECONNREFUSED).
+ */
 export function apiBase(): string {
+  if (typeof window === 'undefined') {
+    return (
+      process.env.INTERNAL_API_URL
+      || process.env.NEXT_PUBLIC_API_URL
+      || 'http://localhost:8000'
+    );
+  }
   return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 }
 
