@@ -63,7 +63,14 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: "http://backend:8000"
+      # NEXT_PUBLIC_* is inlined at build time and reaches the browser,
+      # which talks to the host-mapped backend port (8000:8000).
+      NEXT_PUBLIC_API_URL: "http://localhost:8000"
+      # INTERNAL_API_URL is server-side only — Next SSR runs inside
+      # the web container, where the docker DNS name `backend` resolves
+      # to the backend container. Using `localhost` here would loop
+      # back to the web container itself (ECONNREFUSED).
+      INTERNAL_API_URL: "http://backend:8000"
       NODE_ENV: production
     depends_on:
       - backend
