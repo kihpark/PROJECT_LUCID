@@ -49,7 +49,7 @@ from api.storage.postgres.orm import SourceJobORM
 from api.storage.postgres.session import make_sessionmaker
 from api.structure.decomposer import decompose
 from api.structure.link_creator import LinkCreationResult, create_links
-from api.structure.models import StructureObject, StructureResult
+from api.structure.models import StructureFact, StructureObject, StructureResult
 from api.structure.object_matcher import MatchResult, match_or_create_object
 
 logger = logging.getLogger("lucid.structure.processor")
@@ -166,6 +166,32 @@ def _remap_links(
     return fact_object, fact_fact
 
 
+def _serialize_struct_fact(f: StructureFact) -> dict[str, Any]:
+    """Pydantic StructureFact -> dict suitable for JSONB.
+
+    `model_dump(by_alias=True, mode='json')` rewrites `type_` -> `type`
+    and turns enums/datetimes into strings. The Decide Overlay's
+    FactCard reads `fact.fact_uid || fact.uid` so we also project
+    `uid` -> `fact_uid` to match the FactNode terminology.
+    """
+    d = f.model_dump(by_alias=True, mode="json")
+    if "uid" in d and "fact_uid" not in d:
+        d["fact_uid"] = d["uid"]
+    return d
+
+
+def _serialize_struct_object(o: StructureObject) -> dict[str, Any]:
+    """Pydantic StructureObject -> dict suitable for JSONB.
+
+    `class_` -> `class` is handled by `by_alias=True`. We also
+    coerce `properties` to a plain dict so `extra='forbid'` re-validation
+    in tests doesn't trip on Mapping subclasses.
+    """
+    d = o.model_dump(by_alias=True, mode="json")
+    d["properties"] = dict(d.get("properties") or {})
+    return d
+
+
 def process_extracted_job(job_id: uuid.UUID | str) -> None:
     """BackgroundTasks entry. Safe to call on missing / terminal jobs."""
     if isinstance(job_id, str):
@@ -250,7 +276,35 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             es_update_object_adjacency=False,
         )
 
-        # M1 / E telemetry: counts written to extracted_metadata["structure"]
+        # Serialise the decomposer payloads for the Decide Overlay (DR-067).
+        # The route reads facts / objects / *_links_detail directly from the
+        # structure metadata; before chore 5 these were never written, so
+        # the UI showed "0 pending fact(s)" even on a successful structure.
+        facts_payload = [
+            _serialize_struct_fact(f) for f in decomp.facts
+        ]
+        objects_payload = [
+            _serialize_struct_object(o) for o in decomp.objects
+        ]
+        fact_object_links_detail = [
+            {
+                "fact_uid": fo.fact_uid,
+                "object_uid": uid_map.get(fo.object_uid, fo.object_uid),
+                "link_type": str(fo.link_type),
+                "properties": dict(fo.properties or {}),
+            }
+            for fo in decomp.fact_object_links
+        ]
+        fact_fact_links_detail = [
+            {
+                "from_uid": ff.from_uid,
+                "to_uid": ff.to_uid,
+                "link_type": str(ff.link_type),
+            }
+            for ff in decomp.fact_fact_links
+        ]
+
+        # M1 / E telemetry + DR-067 content payload.
         meta = dict(job.extracted_metadata or {})
         meta["structure"] = {
             "fact_count": len(decomp.facts),
@@ -262,6 +316,8 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
                 1 for m in match_per_object.values() if m.created_new
             ),
             "object_disambig_pending": len(disambig_pending),
+            # Pre-chore-5 names kept for back-compat — these were ints
+            # (counts) so anything reading them as numbers still works.
             "fact_object_links": link_result.fact_object_count,
             "fact_fact_links": link_result.fact_fact_count,
             "negates_links": link_result.negates_count,
@@ -274,6 +330,11 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             "output_token_estimate": decomp.output_token_estimate,
             "matches": match_summaries,
             "disambiguation_pending": disambig_pending,
+            # chore 5 — full content payloads the Decide Overlay reads.
+            "facts": facts_payload,
+            "objects": objects_payload,
+            "fact_object_links_detail": fact_object_links_detail,
+            "fact_fact_links_detail": fact_fact_links_detail,
         }
         job.extracted_metadata = meta
         # M1-style anonymized aggregate row (DCR-001 privacy invariant:
