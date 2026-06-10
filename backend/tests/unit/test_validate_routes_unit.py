@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,6 +18,7 @@ from api.models.validate import (
     GraphNoteCreateRequest,
     ObjectDecision,
     PendingFilters,
+    PendingJobDetail,
 )
 from api.storage.postgres.orm import ValidationLog
 
@@ -141,3 +143,36 @@ def test_validation_log_check_constraint_blocks_unknown_action():
         "accept_all", "discard_job",
     ):
         assert f"'{a}'" in sql
+
+
+def test_pending_job_detail_carries_decided_fact_uids_field():
+    """chore 7 — PendingJobDetail surface gains decided_fact_uids."""
+    d = PendingJobDetail(
+        job_id="job-1",
+        source_url="https://example.com",
+        source_type="web_article",
+        captured_at=datetime.now(UTC),
+        captured_from="chrome_ext",
+        knowledge_space_id="ks-1",
+        extracted_text_preview="...",
+        facts=[],
+        decided_fact_uids=["fn-1", "fn-2"],
+    )
+    assert d.decided_fact_uids == ["fn-1", "fn-2"]
+    # Round-trip through model_dump for the FastAPI response surface.
+    dumped = d.model_dump(mode="json")
+    assert dumped["decided_fact_uids"] == ["fn-1", "fn-2"]
+
+
+def test_pending_job_detail_default_decided_fact_uids_is_empty():
+    """chore 7 — back-compat with clients that don't send the field."""
+    d = PendingJobDetail(
+        job_id="job-1",
+        source_url="https://example.com",
+        source_type="web_article",
+        captured_at=datetime.now(UTC),
+        captured_from="chrome_ext",
+        knowledge_space_id="ks-1",
+        extracted_text_preview="...",
+    )
+    assert d.decided_fact_uids == []

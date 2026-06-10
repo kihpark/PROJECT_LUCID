@@ -47,7 +47,13 @@ class PendingJobSummary(LucidBaseModel):
 
 
 class PendingJobDetail(LucidBaseModel):
-    """GET /pending/{job_id} — full decomposition output."""
+    """GET /pending/{job_id} — full decomposition output.
+
+    chore 7: `facts` is filtered to PENDING-only — any fact whose uid
+    appears in `decided_fact_uids` is dropped from this array. The
+    decided set is exposed separately so the UI can render counts
+    ("3 of 5 facts decided") without re-fetching everything.
+    """
 
     job_id: str
     source_url: str
@@ -57,6 +63,7 @@ class PendingJobDetail(LucidBaseModel):
     knowledge_space_id: str
     extracted_text_preview: str
     facts: list[dict[str, Any]] = Field(default_factory=list)
+    decided_fact_uids: list[str] = Field(default_factory=list)
     objects: list[dict[str, Any]] = Field(default_factory=list)
     fact_object_links: list[dict[str, Any]] = Field(default_factory=list)
     fact_fact_links: list[dict[str, Any]] = Field(default_factory=list)

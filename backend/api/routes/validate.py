@@ -197,6 +197,14 @@ def get_pending_detail(
         ks = _resolve_space(session, space_id, user)
         job = _resolve_job(session, job_id, ks)
         s = _structure_meta(job)
+        decided = set(s.get("decided_fact_uids") or [])
+        all_facts: list[dict[str, Any]] = (
+            s.get("facts_summary", []) or s.get("facts", []) or []
+        )
+        pending_facts = [
+            f for f in all_facts
+            if (f.get("fact_uid") or f.get("uid")) not in decided
+        ]
         return PendingJobDetail(
             job_id=str(job.id),
             source_url=job.source_url,
@@ -205,7 +213,8 @@ def get_pending_detail(
             captured_from=job.captured_from,
             knowledge_space_id=str(ks.id),
             extracted_text_preview=(job.extracted_text or "")[:2000],
-            facts=s.get("facts_summary", []) or s.get("facts", []),
+            facts=pending_facts,
+            decided_fact_uids=sorted(decided),
             objects=s.get("objects_summary", []) or s.get("objects", []),
             fact_object_links=s.get("fact_object_links_detail", []),
             fact_fact_links=s.get("fact_fact_links_detail", []),
