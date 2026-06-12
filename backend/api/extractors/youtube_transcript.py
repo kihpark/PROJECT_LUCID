@@ -82,7 +82,9 @@ class YoutubeTranscriptExtractor(Extractor):
             ) from exc
 
         try:
-            transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+            # v1.x: list_transcripts is no longer a classmethod; must
+            # instantiate then call .list(video_id).
+            transcripts = YouTubeTranscriptApi().list(video_id)
         except (TranscriptsDisabled, Exception) as exc:  # noqa: BLE001
             raise NoTranscriptError(str(exc)) from exc
 
@@ -98,7 +100,10 @@ class YoutubeTranscriptExtractor(Extractor):
             raise NoTranscriptError(str(exc)) from exc
 
         try:
-            entries = transcript.fetch()
+            # v1.x: .fetch() returns FetchedTranscript (not list[dict]);
+            # .to_raw_data() converts to the v0.x-compatible shape that
+            # the iteration loop below expects.
+            entries = transcript.fetch().to_raw_data()
         except Exception as exc:  # noqa: BLE001
             raise NoTranscriptError(f"fetch failed: {exc}") from exc
 
