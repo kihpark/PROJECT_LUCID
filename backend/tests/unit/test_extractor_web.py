@@ -1,134 +1,228 @@
-"""Unit: web_article extractor."""
+"""Unit tests for the v2 hybrid web_article extractor.
+
+The chain (in order):
+  1. trafilatura
+  2. per-host CSS selectors (KOREAN_MEDIA_SELECTORS)
+  3. readability + BeautifulSoup
+  4. newspaper3k
+  5. ExtractorError (site-aware diagnostic)
+
+Tests use stubs to force a strategy to "win" so the chain ordering is
+deterministic. The host-suffix matcher gets its own test because that
+helper is the one the v1 work didn't exercise.
+"""
 from __future__ import annotations
 
-from api.extractors.web_article import WebArticleExtractor, _detect_language
+from unittest.mock import patch
+
+import pytest
+
+from api.extractors.base import ExtractorError
+from api.extractors.web_article import (
+    FALLBACK_TRIGGER_CHARS,
+    KOREAN_MEDIA_SELECTORS,
+    WebArticleExtractor,
+    _selectors_for_host,
+)
 
 
-def test_detect_language_ko():
-    assert _detect_language("한국어 텍스트만") == "ko"
-
-
-def test_detect_language_en():
-    assert _detect_language("This is purely English text.") == "en"
-
-
-def test_detect_language_mixed():
-    assert _detect_language("English mixed 한국어 text") == "mixed"
-
-
-def test_web_extractor_strips_script_style_and_extracts_title():
-    html = (
-        '<html><head><title>Real Title</title>'
-        '<meta name="author" content="Jane Doe"></head>'
-        '<body><h1>Header</h1><article><p>This is the body of the article that should be long enough to clear the paywall warning floor. ' + ("Filler. " * 100) + '</p></article>'
-        '<script>alert(1)</script><style>.x{}</style></body></html>'
-    ).encode("utf-8")
-    e = WebArticleExtractor()
-    result = e.extract(html, {"source_url": "https://example.com"})
-    assert "alert(1)" not in result.merged_text
-    assert ".x{}" not in result.merged_text
-    assert "body of the article" in result.merged_text
-    # paywall warning should NOT fire
-    assert not any("paywall" in w.lower() for w in result.extraction_warnings)
-
-
-def test_web_extractor_paywall_warning_on_short_body():
-    """When readability extracts a body whose char-count falls under the
-    PAYWALL_ABS_FLOOR (200), the warning must fire."""
-    html = b"<html><head><title>X</title></head><body><article><p>too short</p></article></body></html>"
-    result = WebArticleExtractor().extract(html, {})
-    # body length is well below 200 chars, so paywall warning is mandatory
-    assert any("paywall" in w.lower() for w in result.extraction_warnings), (
-        f"warnings: {result.extraction_warnings}; body: {result.merged_text!r}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# chore 6 — Korean media fallback + diagnostic ExtractorError
-# ---------------------------------------------------------------------------
-def _wrap_html(body_html: str) -> bytes:
+def _html(body_html: str) -> bytes:
     return (
         f"<!doctype html><html><head><title>t</title></head>"
         f"<body>{body_html}</body></html>"
     ).encode()
 
 
-def test_hankyung_selector_fallback_recovers_body():
-    """A hankyung-style article with empty readability output recovers
-    via the #articletxt selector chain."""
-    from api.extractors.web_article import WebArticleExtractor
-
-    # Use real Korean text (>= 200 chars after merging) so the
-    # FALLBACK_TRIGGER_CHARS threshold is crossed naturally.
-    body = "한국경제 기사 본문입니다. 한경 기사 테스트. " * 30
-    raw = _wrap_html(
-        f"<div class='ad'>ad ad ad</div>"
-        f"<div id='articletxt'><p>{body}</p></div>"
-    )
-    result = WebArticleExtractor().extract(
-        raw, {"source_url": "https://www.hankyung.com/article/2026010101"}
-    )
-    assert "한국경제 기사 본문" in result.merged_text
-    assert (
-        result.extracted_metadata["extractor_strategy"]
-        in ("selector:#articletxt", "readability")
-    )
+def _kor_long(n: int = 25) -> str:
+    """A Korean phrase long enough to clear FALLBACK_TRIGGER_CHARS."""
+    return ("한국경제 기사 본문 테스트입니다. " * n).strip()
 
 
-def test_chosun_selector_fallback_uses_par_class():
-    """A chosun-style layout with .par paragraphs recovers."""
-    from api.extractors.web_article import WebArticleExtractor
+# ---------------------------------------------------------------------------
+# Host suffix matcher
+# ---------------------------------------------------------------------------
 
-    body = "<p class='par'>" + "조선일보 기사 본문 테스트. " * 50 + "</p>"
-    raw = _wrap_html(f"<div class='ad'>ad</div>{body}")
-    result = WebArticleExtractor().extract(
-        raw, {"source_url": "https://news.chosun.com/site/data/html/2026/01.html"}
-    )
-    assert "조선일보 기사 본문" in result.merged_text
+def test_selectors_for_host_exact_match():
+    key, sels = _selectors_for_host("hankyung.com")
+    assert key == "hankyung.com"
+    assert "#articletxt" in sels
 
 
-def test_unknown_host_with_empty_body_raises_with_url_hint():
-    """Unknown host + nothing usable -> ExtractorError mentioning host."""
-    import pytest
-
-    from api.extractors.base import ExtractorError
-    from api.extractors.web_article import WebArticleExtractor
-
-    # Empty body produces truly empty merged_text (no <title>/<div>x
-    # leaking through readability's fallback path).
-    raw = b"<!doctype html><html><head></head><body></body></html>"
-    with pytest.raises(ExtractorError) as exc_info:
-        WebArticleExtractor().extract(
-            raw, {"source_url": "https://example.com/whatever"}
-        )
-    msg = str(exc_info.value)
-    assert "example.com" in msg
-    assert "selection-save" in msg
-
-
-def test_known_host_empty_layout_raises_with_selectors_listed():
-    """Known host + no selector hits -> ExtractorError lists the
-    selectors tried so PO can see what failed."""
-    import pytest
-
-    from api.extractors.base import ExtractorError
-    from api.extractors.web_article import WebArticleExtractor
-
-    raw = b"<!doctype html><html><head></head><body></body></html>"
-    with pytest.raises(ExtractorError) as exc_info:
-        WebArticleExtractor().extract(
-            raw, {"source_url": "https://www.hankyung.com/article/xyz"}
-        )
-    msg = str(exc_info.value)
-    assert "hankyung.com" in msg
-    assert "#articletxt" in msg
-    assert "selection-save" in msg
-
-
-def test_selector_suffix_matching_subdomain():
-    """news.naver.com should match the `naver.com` entry."""
-    from api.extractors.web_article import _selectors_for_host
-
+def test_selectors_for_host_subdomain_match():
     key, sels = _selectors_for_host("news.naver.com")
     assert key == "naver.com"
     assert "#dic_area" in sels
+
+
+def test_selectors_for_host_unknown_returns_empty():
+    key, sels = _selectors_for_host("randomblog.example.io")
+    assert key is None
+    assert sels == []
+
+
+# ---------------------------------------------------------------------------
+# Strategy ordering — each layer is stubbed to be the winner
+# ---------------------------------------------------------------------------
+
+def test_trafilatura_wins_when_it_returns_long_enough():
+    """Strategy 1 — trafilatura content sufficient -> chain stops here."""
+    body = _kor_long()
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value=body,
+    ):
+        result = WebArticleExtractor().extract(
+            _html("<div>noise</div>"),
+            {"source_url": "https://www.hankyung.com/article/xyz"},
+        )
+    assert body[:20] in result.merged_text
+    assert result.extracted_metadata["extractor_strategy"] == "trafilatura"
+    assert result.extracted_metadata["strategies_attempted"] == ["trafilatura"]
+
+
+def test_selectors_win_when_trafilatura_returns_short():
+    """Strategy 2 — trafilatura too short, selector hit on hankyung."""
+    body = _kor_long()
+    raw = _html(f"<div id='articletxt'>{body}</div>")
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value="x",
+    ):
+        result = WebArticleExtractor().extract(
+            raw, {"source_url": "https://www.hankyung.com/article/xyz"},
+        )
+    strat = result.extracted_metadata["extractor_strategy"]
+    assert strat.startswith("selector:")
+    assert "articletxt" in strat
+    assert "selectors:hankyung.com" in result.extracted_metadata["strategies_attempted"]
+
+
+def test_readability_wins_when_first_two_strategies_miss():
+    """Strategy 3 — readability hit when nothing earlier worked."""
+    body = _kor_long()
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value="",
+    ), patch(
+        "api.extractors.web_article._try_selector_chain",
+        return_value=("", None),
+    ), patch(
+        "api.extractors.web_article._try_readability",
+        return_value=(body, "T"),
+    ):
+        result = WebArticleExtractor().extract(
+            _html("<div>x</div>"),
+            {"source_url": "https://unknown.example/post/1"},
+        )
+    assert result.extracted_metadata["extractor_strategy"] == "readability"
+    assert "readability" in result.extracted_metadata["strategies_attempted"]
+
+
+def test_newspaper3k_wins_as_final_fallback():
+    body = _kor_long()
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value="",
+    ), patch(
+        "api.extractors.web_article._try_selector_chain",
+        return_value=("", None),
+    ), patch(
+        "api.extractors.web_article._try_readability",
+        return_value=("", None),
+    ), patch(
+        "api.extractors.web_article._try_newspaper",
+        return_value=(body, "T"),
+    ):
+        result = WebArticleExtractor().extract(
+            _html("<div>x</div>"),
+            {"source_url": "https://unknown.example/post/1"},
+        )
+    assert result.extracted_metadata["extractor_strategy"] == "newspaper3k"
+    assert "newspaper3k" in result.extracted_metadata["strategies_attempted"]
+
+
+# ---------------------------------------------------------------------------
+# ExtractorError diagnostics
+# ---------------------------------------------------------------------------
+
+def test_known_host_all_strategies_fail_raises_site_aware_error():
+    """Every strategy returns empty/short -> site-aware diagnostic."""
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value="",
+    ), patch(
+        "api.extractors.web_article._try_selector_chain",
+        return_value=("", None),
+    ), patch(
+        "api.extractors.web_article._try_readability",
+        return_value=("", None),
+    ), patch(
+        "api.extractors.web_article._try_newspaper",
+        return_value=("", None),
+    ):
+        with pytest.raises(ExtractorError) as exc:
+            WebArticleExtractor().extract(
+                _html(""),
+                {"source_url": "https://www.hankyung.com/article/xyz"},
+            )
+    msg = str(exc.value)
+    assert "hankyung.com" in msg
+    assert "trafilatura" in msg
+    assert "selection-save" in msg
+
+
+def test_unknown_host_all_strategies_fail_raises_generic_error():
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value="",
+    ), patch(
+        "api.extractors.web_article._try_selector_chain",
+        return_value=("", None),
+    ), patch(
+        "api.extractors.web_article._try_readability",
+        return_value=("", None),
+    ), patch(
+        "api.extractors.web_article._try_newspaper",
+        return_value=("", None),
+    ):
+        with pytest.raises(ExtractorError) as exc:
+            WebArticleExtractor().extract(
+                _html(""),
+                {"source_url": "https://example.com/post/1"},
+            )
+    msg = str(exc.value)
+    assert "example.com" in msg
+    assert "paywalled" in msg or "JavaScript-rendered" in msg
+    assert "selection-save" in msg
+
+
+def test_strategy_threshold_is_200_chars():
+    """A 199-char body is "short" — strategies that return only that
+    much are NOT treated as winners; the chain advances."""
+    short = "한" * 100  # 100 chars, well below FALLBACK_TRIGGER_CHARS=200
+    assert FALLBACK_TRIGGER_CHARS > len(short)
+    body = _kor_long()
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value=short,
+    ), patch(
+        "api.extractors.web_article._try_selector_chain",
+        return_value=("", None),
+    ), patch(
+        "api.extractors.web_article._try_readability",
+        return_value=(body, None),
+    ):
+        result = WebArticleExtractor().extract(
+            _html("x"), {"source_url": "https://www.unknown.com/p"},
+        )
+    assert result.extracted_metadata["extractor_strategy"] == "readability"
+
+
+# ---------------------------------------------------------------------------
+# 12 Korean publishers must all have entries
+# ---------------------------------------------------------------------------
+
+def test_all_12_korean_publishers_have_selector_lists():
+    expected = {
+        "hankyung.com", "chosun.com", "joongang.co.kr", "donga.com",
+        "mk.co.kr", "naver.com", "daum.net", "yna.co.kr",
+        "ytn.co.kr", "kbs.co.kr", "mbc.co.kr", "sbs.co.kr",
+    }
+    assert expected.issubset(set(KOREAN_MEDIA_SELECTORS.keys()))
+    for host, sels in KOREAN_MEDIA_SELECTORS.items():
+        assert sels, f"{host} entry is empty"
+        for sel in sels:
+            assert isinstance(sel, str) and sel.strip()
