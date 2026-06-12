@@ -155,3 +155,30 @@ export interface KnowledgeSpacePublic {
   name: string | null;
   user_id: string;
 }
+
+// ---------------------------------------------------------------------------
+// B-25 / DR-089 — recall thin slice
+// ---------------------------------------------------------------------------
+
+export interface RecallFact {
+  fact_uid: string;
+  claim: string;
+  claim_en: string | null;
+  subject_uid: string;
+  predicate: string;
+  object_value: string;
+  source_uids: string[];
+  validated_at: string;
+  validator_id: string;
+  validation_method: 'manual';
+  knowledge_space_id: string;
+  negation_flag: boolean;
+  negation_scope: 'full' | 'partial' | null;
+  score: number;
+}
+
+export interface RecallResponse {
+  signature: string;
+  facts: RecallFact[];
+  total: number;
+}
