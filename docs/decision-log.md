@@ -62,7 +62,7 @@
 | DR-050 | Gatekeeping warns, never blocks. "Save anyway" is recorded as `override_warning: true` in metadata | User autonomy — Lucid surfaces conflicts but the user always decides. Overridden facts get a yellow border in Stellar View for post-hoc review. See surface-stage-spec.md §8 and §14 Q5. |
 | DR-051 | ~~Staleness daily/dynamic~~ **RETRACTED** | Superseded by DR-053; no staleness system in v2. |
 | DR-052 | ~~Stale facts shown with label~~ **RETRACTED** | Superseded by DR-053; time-bound facts are permanently true (context only). |
-| DR-053 | Beta is wedge discovery, not wedge validation | Honest pitch principle — earlier hypotheses about academic researchers as the primary target have been retracted; usage data determines the wedge. See beta-backlog.md §0. |
+| DR-053 | (a) **Beta is wedge discovery, not wedge validation.** (b) **Staleness system retired in v2** — `valid_until`, `is_stale`, `stale_at` FORBIDDEN on AtomicFact / FactNode (`extra="forbid"`); `valid_from` preserved as context-only metadata only (never triggers expiry, alerts, or re-validation). | (a) Honest pitch principle — earlier hypotheses about academic researchers as the primary target have been retracted; usage data determines the wedge. See beta-backlog.md §0. (b) Bundled with (a) when DR-051 + DR-052 were retracted; see those rows' supersession notes. Code anchors: `backend/api/models/facts.py` (`extra="forbid"` rejects the three fields), `backend/api/storage/elasticsearch/mappings.py` (mapping omits them). |
 | DR-054 | Universal recruitment + self-selection screening, NOT family/academic channels | Phase 1 expansion preservation — family/academic networks are strategic capital reserved for Phase 1 once the wedge archetype is identified. See beta-backlog.md §1.1. |
 | DR-055 | Beta target: 30-40 users, quality over quantity | Better fewer real signals — 30 retained users beat 70 names; floor is 30, not the 50 figure that appeared in earlier drafts. See beta-backlog.md §1.1 and §1.4. |
 | DR-056 | Archetype measured along 5 dimensions: consumption intensity, validation frequency, surface usage pattern, domain diversity, device environment | Multi-dim wedge discovery — segment is not asked at signup; it is inferred from behavior along these axes. See beta-backlog.md §1.2. |
@@ -87,8 +87,8 @@ and C-22 for full context.
 | DR-006 | FAISS for vector search in beta | v2 stack: ES dense_vector kNN |
 | DR-008 | Embed with LOCAL multilingual model | REOPENED — embedding source TBD in PR-1A-3 |
 | DR-015 | valid_from required for policy/legal facts | Superseded by DR-053 (no staleness) |
-| DR-051 | Staleness: daily scan + dynamic trigger | Superseded by DR-053 |
-| DR-052 | Stale facts shown with label | Superseded by DR-053 |
+| DR-051 | Staleness: daily scan + dynamic trigger | Superseded by DR-053 (b) — staleness system fully retired |
+| DR-052 | Stale facts shown with label | Superseded by DR-053 (b) — no staleness label; time-bound facts are permanently true (context only) |
 | DR-027 | Two capture modes (careful + trusted) selected per capture | Reframed: per-source policy in Settings SET-2, not per-capture |
 | DR-043 | Surface: 6 modes | Reframed: 5 modes; Mode 5 Staleness retired |
 | DR-032 | Object matching: 0.85-0.95 semi-auto band | Reframed: user-delegated via Validate queue; Person/Org/Service tightened to 0.98 (DCR-001 / DR-065) |
