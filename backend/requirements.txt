@@ -28,6 +28,9 @@ email-validator>=2.0  # Pydantic EmailStr validation
 
 # --- LLM ---
 anthropic>=0.25
+
+# spike/mcp-streamable-http — Anthropic-maintained MCP Python SDK
+mcp>=1.0
 openai>=1.30  # text-embedding-3-small for ES kNN (PR-1A-3)
 
 # --- Capture / extraction ---
