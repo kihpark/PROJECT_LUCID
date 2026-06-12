@@ -10,9 +10,10 @@ constraint:
   structured         done (decomposition + Object matching + Link creation)
   structure_failed   recoverable error during structure
 
-The downgrade drops the new values; rows currently in any of those
-states would violate the smaller constraint, so downgrade is for
-greenfield envs only.
+The downgrade normalises existing structure-stage rows to their
+pre-3PR-3-2 vocabulary (structuring->extracting, structured->extracted,
+structure_failed->extract_failed) BEFORE tightening the CHECK, so the
+downgrade is now data-safe on populated DBs.
 """
 from __future__ import annotations
 
@@ -41,5 +42,25 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Production-safe: normalise structure-stage rows back to the
+    # pre-3PR-3-2 vocabulary BEFORE tightening the CHECK. ALTER TABLE
+    # ADD CHECK validates existing rows; without this update the
+    # downgrade would fail with CheckViolation on any container that
+    # has captured + structured anything.
+    #
+    # Mapping (preserves in-progress / done / failed semantics):
+    #   structuring        -> extracting
+    #   structured         -> extracted
+    #   structure_failed   -> extract_failed
+    op.execute(
+        "UPDATE source_jobs SET status = "
+        "CASE status "
+        "  WHEN 'structuring'       THEN 'extracting' "
+        "  WHEN 'structured'        THEN 'extracted' "
+        "  WHEN 'structure_failed'  THEN 'extract_failed' "
+        "  ELSE status "
+        "END "
+        "WHERE status IN ('structuring','structured','structure_failed')"
+    )
     op.drop_constraint("ck_source_job_status", "source_jobs", type_="check")
     op.create_check_constraint("ck_source_job_status", "source_jobs", _OLD)

@@ -40,6 +40,42 @@ def _to_response(job: SourceJobORM) -> JobStatusResponse:
     )
 
 
+# Literal-path routes MUST be declared before parametric routes that
+# would otherwise swallow them. FastAPI registers routes in source
+# order; /api/jobs/pending must be declared before /api/jobs/{job_id}
+# or the UUID catch-all tries to parse "pending" and returns 422.
+@router.get("/pending", response_model=list[JobStatusResponse])
+def list_pending_jobs(user: User = Depends(get_current_user)) -> list[JobStatusResponse]:
+    """Return all of the caller's source_jobs, newest first.
+
+    The endpoint name "pending" reflects the user mental model
+    ("the jobs I'm still tracking"), NOT the narrow
+    `status IN ('pending_extract', 'extracting')` set. Every state
+    the user might still want to act on — including extract_failed
+    (retry candidate), structured (decide-overlay candidate), and
+    structure_failed (retry candidate) — is in-scope.
+
+    Cross-user isolation is enforced via `user_id` filter; another
+    user's captures are never returned regardless of state.
+
+    (Frontend currently consumes the Sprint 4B
+    `GET /api/spaces/{sid}/pending` route for the validate UI;
+    `/api/jobs/pending` exists for the chrome extension's "recent
+    captures" lookups and the integration test suite.)
+    """
+    session = _new_session()
+    try:
+        rows = (
+            session.query(SourceJobORM)
+            .filter(SourceJobORM.user_id == user.id)
+            .order_by(SourceJobORM.created_at.desc())
+            .all()
+        )
+        return [_to_response(j) for j in rows]
+    finally:
+        session.close()
+
+
 @router.get("/{job_id}", response_model=JobStatusResponse)
 def get_job(
     job_id: uuid.UUID, user: User = Depends(get_current_user)
@@ -52,27 +88,5 @@ def get_job(
         if job.user_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
         return _to_response(job)
-    finally:
-        session.close()
-
-
-@router.get("/pending", response_model=list[JobStatusResponse])
-def list_pending_jobs(user: User = Depends(get_current_user)) -> list[JobStatusResponse]:
-    """Return the caller's jobs in any non-terminal status.
-
-    Terminal = `extracted` (Sprint 2C completion state) or
-    `extract_failed`. Everything else is "pending" for the user.
-    """
-    pending = {SourceStatus.PENDING_EXTRACT.value, SourceStatus.EXTRACTING.value}
-    session = _new_session()
-    try:
-        rows = (
-            session.query(SourceJobORM)
-            .filter(SourceJobORM.user_id == user.id)
-            .filter(SourceJobORM.status.in_(pending))
-            .order_by(SourceJobORM.created_at.desc())
-            .all()
-        )
-        return [_to_response(j) for j in rows]
     finally:
         session.close()

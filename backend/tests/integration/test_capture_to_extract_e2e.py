@@ -179,14 +179,26 @@ def test_capture_extract_failure_invalid_source_type_logical(client, auth_header
 
 def test_capture_extract_dispatcher_failure_propagates(client, auth_headers, monkeypatch):
     """When the dispatcher's extract() raises ExtractorError, the row
-    transitions to extract_failed with the message preserved."""
-    from api.extractors import dispatcher as dispatcher_mod
+    transitions to extract_failed with the message preserved.
+
+    NOTE: processor.py imports the dispatcher's `extract` callable via
+        from api.extractors.dispatcher import extract as dispatch_extract
+    The `dispatch_extract` name in processor is bound at import time
+    and is NOT a property lookup. Monkeypatching dispatcher_mod.extract
+    therefore has zero effect on the processor's execution. To inject
+    the contrived failure, the monkeypatch MUST target the importer's
+    local binding (api.extractors.processor.dispatch_extract).
+    See https://docs.pytest.org/en/stable/how-to/monkeypatch.html
+    "Notice that we are monkeypatching the function in the namespace
+    where it is being looked up".
+    """
+    from api.extractors import processor as processor_mod
     from api.extractors.base import ExtractorError
 
     def _boom(raw, metadata, *, source_type):
         raise ExtractorError("contrived test failure")
 
-    monkeypatch.setattr(dispatcher_mod, "extract", _boom)
+    monkeypatch.setattr(processor_mod, "dispatch_extract", _boom)
 
     resp = client.post(
         "/api/capture",
