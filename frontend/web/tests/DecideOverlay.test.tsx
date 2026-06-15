@@ -69,31 +69,34 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('DecideOverlay — default landing (B-28 D-1)', () => {
-  it('lands on the Review tab by default', () => {
+describe('DecideOverlay — collapsed single Review surface (B-29 defect 2)', () => {
+  it('renders the Review surface immediately with no tabs', () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
-    // FactCard renders only on Review.
+    // FactCards render on landing.
     expect(screen.getByTestId('fact-card-fn-1')).toBeInTheDocument();
     expect(screen.getByTestId('fact-card-fn-2')).toBeInTheDocument();
-    // The Review tab is the active aria-selected one.
-    expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    // The accept_all / review tab pair from pre-B-29 must not exist.
+    expect(screen.queryByRole('tab', { name: /Review/i })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Accept all/i })).toBeNull();
+  });
+
+  it('Accept-all is a button on the same surface, not a tab', () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    const btn = screen.getByRole('button', { name: /Accept all 2 undecided/i });
+    expect(btn).toBeInTheDocument();
+    expect(btn).not.toBeDisabled();
   });
 
   it('initial counter shows all facts as undecided', () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
     const counter = screen.getByTestId('decision-counters');
     expect(counter).toHaveTextContent(/accepted:\s*0/);
-    expect(counter).toHaveTextContent(/edited:\s*0/);
-    expect(counter).toHaveTextContent(/discarded:\s*0/);
     expect(counter).toHaveTextContent(/undecided:\s*2/);
   });
 });
 
-describe('DecideOverlay — Submit per-card decisions (regression)', () => {
-  it('submits the per-card decisions in Review mode', async () => {
+describe('DecideOverlay — per-card decisions (regression)', () => {
+  it('submits per-card decisions via Submit', async () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
     fireEvent.click(screen.getAllByText('Accept')[0]!);
     fireEvent.click(screen.getAllByText('Discard')[1]!);
@@ -113,15 +116,13 @@ describe('DecideOverlay — Submit per-card decisions (regression)', () => {
 });
 
 describe('DecideOverlay — Undo restores undecided (B-28 D-2)', () => {
-  it('Undo button reverts an accepted fact to undecided', () => {
+  it('Undo reverts an accepted fact to undecided', () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
     const counter = screen.getByTestId('decision-counters');
-    // Accept fn-1
     fireEvent.click(screen.getAllByText('Accept')[0]!);
     expect(counter).toHaveTextContent(/accepted:\s*1/);
     expect(counter).toHaveTextContent(/undecided:\s*1/);
     expect(screen.getByTestId('fact-card-fn-1')).toHaveAttribute('data-state', 'accept');
-    // Undo
     fireEvent.click(screen.getAllByLabelText('Undo this decision')[0]!);
     expect(counter).toHaveTextContent(/accepted:\s*0/);
     expect(counter).toHaveTextContent(/undecided:\s*2/);
@@ -135,11 +136,10 @@ describe('DecideOverlay — Undo restores undecided (B-28 D-2)', () => {
     expect(undoButtons[1]).toBeDisabled();
   });
 
-  it('Submit after Undo omits the un-decided fact from the payload', async () => {
+  it('Submit after Undo omits the un-decided fact', async () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
     fireEvent.click(screen.getAllByText('Accept')[0]!);
     fireEvent.click(screen.getAllByText('Discard')[1]!);
-    // Now undo fn-1
     fireEvent.click(screen.getAllByLabelText('Undo this decision')[0]!);
     fireEvent.click(screen.getByText('Submit decisions'));
     await waitFor(() => expect(api.submitDecisions).toHaveBeenCalledTimes(1));
@@ -155,22 +155,17 @@ describe('DecideOverlay — Undo restores undecided (B-28 D-2)', () => {
 });
 
 describe('DecideOverlay — Accept all transitions + submits (B-28 D-3)', () => {
-  it('Accept-all button on accept_all tab is disabled when no undecided facts', () => {
+  it('Accept-all button disabled when no undecided facts to accept', () => {
     const jobAllDecided: PendingJobDetail = { ...baseJob, facts: [] };
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={jobAllDecided} />);
-    fireEvent.click(screen.getByRole('tab', { name: /Accept all/i }));
     const btn = screen.getByRole('button', { name: /Accept all 0 undecided/i });
     expect(btn).toBeDisabled();
   });
 
-  it('Accept-all transitions every undecided fact to accept then submits', async () => {
+  it('Accept-all transitions every undecided fact and submits', async () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
-    fireEvent.click(screen.getByRole('tab', { name: /Accept all/i }));
     fireEvent.click(screen.getByRole('button', { name: /Accept all 2 undecided/i }));
     await waitFor(() => expect(api.submitDecisions).toHaveBeenCalledTimes(1));
-    // Backend's acceptAll endpoint should NOT be hit — D-3 routes the
-    // bulk action through the unified submitDecisions path so Review
-    // and Accept-all stay in sync.
     expect(api.acceptAll).not.toHaveBeenCalled();
     const call = (api.submitDecisions as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
     const payload = call[2] as {
@@ -184,19 +179,13 @@ describe('DecideOverlay — Accept all transitions + submits (B-28 D-3)', () => 
       expect.objectContaining({ fact_uid: 'fn-2', action: 'accept' }),
     );
   });
-});
 
-describe('DecideOverlay — Review and Accept-all share state (B-28 D-4)', () => {
-  it('discard on Review tab is preserved when Accept-all runs', async () => {
+  it('Accept-all preserves a prior Discard (B-28 D-4 shared-state invariant)', async () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
-    // Discard fn-1 on Review tab
+    // Discard fn-1 via per-card action first.
     fireEvent.click(screen.getAllByText('Discard')[0]!);
-    // Switch to Accept-all
-    fireEvent.click(screen.getByRole('tab', { name: /Accept all/i }));
-    // Accept-all should now show 1 undecided (fn-2), and fn-1's state
-    // should appear in the read-only list as 'discard'.
-    expect(screen.getByTestId('accept-all-row-fn-1')).toHaveTextContent('[discard]');
-    expect(screen.getByTestId('accept-all-row-fn-2')).toHaveTextContent('[undecided]');
+    expect(screen.getByTestId('fact-card-fn-1')).toHaveAttribute('data-state', 'discard');
+    // Then Accept-all on the remaining 1 undecided (fn-2).
     fireEvent.click(screen.getByRole('button', { name: /Accept all 1 undecided/i }));
     await waitFor(() => expect(api.submitDecisions).toHaveBeenCalledTimes(1));
     const call = (api.submitDecisions as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
@@ -210,33 +199,8 @@ describe('DecideOverlay — Review and Accept-all share state (B-28 D-4)', () =>
     expect(payload.decisions).toContainEqual(
       expect.objectContaining({ fact_uid: 'fn-2', action: 'accept' }),
     );
-  });
-
-  it('Accept-all rendered state is reflected when switching back to Review', async () => {
-    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
-    // Edit fn-1 on Review
-    fireEvent.click(screen.getAllByText('Edit')[0]!);
-    expect(screen.getByTestId('fact-card-fn-1')).toHaveAttribute('data-state', 'edit');
-    // Switch to Accept-all, accept the remaining undecided fn-2
-    fireEvent.click(screen.getByRole('tab', { name: /Accept all/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Accept all 1 undecided/i }));
-    await waitFor(() => expect(api.submitDecisions).toHaveBeenCalledTimes(1));
-    // Switch back to Review — fn-1 still 'edit', fn-2 now 'accept'
-    fireEvent.click(screen.getByRole('tab', { name: 'Review' }));
-    expect(screen.getByTestId('fact-card-fn-1')).toHaveAttribute('data-state', 'edit');
+    // After Accept-all, fn-1 stays discarded and fn-2 is now accepted.
+    expect(screen.getByTestId('fact-card-fn-1')).toHaveAttribute('data-state', 'discard');
     expect(screen.getByTestId('fact-card-fn-2')).toHaveAttribute('data-state', 'accept');
-  });
-});
-
-describe('DecideOverlay — counters track shared state', () => {
-  it('counters update across tab switches', () => {
-    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
-    fireEvent.click(screen.getAllByText('Accept')[0]!);
-    fireEvent.click(screen.getAllByText('Discard')[1]!);
-    fireEvent.click(screen.getByRole('tab', { name: /Accept all/i }));
-    const counter = screen.getByTestId('decision-counters');
-    expect(counter).toHaveTextContent(/accepted:\s*1/);
-    expect(counter).toHaveTextContent(/discarded:\s*1/);
-    expect(counter).toHaveTextContent(/undecided:\s*0/);
   });
 });

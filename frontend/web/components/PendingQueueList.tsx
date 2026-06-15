@@ -5,6 +5,20 @@ import type { Route } from 'next';
 import { ActionButton } from './ActionButton';
 import type { PendingJobSummary, PendingPage } from '@/lib/types';
 
+/**
+ * Extract the host (domain) from a URL string, returning null when the
+ * input is not parseable. U-1: surface the host on the card header so
+ * the user can identify the source at a glance without parsing the
+ * full URL.
+ */
+function hostFromUrl(url: string): string | null {
+  try {
+    return new URL(url).host || null;
+  } catch {
+    return null;
+  }
+}
+
 interface Props {
   page: PendingPage;
   onPage: (offset: number) => void;
@@ -19,23 +33,22 @@ function PendingCard({ job }: { job: PendingJobSummary }) {
     >
       <header className="flex items-baseline justify-between mb-2">
         <h3 className="text-sm font-medium truncate" title={job.source_url}>
-          {job.source_url}
+          {hostFromUrl(job.source_url) ?? job.source_url}
         </h3>
         <code className="text-xxs text-text-muted font-mono shrink-0 ml-2">
           {job.source_type}
         </code>
       </header>
+      <p className="text-xxs text-text-muted font-mono mb-1 truncate" title={job.source_url}>
+        {job.source_url}
+      </p>
       <p className="text-xxs text-text-muted font-mono mb-3">
         captured {new Date(job.captured_at).toLocaleString()} · from {job.captured_from}
       </p>
       <dl className="flex gap-4 text-xs text-text-secondary">
         <div>
           <dt className="text-text-muted">facts</dt>
-          <dd className="font-mono">{job.fact_count}</dd>
-        </div>
-        <div>
-          <dt className="text-text-muted">objects</dt>
-          <dd className="font-mono">{job.object_count}</dd>
+          <dd className="font-mono" data-testid="pending-card-facts">{job.fact_count}</dd>
         </div>
         {job.has_negation && (
           <span

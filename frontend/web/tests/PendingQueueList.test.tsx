@@ -56,6 +56,15 @@ describe('PendingQueueList', () => {
     expect(onPage).toHaveBeenCalledWith(20);
   });
 
+  it('does not render the objects count (B-29 U-2)', () => {
+    render(<PendingQueueList page={page} onPage={() => {}} />);
+    // The facts dd survives as the only numeric stat.
+    const factsDds = screen.getAllByTestId('pending-card-facts');
+    expect(factsDds.length).toBe(2);
+    // No "objects" label remains on the card surface.
+    expect(screen.queryByText(/^objects$/)).toBeNull();
+  });
+
   it('card href is the resolved dynamic segment, not a literal [jobId]', () => {
     // Regression for Walking-Skeleton Iteration 2 Bug 1 — the
     // object-form href ({ pathname: '/pending/[jobId]', query: { jobId } })

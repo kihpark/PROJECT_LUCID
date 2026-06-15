@@ -296,3 +296,80 @@ def test_e2e_graph_note_search(client, auth_context):
     )
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+
+# ---------------------------------------------------------------------------
+# B-29 defect 1 — list card count must equal detail pending count
+# ---------------------------------------------------------------------------
+def test_b29_list_card_count_equals_detail_pending_count(client, auth_context):
+    """The pending-list card's fact_count and GET /pending/{id}'s
+    facts.length must always agree. Pre-B-29 they did not: the list
+    used the all-time decomposer count, the detail filtered out
+    decided facts."""
+    headers, user_id, space_id = auth_context
+    job_id = _seed_structured_job(user_id, space_id, with_facts=5)
+
+    # Mark 2 of 5 facts as decided to create the disagreement scenario.
+    from api.security import dependencies as sec_deps
+    from api.storage.postgres.orm import SourceJobORM
+    sm = sec_deps._session_factory
+    with sm() as s:
+        j = s.get(SourceJobORM, job_id)
+        meta = dict(j.extracted_metadata or {})
+        struct = dict(meta.get("structure") or {})
+        struct["decided_fact_uids"] = ["fn-1", "fn-2"]
+        meta["structure"] = struct
+        j.extracted_metadata = meta
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(j, "extracted_metadata")
+        s.commit()
+
+    list_resp = client.get(f"/api/spaces/{space_id}/pending", headers=headers)
+    assert list_resp.status_code == 200
+    items = [i for i in list_resp.json()["items"] if i["job_id"] == str(job_id)]
+    assert len(items) == 1
+    list_fact_count = items[0]["fact_count"]
+
+    detail_resp = client.get(f"/api/spaces/{space_id}/pending/{job_id}", headers=headers)
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    detail_pending_count = len(detail["facts"])
+
+    assert list_fact_count == detail_pending_count == 3, (
+        f"list={list_fact_count} detail={detail_pending_count} (expected both 3)"
+    )
+
+
+def test_b29_list_hides_jobs_with_zero_pending_facts(client, auth_context):
+    """PO directive: facts 0 빈 카드를 큐에 쌓지 말 것. A job whose
+    every fact has been decided (or which had no facts at all)
+    disappears from the pending list."""
+    headers, user_id, space_id = auth_context
+    # Seed two jobs: one fully decided, one with pending facts.
+    decided_job = _seed_structured_job(user_id, space_id, with_facts=2)
+    pending_job = _seed_structured_job(user_id, space_id, with_facts=2)
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from api.security import dependencies as sec_deps
+    from api.storage.postgres.orm import SourceJobORM
+    sm = sec_deps._session_factory
+    with sm() as s:
+        j = s.get(SourceJobORM, decided_job)
+        meta = dict(j.extracted_metadata or {})
+        struct = dict(meta.get("structure") or {})
+        struct["decided_fact_uids"] = ["fn-1", "fn-2"]
+        meta["structure"] = struct
+        j.extracted_metadata = meta
+        flag_modified(j, "extracted_metadata")
+        s.commit()
+
+    resp = client.get(f"/api/spaces/{space_id}/pending", headers=headers)
+    assert resp.status_code == 200
+    page = resp.json()
+    job_ids_on_list = {i["job_id"] for i in page["items"]}
+    assert str(pending_job) in job_ids_on_list
+    assert str(decided_job) not in job_ids_on_list, (
+        "fully-decided job leaked into the queue"
+    )

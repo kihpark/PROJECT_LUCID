@@ -16,8 +16,6 @@ import type {
   PendingJobDetail,
 } from '@/lib/types';
 
-type TabValue = 'review' | 'accept_all';
-
 interface FactDecisionDraft {
   action: FactAction;
   editedClaim?: string;
@@ -32,29 +30,26 @@ interface Props {
   spaceId: string;
   jobId: string;
   initial: PendingJobDetail;
-  // PR-4A-2: when set, the Review tab renders an inline GraphNoteEditor
-  // under every FactCard. /pending/[jobId]/review passes this.
+  // PR-4A-2: when set, an inline GraphNoteEditor is rendered under
+  // every FactCard. /pending/[jobId]/review passes this.
   reviewMode?: boolean;
 }
 
 /**
- * Decide Overlay — single shared state model (B-28).
+ * Decide Overlay — single shared state model (B-28 + B-29).
  *
- * Per-fact state is a discriminated union held in one map:
+ * Per-fact state held in one map:
  *   factDecisions[uid] absent           -> undecided
  *   factDecisions[uid].action === 'accept'  -> accepted
- *   factDecisions[uid].action === 'edit'    -> edited (with editedClaim)
+ *   factDecisions[uid].action === 'edit'    -> edited
  *   factDecisions[uid].action === 'discard' -> discarded
  *
- * Both tabs (Review and Accept-all) read and write this same map.
- * The Accept-all action is a state TRANSITION (undecided -> accept on
- * every fact that hasn\'t been touched) followed by an immediate
- * submit; edited / discarded facts are preserved as-is. Submit alone
- * persists the current state to validation_logs.
- *
- * DR-083 (guardrail): Accept-all is only enabled when facts are
- * rendered on screen, matching the voice path\'s ban on
- * "bulk-accept-without-seeing".
+ * B-29 defect 2 collapsed the previous accept-all / review tabs
+ * into a SINGLE Review surface. The Accept-all action is now a
+ * button rendered ABOVE the fact list, never a separate tab. The
+ * user always sees the facts before the bulk button is offered —
+ * DR-083 (no bulk-accept without seeing) is satisfied by surface,
+ * not by guard. Submit is a sticky footer button.
  */
 export function DecideOverlay({
   spaceId,
@@ -63,10 +58,6 @@ export function DecideOverlay({
   reviewMode = false,
 }: Props) {
   const [lang, setLang] = useState<Lang>('en');
-  // B-28 D-1: default lands on Review so the user reads facts before
-  // any bulk action. The accept_all tab is the explicit bulk-action
-  // surface, not the default.
-  const [tab, setTab] = useState<TabValue>('review');
   const [factDecisions, setFactDecisions] = useState<
     Record<string, FactDecisionDraft>
   >({});
@@ -111,10 +102,6 @@ export function DecideOverlay({
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasDirtyDecisions]);
 
-  // ---------------------------------------------------------------------------
-  // State mutators (the only paths that write to factDecisions)
-  // ---------------------------------------------------------------------------
-
   const onFactChange = (
     uid: string,
     next: { action: FactAction; editedClaim?: string },
@@ -131,17 +118,13 @@ export function DecideOverlay({
     });
   };
 
-  // B-28 D-3/D-4: Accept-all is a state transition (preserve
-  // edited/discarded, set undecided -> accept) + submit. Both tabs
-  // observe the same factDecisions map so the post-transition state
-  // shows up under the per-card buttons on the Review tab too.
+  // Accept-all: B-28 behaviour preserved. State transition (undecided
+  // -> accept, preserve edited/discarded) followed by submit.
   const onAcceptAllAndSubmit = async () => {
-    if (facts.length === 0) return;
+    if (facts.length === 0 || counts.undecided === 0) return;
     setBusy(true);
     setError(null);
     try {
-      // 1) Compute the next decisions map: preserve every existing
-      //    entry, fill missing slots with 'accept'.
       const nextDecisions: Record<string, FactDecisionDraft> = {
         ...factDecisions,
       };
@@ -152,13 +135,7 @@ export function DecideOverlay({
           nextDecisions[uid] = { action: 'accept' };
         }
       }
-
-      // 2) Reflect into local state immediately so the UI (Review tab,
-      //    counters) shows the post-transition view even if the API
-      //    call is slow.
       setFactDecisions(nextDecisions);
-
-      // 3) Submit the unified payload.
       const r = await submitDecisions(spaceId, jobId, {
         decisions: Object.entries(nextDecisions).map(([fact_uid, d]) => ({
           fact_uid,
@@ -227,10 +204,6 @@ export function DecideOverlay({
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <header className="mb-6">
@@ -253,27 +226,6 @@ export function DecideOverlay({
           {new Date(initial.captured_at).toLocaleString()}
         </p>
       </header>
-
-      <div className="flex gap-2 mb-4" role="tablist" aria-label="Decide mode">
-        <ActionButton
-          variant="ghost"
-          active={tab === 'review'}
-          onClick={() => setTab('review')}
-          role="tab"
-          aria-selected={tab === 'review'}
-        >
-          Review
-        </ActionButton>
-        <ActionButton
-          variant="ghost"
-          active={tab === 'accept_all'}
-          onClick={() => setTab('accept_all')}
-          role="tab"
-          aria-selected={tab === 'accept_all'}
-        >
-          Accept all ({facts.length})
-        </ActionButton>
-      </div>
 
       <div
         className="mb-4 rounded-md border border-border-subtle bg-bg-elevated/40 p-3 text-xxs font-mono text-text-muted flex gap-3"
@@ -304,35 +256,43 @@ export function DecideOverlay({
         </div>
       )}
 
-      {tab === 'accept_all' ? (
-        <section aria-label="Accept all">
-          <p className="text-sm text-text-secondary mb-4">
-            Accept every undecided fact in one step. Facts you have
-            already edited or discarded are preserved as-is.
-            Disambiguations stay in the queue and will surface on the
-            next visit.
-          </p>
-          <ul className="mb-4 list-disc list-inside text-sm text-text-secondary max-h-60 overflow-auto">
-            {facts.map((f) => {
-              const uid = f.fact_uid || f.uid || '';
-              const state = factDecisions[uid]?.action ?? 'undecided';
-              return (
-                <li key={uid} data-testid={`accept-all-row-${uid}`}>
-                  <span lang={lang === 'kr' ? 'ko' : 'en'}>
-                    {lang === 'en' ? (f.claim_en || f.claim) : f.claim}
-                  </span>{' '}
-                  <span className="text-xxs font-mono text-text-muted">[{state}]</span>
-                </li>
-              );
-            })}
-          </ul>
+      <section aria-label="Review">
+        {disambig.length > 0 && (
+          <div className="mb-6">
+            <h2 className="text-sm font-medium text-accent-warm mb-2">
+              {disambig.length} object(s) need disambiguation
+            </h2>
+            {disambig.map((d) => (
+              <DisambigCard
+                key={d.llm_uid}
+                candidateId={d.llm_uid}
+                candidateName={d.candidate_name}
+                decisionReason={d.decision_reason}
+                candidates={d.candidates}
+                action={objectDecisions[d.llm_uid]?.action}
+                mergeTargetUid={objectDecisions[d.llm_uid]?.mergeTargetUid}
+                onChange={(next) =>
+                  setObjectDecisions((prev) => ({
+                    ...prev,
+                    [d.llm_uid]: next,
+                  }))
+                }
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-medium">
+            {facts.length} pending fact(s)
+          </h2>
           <div className="flex gap-2">
             <ActionButton
               variant="primary"
               disabled={busy || facts.length === 0 || counts.undecided === 0}
               onClick={onAcceptAllAndSubmit}
             >
-              Accept all {counts.undecided} undecided and submit
+              Accept all {counts.undecided} undecided
             </ActionButton>
             <ActionButton
               variant="danger"
@@ -342,69 +302,39 @@ export function DecideOverlay({
               Discard job
             </ActionButton>
           </div>
-        </section>
-      ) : (
-        <section aria-label="Review">
-          {disambig.length > 0 && (
-            <div className="mb-6">
-              <h2 className="text-sm font-medium text-accent-warm mb-2">
-                {disambig.length} object(s) need disambiguation
-              </h2>
-              {disambig.map((d) => (
-                <DisambigCard
-                  key={d.llm_uid}
-                  candidateId={d.llm_uid}
-                  candidateName={d.candidate_name}
-                  decisionReason={d.decision_reason}
-                  candidates={d.candidates}
-                  action={objectDecisions[d.llm_uid]?.action}
-                  mergeTargetUid={objectDecisions[d.llm_uid]?.mergeTargetUid}
-                  onChange={(next) =>
-                    setObjectDecisions((prev) => ({
-                      ...prev,
-                      [d.llm_uid]: next,
-                    }))
-                  }
-                />
-              ))}
-            </div>
-          )}
+        </div>
 
-          <div className="mb-4">
-            <h2 className="text-sm font-medium mb-2">
-              {facts.length} pending fact(s)
-            </h2>
-            {facts.map((f) => {
-              const uid = f.fact_uid || f.uid || '';
-              if (!uid) return null;
-              return (
-                <FactCard
-                  key={uid}
-                  fact={f}
-                  objects={initial.objects}
-                  lang={lang}
-                  action={factDecisions[uid]?.action}
-                  editedClaim={factDecisions[uid]?.editedClaim}
-                  onChange={(next) => onFactChange(uid, next)}
-                  onUndo={() => onFactUndo(uid)}
-                  reviewMode={reviewMode}
-                  spaceId={spaceId}
-                />
-              );
-            })}
-          </div>
+        <div className="mb-4">
+          {facts.map((f) => {
+            const uid = f.fact_uid || f.uid || '';
+            if (!uid) return null;
+            return (
+              <FactCard
+                key={uid}
+                fact={f}
+                objects={initial.objects}
+                lang={lang}
+                action={factDecisions[uid]?.action}
+                editedClaim={factDecisions[uid]?.editedClaim}
+                onChange={(next) => onFactChange(uid, next)}
+                onUndo={() => onFactUndo(uid)}
+                reviewMode={reviewMode}
+                spaceId={spaceId}
+              />
+            );
+          })}
+        </div>
 
-          <div className="sticky bottom-0 bg-bg-base/95 py-4 -mx-4 px-4 border-t border-border-subtle">
-            <ActionButton
-              variant="primary"
-              disabled={busy || !hasDirtyDecisions}
-              onClick={onSubmit}
-            >
-              Submit decisions
-            </ActionButton>
-          </div>
-        </section>
-      )}
+        <div className="sticky bottom-0 bg-bg-base/95 py-4 -mx-4 px-4 border-t border-border-subtle">
+          <ActionButton
+            variant="primary"
+            disabled={busy || !hasDirtyDecisions}
+            onClick={onSubmit}
+          >
+            Submit decisions
+          </ActionButton>
+        </div>
+      </section>
     </div>
   );
 }
