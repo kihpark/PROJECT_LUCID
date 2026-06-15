@@ -1,14 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActionButton } from './ActionButton';
 import { GraphNoteEditor } from './GraphNoteEditor';
-import type { FactAction, FactSummary } from '@/lib/types';
+import type { FactAction, FactSummary, ObjectSummary } from '@/lib/types';
 import type { Lang } from './LangToggle';
 
 interface Props {
   fact: FactSummary;
   lang: Lang;
+  // B-27: when present, FactCard resolves subject_uid / object_value
+  // references like "obj-1" against this list and displays the
+  // object's human-readable name (or name_en in EN mode). If a value
+  // matches the obj-N shape but has no entry, the card shows a
+  // "(미해석)" / "(unresolved)" marker rather than the raw ref so the
+  // PO can spot serialization gaps in dogfood. Plain literal values
+  // (numbers, dates, "흑자" etc.) pass through unchanged.
+  objects?: ObjectSummary[];
   action?: FactAction;
   editedClaim?: string;
   onChange: (next: { action: FactAction; editedClaim?: string }) => void;
@@ -28,9 +36,32 @@ function displayClaim(fact: FactSummary, lang: Lang): string {
   return fact.claim;
 }
 
+const OBJECT_REF_PATTERN = /^obj-\d+$/i;
+
+function resolveEntity(
+  value: string | undefined,
+  labelMap: Map<string, ObjectSummary>,
+  lang: Lang,
+): string {
+  if (!value) return '—';
+  const obj = labelMap.get(value);
+  if (obj) {
+    if (lang === 'en' && obj.name_en) return obj.name_en;
+    return obj.name;
+  }
+  if (OBJECT_REF_PATTERN.test(value)) {
+    // Looks like an object ref the structure stage failed to emit. Surface
+    // it explicitly so the dogfood UX shows the problem instead of a raw
+    // internal id pretending to be a name.
+    return lang === 'en' ? `${value} (unresolved)` : `${value} (미해석)`;
+  }
+  return value;
+}
+
 export function FactCard({
   fact,
   lang,
+  objects,
   action,
   editedClaim,
   onChange,
@@ -43,6 +74,16 @@ export function FactCard({
   const isEditing = action === 'edit';
   const isDiscarded = action === 'discard';
   const hasAction = action !== undefined;
+
+  const labelMap = useMemo(() => {
+    const m = new Map<string, ObjectSummary>();
+    if (!objects) return m;
+    for (const o of objects) m.set(o.uid, o);
+    return m;
+  }, [objects]);
+
+  const subjectLabel = resolveEntity(fact.subject_uid, labelMap, lang);
+  const objectLabel = resolveEntity(fact.object_value, labelMap, lang);
 
   return (
     <article
@@ -75,15 +116,15 @@ export function FactCard({
         <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-2 mb-3">
           <div>
             <dt className="opacity-60">subject</dt>
-            <dd>{fact.subject_uid || '—'}</dd>
+            <dd data-testid="fact-subject">{subjectLabel}</dd>
           </div>
           <div>
             <dt className="opacity-60">predicate</dt>
-            <dd>{fact.predicate || '—'}</dd>
+            <dd data-testid="fact-predicate">{fact.predicate || '—'}</dd>
           </div>
           <div>
             <dt className="opacity-60">object</dt>
-            <dd>{fact.object_value || '—'}</dd>
+            <dd data-testid="fact-object">{objectLabel}</dd>
           </div>
         </dl>
       )}
