@@ -30,6 +30,29 @@ def _set_secret(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _suppress_structure_auto_chain(monkeypatch):
+    """Pin 'extracted' as terminal for every test in this file.
+
+    Production processor.py:151 dispatches the structure stage on a
+    daemon thread the moment extract success commits (PR-3-3). Tests
+    in THIS file assert on the extract-stage terminal state
+    ('extracted' / 'extract_failed'), so the auto-chain races every
+    such test — 'extracted' is only the terminal state until the
+    daemon thread fires.
+
+    Patching `_enqueue_structure_async` to a no-op turns 'extracted'
+    into a stable terminal observation, isolating extract-stage
+    invariants from structure-stage timing. Tests that DO care about
+    end-to-end CSVS through structure should live in
+    `test_csvs_e2e.py`, which monkeypatches
+    `_STRUCTURE_INLINE_FOR_TESTS = True` instead to force structure
+    onto the calling thread.
+    """
+    from api.extractors import processor as proc_mod
+    monkeypatch.setattr(proc_mod, "_enqueue_structure_async", lambda _job_id: None)
+
+
 @pytest.fixture
 def client(pg_engine, alembic_upgrade):
     """FastAPI TestClient against a live Postgres."""
@@ -218,8 +241,15 @@ def test_capture_extract_dispatcher_failure_propagates(client, auth_headers, mon
 
 
 def test_extract_idempotent_on_already_extracted(client, auth_headers):
-    """Calling process_source_job twice on the same id leaves the second
-    invocation as a no-op (status stays extracted, no error)."""
+    """Re-calling process_source_job past pending_extract is a no-op.
+
+    The autouse `_suppress_structure_auto_chain` fixture pins
+    'extracted' as the terminal state, so body_1 and body_2 are
+    observed in the same window. The state guard at
+    processor.py:90-99 must reject the second call. Companion unit
+    tests in tests/unit/test_processor.py verify dispatch_extract +
+    _enqueue_structure_async are NOT invoked on the re-call.
+    """
     from api.extractors.processor import process_source_job
 
     html = b"<html><body><article>" + b"some body text " * 100 + b"</article></body></html>"
@@ -237,11 +267,15 @@ def test_extract_idempotent_on_already_extracted(client, auth_headers):
     body_1 = _wait_for_status(client, auth_headers, job_id, target={"extracted", "extract_failed"})
     assert body_1["status"] in ("extracted", "extract_failed")
 
-    # Re-invoke the processor directly with the same id; should be a no-op.
+    # Re-invoke the processor directly with the same id; the state
+    # guard at processor.py:90-99 must early-return without touching
+    # the row.
     process_source_job(uuid.UUID(job_id))
 
     body_2 = client.get(f"/api/jobs/{job_id}", headers=auth_headers).json()
     assert body_2["status"] == body_1["status"]
+    assert body_2.get("extracted_at") == body_1.get("extracted_at")
+    assert body_2.get("error_message") == body_1.get("error_message")
 
 
 def test_post_capture_returns_immediately(client, auth_headers):
