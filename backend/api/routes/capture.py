@@ -128,6 +128,36 @@ def capture(
             else None
         )
         ks = _resolve_knowledge_space(session, user, ks_uuid)
+
+        # B-29 defect 3 (policy i): if this user already has a job for
+        # the same (knowledge_space, source_url) — at any status, even
+        # already-fully-decided — refuse to create a second row.
+        # Return the existing job_id with duplicate=True so the client
+        # can route the user there instead of piling empty cards into
+        # the queue. The (ii) re-analyse policy is deferred pending
+        # PO sign-off.
+        existing = (
+            session.query(SourceJobORM)
+            .filter(
+                SourceJobORM.user_id == user.id,
+                SourceJobORM.knowledge_space_id == ks.id,
+                SourceJobORM.source_url == req.source_url,
+            )
+            .order_by(SourceJobORM.created_at.desc())
+            .first()
+        )
+        if existing is not None:
+            logger.info(
+                "capture: duplicate suppressed user=%s ks=%s url=%s -> existing job %s",
+                user.id, ks.id, req.source_url, existing.id,
+            )
+            return CaptureResponse(
+                job_id=str(existing.id),
+                status=SourceStatus(existing.status),
+                status_url=f"/api/jobs/{existing.id}",
+                duplicate=True,
+            )
+
         policy = _resolve_policy(session, user, req.source_url)
 
         compressed: bytes | None = None

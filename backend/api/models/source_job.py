@@ -85,11 +85,20 @@ class CaptureRequest(LucidBaseModel):
 
 
 class CaptureResponse(LucidBaseModel):
-    """202 response to POST /api/capture."""
+    """202 response to POST /api/capture.
+
+    `duplicate` is set when the server found an existing SourceJob
+    for the same (user, knowledge_space, source_url) and returned
+    that job's id instead of creating a new one. B-29 policy (i):
+    block duplicate captures, route the client to the existing
+    job so the queue is not padded with empty rows. Clients that
+    care can show "Already saved" instead of "Saving...".
+    """
 
     job_id: UID
     status: SourceStatus
     status_url: str  # e.g. "/api/jobs/{job_id}"
+    duplicate: bool = False
 
 
 class JobStatusResponse(LucidBaseModel):

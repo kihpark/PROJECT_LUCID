@@ -192,3 +192,89 @@ def test_pending_jobs_filtered_by_user(client, auth_headers):
     urls = {p["source_url"] for p in pending}
     assert {"https://example.com/a", "https://example.com/b"}.issubset(urls)
     assert "https://example.com/other" not in urls
+
+
+
+# ---------------------------------------------------------------------------
+# B-29 defect 3 — duplicate URL must NOT create a second job (policy i)
+# ---------------------------------------------------------------------------
+def test_b29_capture_duplicate_returns_existing_job(client, auth_headers):
+    """Second POST of the same (user, ks, source_url) must return the
+    EXISTING job_id with duplicate=True. The DB row count for that URL
+    stays at 1.
+
+    NOTE: integration tests share a Postgres instance with dogfood
+    state. Use a per-run unique URL so leftover rows from other tests
+    (or live PO captures) don't skew the count assertion.
+    """
+    headers = auth_headers["headers"]
+    unique_url = f"https://b29-dedup-test.example.com/{uuid.uuid4().hex}"
+    payload = {
+        "source_url": unique_url,
+        "source_type": "web_article",
+        "captured_from": "chrome_ext",
+    }
+    r1 = client.post("/api/capture", headers=headers, json=payload)
+    assert r1.status_code == 202, r1.text
+    body1 = r1.json()
+    assert body1.get("duplicate") is False
+    job_id_1 = body1["job_id"]
+
+    r2 = client.post("/api/capture", headers=headers, json=payload)
+    assert r2.status_code == 202, r2.text
+    body2 = r2.json()
+    assert body2.get("duplicate") is True
+    assert body2["job_id"] == job_id_1, (
+        f"second capture returned a new job {body2['job_id']!r} "
+        f"instead of the existing {job_id_1!r}"
+    )
+
+    # DB-level invariant: only one row for that URL exists.
+    from sqlalchemy import func, select
+
+    from api.security import dependencies as sec_deps
+    from api.storage.postgres.orm import SourceJobORM
+    s = sec_deps._session_factory()
+    try:
+        count = s.scalar(
+            select(func.count()).select_from(SourceJobORM).where(
+                SourceJobORM.source_url == unique_url
+            )
+        )
+        assert count == 1, f"expected 1 row, found {count}"
+    finally:
+        s.close()
+
+
+def test_b29_capture_dedup_scoped_to_user(client):
+    """Two different users may each save the same URL; the dedup
+    guard is per-(user, ks, url), not global."""
+    # User A
+    email_a = f"dedup-a-{uuid.uuid4().hex[:8]}@lucid.example"
+    reg_a = client.post(
+        "/api/auth/register",
+        json={"email": email_a, "password": "longerthan8chars!"},
+    )
+    assert reg_a.status_code == 201, reg_a.text
+    headers_a = {"Authorization": f"Bearer {reg_a.json()['access_token']}"}
+
+    # User B
+    email_b = f"dedup-b-{uuid.uuid4().hex[:8]}@lucid.example"
+    reg_b = client.post(
+        "/api/auth/register",
+        json={"email": email_b, "password": "longerthan8chars!"},
+    )
+    assert reg_b.status_code == 201, reg_b.text
+    headers_b = {"Authorization": f"Bearer {reg_b.json()['access_token']}"}
+
+    payload = {
+        "source_url": "https://example.com/scoped-dedup",
+        "source_type": "web_article",
+        "captured_from": "chrome_ext",
+    }
+    r_a = client.post("/api/capture", headers=headers_a, json=payload)
+    r_b = client.post("/api/capture", headers=headers_b, json=payload)
+    assert r_a.status_code == 202 and r_b.status_code == 202
+    assert r_a.json()["job_id"] != r_b.json()["job_id"]
+    assert r_a.json()["duplicate"] is False
+    assert r_b.json()["duplicate"] is False

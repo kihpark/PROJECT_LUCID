@@ -95,16 +95,40 @@ def _structure_meta(job: SourceJobORM) -> dict[str, Any]:
 
 
 def _job_summary(job: SourceJobORM) -> PendingJobSummary:
+    """Build the list-card summary.
+
+    B-29 defect 1: `fact_count` here means the PENDING fact count
+    (total facts emitted by the decomposer minus those already
+    accepted/edited/discarded), NOT the all-time decomposer count.
+    The pre-B-29 implementation used the raw `fact_count` from the
+    structure metadata, which is the count at extraction time. After
+    the user finishes a Decide pass it never decreased, so the list
+    card showed "facts 12" for a job whose Decide detail view
+    correctly showed "0 pending fact(s)". List and detail now agree:
+    the list card's number IS the post-decided pending count, which
+    is the same number the Decide overlay renders one click later.
+    """
     s = _structure_meta(job)
-    facts = s.get("fact_count", 0)
+    total_facts: int = s.get("fact_count", 0)
+    facts_summary: list[dict[str, Any]] = s.get("facts_summary") or s.get("facts") or []
+    decided: set[str] = set(s.get("decided_fact_uids") or [])
+    if decided:
+        pending_count = sum(
+            1
+            for m in facts_summary
+            if (m.get("fact_uid") or m.get("uid")) not in decided
+        )
+    else:
+        pending_count = total_facts
     objs = s.get("object_count", 0)
     disambig = s.get("object_disambig_pending", 0)
-    # Negation indicator: we count facts whose stored structure carried
-    # any negation_flag.  Beta keeps this as a coarse boolean — the
-    # processor stamps per-fact flags into extracted_metadata.
+    # Negation indicator only counts PENDING facts now — a job whose
+    # only negated fact was already decided no longer wears the ⚠
+    # badge on the list.
     negation = any(
         bool(m.get("negation_flag"))
-        for m in s.get("facts_summary", []) or []
+        for m in facts_summary
+        if (m.get("fact_uid") or m.get("uid")) not in decided
     )
     return PendingJobSummary(
         job_id=str(job.id),
@@ -112,7 +136,7 @@ def _job_summary(job: SourceJobORM) -> PendingJobSummary:
         source_type=job.source_type,
         captured_at=job.captured_at,
         captured_from=job.captured_from,
-        fact_count=facts,
+        fact_count=pending_count,
         object_count=objs,
         has_negation=negation,
         has_disambiguation=disambig > 0,
@@ -175,10 +199,21 @@ def list_pending(
 
         # Sort: captured_at desc (the spec default).
         rows.sort(key=lambda j: j.captured_at, reverse=True)
-        total = len(rows)
-        sliced = rows[offset : offset + limit]
+
+        # B-29: build summaries first so we can drop fully-decided
+        # (or never-had-any-facts) jobs from the queue. The PO
+        # directive: "facts 0 빈 카드를 큐에 쌓지 말 것" applies to both
+        # the empty-duplicate case (defect 3) and the all-decided case.
+        # The drop happens AFTER filters and AFTER sorting but BEFORE
+        # pagination so the `total` reflects what the user can actually
+        # act on.
+        summaries = [_job_summary(j) for j in rows]
+        summaries = [s for s in summaries if s.fact_count > 0]
+
+        total = len(summaries)
+        sliced = summaries[offset : offset + limit]
         return PendingPage(
-            items=[_job_summary(j) for j in sliced],
+            items=sliced,
             total=total, offset=offset, limit=limit,
         )
     finally:
