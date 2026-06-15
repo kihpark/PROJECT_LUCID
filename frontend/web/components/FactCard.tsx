@@ -12,8 +12,11 @@ interface Props {
   action?: FactAction;
   editedClaim?: string;
   onChange: (next: { action: FactAction; editedClaim?: string }) => void;
-  // PR-4A-2: when reviewMode + spaceId provided, render the inline
-  // GraphNoteEditor below the action row.
+  // B-28: returns this fact to the undecided state. The parent removes
+  // it from the shared decisions map. Visible only when an action is
+  // currently set; the button stays disabled otherwise so the affordance
+  // is discoverable without polluting the no-decision row.
+  onUndo?: () => void;
   reviewMode?: boolean;
   spaceId?: string;
 }
@@ -31,6 +34,7 @@ export function FactCard({
   action,
   editedClaim,
   onChange,
+  onUndo,
   reviewMode = false,
   spaceId,
 }: Props) {
@@ -38,10 +42,12 @@ export function FactCard({
   const [draft, setDraft] = useState(editedClaim ?? '');
   const isEditing = action === 'edit';
   const isDiscarded = action === 'discard';
+  const hasAction = action !== undefined;
 
   return (
     <article
       data-testid={`fact-card-${factUid}`}
+      data-state={action ?? 'undecided'}
       className={[
         'rounded-lg border p-4 mb-3 transition-colors',
         isDiscarded
@@ -102,7 +108,7 @@ export function FactCard({
           </p>
         </div>
       )}
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         <ActionButton
           variant={action === 'accept' ? 'primary' : 'secondary'}
           active={action === 'accept'}
@@ -124,6 +130,16 @@ export function FactCard({
         >
           Discard
         </ActionButton>
+        {onUndo && (
+          <ActionButton
+            variant="ghost"
+            disabled={!hasAction}
+            onClick={onUndo}
+            aria-label="Undo this decision"
+          >
+            Undo
+          </ActionButton>
+        )}
       </div>
       {reviewMode && spaceId && (
         <GraphNoteEditor spaceId={spaceId} factUid={factUid} />
