@@ -28,6 +28,10 @@ interface FakeChrome {
   tabs: {
     query: AnyFn;
     create: AnyFn;
+    sendMessage: AnyFn;
+  };
+  scripting: {
+    executeScript: AnyFn;
   };
 }
 
@@ -60,6 +64,10 @@ const fakeChrome: FakeChrome = {
   tabs: {
     query: vi.fn(),
     create: vi.fn(),
+    sendMessage: vi.fn(),
+  },
+  scripting: {
+    executeScript: vi.fn(),
   },
 };
 
