@@ -251,6 +251,7 @@ export function DecideOverlay({
                 <FactCard
                   key={uid}
                   fact={f}
+                  objects={initial.objects}
                   lang={lang}
                   action={factDecisions[uid]?.action}
                   editedClaim={factDecisions[uid]?.editedClaim}
