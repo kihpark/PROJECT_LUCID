@@ -127,6 +127,66 @@ def delete_fact(uid: str) -> bool:
     return True
 
 
+def find_fact_by_spo(
+    knowledge_space_id: str,
+    subject_uid: str,
+    predicate: str,
+    object_value: str,
+) -> dict[str, Any] | None:
+    """B-48a S/P/O dedup lookup. Returns the existing FactNode source
+    dict (including fact_uid + source_uids) for this (KS, subject,
+    predicate, object) triple, or None if no validated fact matches.
+
+    PO directive 2026-06-18 [B-48 decision 1]: dedup key is the canonical
+    triple only — claim text is NOT part of the key. Two captures of the
+    same proposition with slightly different phrasing collapse to a
+    single FactNode + N source_uids.
+    """
+    client = get_client()
+    try:
+        resp = client.search(
+            index=LUCID_FACTS,
+            query={"bool": {"filter": [
+                {"term": {"knowledge_space_id": knowledge_space_id}},
+                {"term": {"subject_uid": subject_uid}},
+                {"term": {"predicate": predicate}},
+                {"term": {"object_value": object_value}},
+            ]}},
+            size=1,
+        )
+    except Exception as exc:  # noqa: BLE001 - dedup degrades quietly
+        logger.warning("find_fact_by_spo failed: %s", exc)
+        return None
+    hits = resp.get("hits", {}).get("hits") or []
+    return hits[0].get("_source") if hits else None
+
+
+def attach_source_to_fact(fact_uid: str, source_uid: str) -> bool:
+    """B-48a: append `source_uid` to an existing FactNode.source_uids
+    if it isn't already in the list. Idempotent — repeated calls with
+    the same source_uid don't grow the list.
+
+    Returns True when the list was modified (i.e. a new source was
+    added), False when the source was already present or the fact
+    no longer exists.
+    """
+    client = get_client()
+    if not client.exists(index=LUCID_FACTS, id=fact_uid):
+        return False
+    current = client.get(index=LUCID_FACTS, id=fact_uid)["_source"]
+    existing = list(current.get("source_uids") or [])
+    if source_uid in existing:
+        return False
+    existing.append(source_uid)
+    client.update(
+        index=LUCID_FACTS,
+        id=fact_uid,
+        doc={"source_uids": existing, "updated_at": utc_now().isoformat()},
+        refresh="wait_for",
+    )
+    return True
+
+
 def bulk_create_facts(facts: list[FactNode], with_embedding: bool = True) -> list[str]:
     """ES bulk API insert. Returns the list of created fact_uids.
 

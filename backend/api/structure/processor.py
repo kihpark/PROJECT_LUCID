@@ -43,6 +43,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from api.models.base import new_uid
 from api.models.objects import ObjectClass
 from api.models.source_job import SourceStatus
 from api.storage.elasticsearch.embeddings import get_embedding
@@ -143,16 +144,71 @@ def _build_uid_mapping(
     return mapping
 
 
+# B-48a: shape check for an LLM placeholder fact uid like "fn-1" /
+# "fn-12" / "fn-1-a" (the coord_splitter appends -a/-b/...). Anything
+# else (e.g. a canonical UUID4 already, an unexpected blank) is left
+# untouched by the remap.
+_FACT_PLACEHOLDER_RE = re.compile(r"^fn-\d+(?:-[a-z])?$", re.IGNORECASE)
+
+
+def _build_fact_uid_mapping(decomp: StructureResult) -> dict[str, str]:
+    """B-48a: map every decomposer-issued LLM placeholder fact uid
+    ('fn-1', 'fn-1-a', ...) to a fresh canonical UUID4.
+
+    Mirrors the Object-side `_build_uid_mapping` from B-35. Each
+    `decomp.facts[i].uid` and every `fact_uid` referenced by the
+    fact_object / fact_fact links is rewritten through this map so
+    the FactNode that lands in ES has a non-colliding doc id. Prior
+    to this remap, multiple jobs all emitted `fn-1` and the ES
+    `index(id='fn-1')` calls overwrote each other — the silent
+    cause of the 86→23 fact-count discrepancy after replay.
+
+    The mapping only touches placeholder-shaped uids; anything that
+    already looks canonical (e.g. a UUID4) maps to itself.
+    """
+    mapping: dict[str, str] = {}
+    seen: set[str] = set()
+    for f in decomp.facts:
+        if f.uid in seen:
+            continue
+        seen.add(f.uid)
+        if _FACT_PLACEHOLDER_RE.match(f.uid):
+            mapping[f.uid] = new_uid()
+        else:
+            mapping[f.uid] = f.uid
+    # The link records may reference fact uids the `facts` list didn't
+    # cover (split coord children referenced before they appear, or
+    # legacy payloads); fall back to identity so the link still points
+    # somewhere stable.
+    for fo in decomp.fact_object_links:
+        mapping.setdefault(
+            fo.fact_uid,
+            new_uid() if _FACT_PLACEHOLDER_RE.match(fo.fact_uid) else fo.fact_uid,
+        )
+    for ff in decomp.fact_fact_links:
+        for u in (ff.from_uid, ff.to_uid):
+            mapping.setdefault(
+                u, new_uid() if _FACT_PLACEHOLDER_RE.match(u) else u,
+            )
+    return mapping
+
+
 def _remap_links(
     decomp: StructureResult,
     uid_map: dict[str, str],
+    fact_uid_map: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Apply the uid_map to fact_object and fact_fact link payloads.
-    Fact uids are left as-is (FactNode persistence is PR-3-3 scope)."""
+
+    B-48a: `fact_uid_map` rewrites the fact-side uids the same way the
+    decomposer Object-side `uid_map` rewrites object uids. When None
+    (legacy path), fact uids are left as-is.
+    """
+    fum = fact_uid_map or {}
     fact_object: list[dict[str, Any]] = []
     for fo in decomp.fact_object_links:
         fact_object.append({
-            "fact_uid": fo.fact_uid,
+            "fact_uid": fum.get(fo.fact_uid, fo.fact_uid),
             "object_uid": uid_map.get(fo.object_uid, fo.object_uid),
             "link_type": str(fo.link_type),
             "properties": fo.properties,
@@ -160,8 +216,8 @@ def _remap_links(
     fact_fact: list[dict[str, Any]] = []
     for ff in decomp.fact_fact_links:
         fact_fact.append({
-            "from_uid": ff.from_uid,
-            "to_uid": ff.to_uid,
+            "from_uid": fum.get(ff.from_uid, ff.from_uid),
+            "to_uid": fum.get(ff.to_uid, ff.to_uid),
             "link_type": str(ff.link_type),
         })
     return fact_object, fact_fact
@@ -176,6 +232,7 @@ _OBJ_PLACEHOLDER_RE = re.compile(r"^obj-\d+$", re.IGNORECASE)
 def _serialize_struct_fact(
     f: StructureFact,
     uid_map: dict[str, str] | None = None,
+    fact_uid_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Pydantic StructureFact -> dict suitable for JSONB.
 
@@ -194,10 +251,23 @@ def _serialize_struct_fact(
     subject_uid with another fact (potentially from a different
     article) whose object is also "SpaceX", because both ran through
     the same KS-scoped object matcher.
+
+    B-48a: when `fact_uid_map` is supplied, both `uid` and `fact_uid`
+    are rewritten from the LLM placeholder (fn-N) to a canonical
+    UUID4. Submit then indexes into ES with the canonical id; the
+    Decide overlay continues to round-trip through whichever uid it
+    receives — its only contract is "use whatever the backend gave
+    you as the React key and as the accept/discard parameter".
     """
     d = f.model_dump(by_alias=True, mode="json")
     if "uid" in d and "fact_uid" not in d:
         d["fact_uid"] = d["uid"]
+    if fact_uid_map:
+        original = d.get("uid")
+        if isinstance(original, str) and original in fact_uid_map:
+            canonical = fact_uid_map[original]
+            d["uid"] = canonical
+            d["fact_uid"] = canonical
     if uid_map:
         subject = d.get("subject_uid")
         if isinstance(subject, str) and subject in uid_map:
@@ -313,9 +383,10 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             if mr.disambiguation_required:
                 disambig_pending.append(summary)
 
-        # Compose links with remapped Object UIDs
+        # Compose links with remapped Object UIDs + fact UIDs (B-48a).
         uid_map = _build_uid_mapping(decomp, match_per_object)
-        fo_links, ff_links = _remap_links(decomp, uid_map)
+        fact_uid_map = _build_fact_uid_mapping(decomp)
+        fo_links, ff_links = _remap_links(decomp, uid_map, fact_uid_map)
         link_result: LinkCreationResult = create_links(
             fact_object_links=fo_links,
             fact_fact_links=ff_links,
@@ -327,14 +398,15 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         # structure metadata; before chore 5 these were never written, so
         # the UI showed "0 pending fact(s)" even on a successful structure.
         facts_payload = [
-            _serialize_struct_fact(f, uid_map=uid_map) for f in decomp.facts
+            _serialize_struct_fact(f, uid_map=uid_map, fact_uid_map=fact_uid_map)
+            for f in decomp.facts
         ]
         objects_payload = [
             _serialize_struct_object(o, uid_map=uid_map) for o in decomp.objects
         ]
         fact_object_links_detail = [
             {
-                "fact_uid": fo.fact_uid,
+                "fact_uid": fact_uid_map.get(fo.fact_uid, fo.fact_uid),
                 "object_uid": uid_map.get(fo.object_uid, fo.object_uid),
                 "link_type": str(fo.link_type),
                 "properties": dict(fo.properties or {}),
@@ -343,8 +415,8 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         ]
         fact_fact_links_detail = [
             {
-                "from_uid": ff.from_uid,
-                "to_uid": ff.to_uid,
+                "from_uid": fact_uid_map.get(ff.from_uid, ff.from_uid),
+                "to_uid": fact_uid_map.get(ff.to_uid, ff.to_uid),
                 "link_type": str(ff.link_type),
             }
             for ff in decomp.fact_fact_links

@@ -29,20 +29,57 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 
+from api.models.base import new_uid
 from api.models.facts import FactNode, FactType
 from api.models.objects import Object, ObjectClass
 from api.storage.elasticsearch.client import LUCID_FACTS, get_client
 from api.storage.elasticsearch.embeddings import get_embedding
-from api.storage.elasticsearch.facts import create_fact
+from api.storage.elasticsearch.facts import (
+    attach_source_to_fact,
+    create_fact,
+    find_fact_by_spo,
+)
 from api.storage.elasticsearch.objects import create_object
+from api.storage.elasticsearch.sources import create_or_update_source
 from api.storage.postgres.orm import SourceJobORM, ValidationLog
 from api.storage.postgres.session import make_sessionmaker
+
+# B-48a: same placeholder shape as the processor uses.
+_FACT_PLACEHOLDER_RE = re.compile(r"^fn-\d+(?:-[a-z])?$", re.IGNORECASE)
+
+
+def _ensure_source_for_job_replay(
+    job: SourceJobORM, knowledge_space_id: str,
+) -> str | None:
+    """Mirror of the validate-path helper, but reachable from replay
+    (no FastAPI dependencies). Returns the source_uid (creates the
+    lucid_sources doc on first call per URL)."""
+    domain = ""
+    try:
+        domain = urlparse(job.source_url).hostname or ""
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        src = create_or_update_source(
+            domain=domain,
+            source_type=str(job.source_type),
+            url=job.source_url,
+            knowledge_space_id=knowledge_space_id,
+            source_job_id=str(job.id),
+            captured_at=job.captured_at.isoformat() if job.captured_at else None,
+        )
+        return src.get("source_uid")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("replay: ensure_source failed: %s", exc)
+        return None
 
 logger = logging.getLogger("lucid.replay")
 
@@ -65,21 +102,30 @@ def _coerce_to_factnode(
     *,
     knowledge_space_id: str,
     validator_id: str,
+    fact_uid_override: str | None = None,
+    source_uid: str | None = None,
 ) -> FactNode:
     """Reconstruct a FactNode from the structure-stage summary.
 
     Mirrors api/routes/validate.py:_coerce_fact_to_factnode but
     operates from THIS module's import surface so the replay can be
     called outside the request lifecycle.
+
+    B-48a: `fact_uid_override` substitutes the LLM placeholder
+    (fn-N) with a canonical UUID4 issued at replay time, so multi-job
+    `fn-1` collisions stop overwriting each other in ES. `source_uid`
+    seeds the FactNode's provenance from the start.
     """
     raw_type = fact_summary.get("type") or fact_summary.get("type_") or "proposition"
     try:
         fact_type = FactType(raw_type)
     except ValueError:
         fact_type = FactType.PROPOSITION
-    fact_uid = fact_summary.get("fact_uid") or fact_summary["uid"]
+    raw_fact_uid = fact_uid_override or (
+        fact_summary.get("fact_uid") or fact_summary["uid"]
+    )
     return FactNode(
-        fact_uid=fact_uid,
+        fact_uid=raw_fact_uid,
         claim=fact_summary.get("claim") or "",
         type=fact_type,
         subject_uid=fact_summary.get("subject_uid") or "unknown",
@@ -88,6 +134,7 @@ def _coerce_to_factnode(
         validation_method="manual",
         validator_id=validator_id,
         knowledge_space_id=knowledge_space_id,
+        source_uids=[source_uid] if source_uid else [],
         negation_flag=bool(fact_summary.get("negation_flag", False)),
         negation_scope=fact_summary.get("negation_scope"),
     )
@@ -145,17 +192,43 @@ def replay_validation_logs() -> dict[str, Any]:
     Discards are skipped (they correctly never reach the recall
     surface). Errors on individual facts are logged but don't abort
     the run — the goal is to recover as much as possible after a wipe.
+
+    B-48a:
+    - Every LLM-placeholder fact uid (fn-N) is mapped to a fresh
+      canonical UUID4 per (job, placeholder) so multi-job `fn-1`
+      collisions stop overwriting each other (the 86→23 mystery).
+    - Every job gets a lucid_sources doc; every replayed fact carries
+      that source_uid in its source_uids list.
+    - S/P/O dedup runs: when two replayed facts share the canonical
+      triple in the same KS, the second one attaches its source_uid
+      to the first instead of creating a duplicate doc.
     """
     sm = make_sessionmaker()
     s = sm()
     client = get_client()
     indexed = 0
+    deduped = 0  # B-48a: count of replays that merged into an existing doc
+    sources_created = 0  # number of UNIQUE source URLs we ensured
     skipped_discard = 0
     skipped_no_fact = 0
     skipped_no_job = 0
     errors: list[str] = []
     indexed_uids: set[str] = set()
     upserted_object_uids: set[str] = set()
+    # B-48a per-job canonical fact_uid assignments, so the same
+    # placeholder seen twice within a job's logs (e.g. an edit after
+    # an accept) maps to the same UUID4.
+    fact_uid_remap: dict[tuple[str, str], str] = {}
+    # B-48a per-job source_uid cache, populated lazily.
+    source_uid_cache: dict[str, str | None] = {}
+
+    def _canonical_for(job_id: str, raw_fact_uid: str) -> str:
+        if not _FACT_PLACEHOLDER_RE.match(raw_fact_uid):
+            return raw_fact_uid
+        key = (job_id, raw_fact_uid)
+        if key not in fact_uid_remap:
+            fact_uid_remap[key] = new_uid()
+        return fact_uid_remap[key]
 
     try:
         # Pull accept + edit logs only; one row per (fact, action) pair.
@@ -190,11 +263,63 @@ def replay_validation_logs() -> dict[str, Any]:
                 continue
 
             try:
+                ks_id = str(job.knowledge_space_id)
+                job_key = str(job.id)
+
+                # B-48a: ensure source for this job (cached).
+                if job_key not in source_uid_cache:
+                    source_uid_cache[job_key] = _ensure_source_for_job_replay(
+                        job, ks_id,
+                    )
+                    if source_uid_cache[job_key]:
+                        sources_created += 1
+                source_uid = source_uid_cache[job_key]
+
+                # B-48a: canonical fact_uid for this (job, placeholder).
+                canonical_uid = _canonical_for(job_key, log.fact_uid or "")
+
                 node = _coerce_to_factnode(
                     fact,
-                    knowledge_space_id=str(job.knowledge_space_id),
+                    knowledge_space_id=ks_id,
                     validator_id=str(log.validator_id),
+                    fact_uid_override=canonical_uid,
+                    source_uid=source_uid,
                 )
+
+                # B-48a S/P/O dedup: if this triple already exists in
+                # the index (from a prior replay round, or another job
+                # in this same round), attach the source_uid instead
+                # of writing a duplicate fact doc.
+                existing = None
+                try:
+                    existing = find_fact_by_spo(
+                        ks_id, node.subject_uid, node.predicate, node.object_value,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "replay: dedup lookup failed for %s: %s",
+                        log.fact_uid, exc,
+                    )
+                if existing is not None and source_uid:
+                    existing_uid = existing.get("fact_uid")
+                    if existing_uid:
+                        try:
+                            attach_source_to_fact(existing_uid, source_uid)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "replay: attach_source failed for %s: %s",
+                                existing_uid, exc,
+                            )
+                        deduped += 1
+                        # Even when deduped, still ensure the related
+                        # Objects exist in ES.
+                        _upsert_objects_for_job(
+                            job,
+                            knowledge_space_id=ks_id,
+                            seen_uids=upserted_object_uids,
+                        )
+                        continue
+
                 # Embedding: best-effort. On API failure / no key, fall
                 # back to a zero vector so the doc still indexes (kNN
                 # against the zero vector just won't match meaningfully).
@@ -232,7 +357,7 @@ def replay_validation_logs() -> dict[str, Any]:
                 # canonical UUIDs to names.
                 _upsert_objects_for_job(
                     job,
-                    knowledge_space_id=str(job.knowledge_space_id),
+                    knowledge_space_id=ks_id,
                     seen_uids=upserted_object_uids,
                 )
             except Exception as exc:  # noqa: BLE001 - keep going
@@ -245,6 +370,8 @@ def replay_validation_logs() -> dict[str, Any]:
     summary = {
         "indexed": indexed,
         "unique_fact_uids": len(indexed_uids),
+        "deduped_into_existing": deduped,
+        "sources_created": sources_created,
         "objects_indexed": len(upserted_object_uids),
         "skipped_discard": skipped_discard,
         "skipped_fact_missing": skipped_no_fact,

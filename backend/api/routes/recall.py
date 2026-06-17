@@ -127,34 +127,47 @@ def _collect_entity_uids(facts: list[RecallFact]) -> list[str]:
     return list(seen.keys())
 
 
+def _retracted_clause(include_retracted: bool) -> dict[str, Any] | None:
+    """B-48a soft-delete filter. Default: hide facts with retracted_at
+    set. `include_retracted=True` removes the filter so the (future)
+    "철회된 사실 보기" toggle can surface them again."""
+    if include_retracted:
+        return None
+    return {"bool": {"must_not": [{"exists": {"field": "retracted_at"}}]}}
+
+
 def _entity_link_facts(
     entity_uids: list[str],
     knowledge_space_id: str,
     *,
     exclude_fact_uids: set[str],
     max_hits: int = 50,
+    include_retracted: bool = False,
 ) -> list[dict[str, Any]]:
     """Return hit dicts for every validated fact whose subject_uid OR
     object_value matches any of `entity_uids`. Excludes facts already
-    in the embedding pass."""
+    in the embedding pass.
+
+    B-48a: retracted facts (retracted_at != null) are filtered out by
+    default; pass `include_retracted=True` to surface them."""
     if not entity_uids:
         return []
+    filters: list[dict[str, Any]] = [
+        {"term": {"knowledge_space_id": knowledge_space_id}},
+        {"term": {"validation_method": "manual"}},
+        {"bool": {
+            "should": [
+                {"terms": {"subject_uid": entity_uids}},
+                {"terms": {"object_value": entity_uids}},
+            ],
+            "minimum_should_match": 1,
+        }},
+    ]
+    retract = _retracted_clause(include_retracted)
+    if retract is not None:
+        filters.append(retract)
     body: dict[str, Any] = {
-        "query": {
-            "bool": {
-                "filter": [
-                    {"term": {"knowledge_space_id": knowledge_space_id}},
-                    {"term": {"validation_method": "manual"}},
-                    {"bool": {
-                        "should": [
-                            {"terms": {"subject_uid": entity_uids}},
-                            {"terms": {"object_value": entity_uids}},
-                        ],
-                        "minimum_should_match": 1,
-                    }},
-                ],
-            },
-        },
+        "query": {"bool": {"filter": filters}},
         "size": max_hits,
     }
     client = get_client()
@@ -175,12 +188,15 @@ def _knn_facts_validated_only(
     k: int,
     *,
     entity_filter_uids: list[str] | None = None,
+    include_retracted: bool = False,
 ) -> list[dict[str, Any]]:
     """ES kNN with hard filters: space + validation_method=manual.
 
     B-49: when `entity_filter_uids` is supplied, every hit MUST
     reference EVERY entity uid on subject_uid OR object_value (AND
     intersection). Pure ES query — no app-side loop.
+
+    B-48a: retracted facts are filtered out by default.
     """
     filters: list[dict[str, Any]] = [
         {"term": {"knowledge_space_id": knowledge_space_id}},
@@ -191,6 +207,9 @@ def _knn_facts_validated_only(
             {"term": {"subject_uid": uid}},
             {"term": {"object_value": uid}},
         ], "minimum_should_match": 1}})
+    retract = _retracted_clause(include_retracted)
+    if retract is not None:
+        filters.append(retract)
     body: dict[str, Any] = {
         "knn": {
             "field": "embedding",
@@ -677,6 +696,10 @@ def recall(
     q: str = Query(..., min_length=1, max_length=2000, description="Query"),
     limit: int = Query(default=RECALL_DEFAULT_K, ge=1, le=RECALL_MAX_K),
     entity: list[str] = Query(default_factory=list, alias="entity"),
+    include_retracted: bool = Query(
+        default=False,
+        description="B-48a: surface facts with retracted_at set (default hides them)",
+    ),
     user: User = Depends(get_current_user),
 ) -> RecallResponse:
     """Return validated facts whose embedding is close to `q`.
@@ -707,10 +730,19 @@ def recall(
     if embedding is None:
         return _empty("embedding_unavailable")
 
+    # Defensive normalize: tests call this route directly without
+    # FastAPI dependency resolution, so Query() sentinel objects can
+    # leak in as defaults for list / bool params.
+    include_retracted_bool = bool(include_retracted) if isinstance(
+        include_retracted, bool,
+    ) else False
+    entity_uids_in: list[str] = entity if isinstance(entity, list) else []
+
     try:
         hits = _knn_facts_validated_only(
             list(embedding), str(ks.id), limit,
-            entity_filter_uids=list(entity),
+            entity_filter_uids=list(entity_uids_in),
+            include_retracted=include_retracted_bool,
         )
     except Exception as exc:  # noqa: BLE001 - degrade quietly
         logger.warning("recall: ES kNN failed: %s", exc)
@@ -743,6 +775,7 @@ def recall(
             entity_uids, str(ks.id),
             exclude_fact_uids=already,
             max_hits=max(RECALL_MAX_K, limit * 5),
+            include_retracted=include_retracted_bool,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("recall: entity-link expansion failed: %s", exc)
@@ -753,11 +786,11 @@ def recall(
             continue
         # B-49: entity filter is AND. Drop expanded facts that don't
         # reference every active filter uid.
-        if entity:
+        if entity_uids_in:
             src = hit.get("_source") or {}
             ok = all(
                 src.get("subject_uid") == uid or src.get("object_value") == uid
-                for uid in entity
+                for uid in entity_uids_in
             )
             if not ok:
                 continue

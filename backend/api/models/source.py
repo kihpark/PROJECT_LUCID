@@ -46,6 +46,10 @@ class Source(LucidBaseModel):
     Persisted in the lucid_sources ES index (PR-1A-3). The aggregate
     counts (`capture_count`) are maintained by the storage layer at
     index time.
+
+    B-48a: `source_job_id` and `captured_at` are populated by the
+    validate path so the fact-detail panel (B-48b) can hyperlink the
+    user back to the source job and surface raw_payload snapshots.
     """
 
     source_uid: UID
@@ -58,3 +62,6 @@ class Source(LucidBaseModel):
     first_captured_at: datetime = Field(default_factory=utc_now)
     capture_count: int = 1
     knowledge_space_id: UID
+    # B-48a reference-layer expansion.
+    source_job_id: UID | None = None
+    captured_at: datetime | None = None

@@ -63,6 +63,28 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
                     "edited_by": {"type": "keyword"},
                 },
             },
+            # B-48a soft-delete scaffold (UI in B-48b). When set, recall
+            # filters this fact out by default; ?include_retracted=true
+            # surfaces it again. retracted_by carries the actor uid so
+            # B-48b can show "you retracted this on ..." in the detail
+            # panel and offer restore.
+            "retracted_at": {"type": "date"},
+            "retracted_by": {"type": "keyword"},
+            # B-48a Phase 1 placeholder for the locator layer (Phase 2
+            # fills char_start / char_end / quote for text, and Phase 3
+            # adds image regions / video timecodes). Stored as a nested
+            # list of objects keyed by `kind` so future modalities can
+            # add fields without a mapping break.
+            "locators": {
+                "type": "nested",
+                "properties": {
+                    "kind": {"type": "keyword"},
+                    "source_uid": {"type": "keyword"},
+                    "char_start": {"type": "integer"},
+                    "char_end": {"type": "integer"},
+                    "quote": {"type": "text", "analyzer": "korean_analyzer"},
+                },
+            },
             "knowledge_space_id": {"type": "keyword"},
             "embedding": {
                 "type": "dense_vector",
@@ -133,6 +155,17 @@ LUCID_SOURCES_MAPPING: dict[str, Any] = {
             "first_captured_at": {"type": "date"},
             "capture_count": {"type": "integer"},
             "knowledge_space_id": {"type": "keyword"},
+            # B-48a reference layer expansion: the Source doc now
+            # tracks the originating SourceJob (so the detail panel can
+            # offer snapshot lookup against raw_payload), per-fact
+            # capture timestamp (different from first_captured_at when
+            # the same URL is captured multiple times), and author for
+            # attribution. published_at is the article's stated date,
+            # captured_at is when the user saved it.
+            "source_job_id": {"type": "keyword"},
+            "captured_at": {"type": "date"},
+            "published_at": {"type": "date"},
+            "author": {"type": "keyword"},
         },
     },
 }

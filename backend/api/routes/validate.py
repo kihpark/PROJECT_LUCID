@@ -341,8 +341,16 @@ def _coerce_fact_to_factnode(
     edited_metadata: dict[str, Any] | None,
     knowledge_space_id: str,
     validator_id: str,
+    source_uid: str | None = None,
 ) -> FactNode:
-    """Build a FactNode from the structure-stage fact summary + user edits."""
+    """Build a FactNode from the structure-stage fact summary + user edits.
+
+    B-48a: `source_uid`, when supplied, is seeded into the FactNode's
+    source_uids list so the validated fact carries provenance from
+    the moment it lands in ES. Callers MUST pass a source_uid in
+    production; the optional default exists only to keep legacy
+    tests (that don't care about provenance) compiling.
+    """
     claim = edited_claim if edited_claim else fact_summary["claim"]
     meta = dict(fact_summary)
     if edited_metadata:
@@ -362,9 +370,45 @@ def _coerce_fact_to_factnode(
         validation_method="manual",
         validator_id=validator_id,
         knowledge_space_id=knowledge_space_id,
+        source_uids=[source_uid] if source_uid else [],
         negation_flag=bool(meta.get("negation_flag", False)),
         negation_scope=meta.get("negation_scope"),
     )
+
+
+def _ensure_source_for_job(
+    job: SourceJobORM, knowledge_space_id: str,
+) -> str | None:
+    """B-48a: ensure a lucid_sources doc exists for this SourceJob and
+    return its source_uid. Idempotent (URL-keyed dedup).
+
+    Quietly returns None when the ES sources index is unavailable so
+    the validate flow falls back to writing facts without provenance
+    rather than 500-ing on the user."""
+    try:
+        from api.storage.elasticsearch.sources import create_or_update_source
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ES sources module unavailable: %s", exc)
+        return None
+    domain = ""
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(job.source_url).hostname or ""
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        src = create_or_update_source(
+            domain=domain,
+            source_type=str(job.source_type),
+            url=job.source_url,
+            knowledge_space_id=knowledge_space_id,
+            source_job_id=str(job.id),
+            captured_at=job.captured_at.isoformat() if job.captured_at else None,
+        )
+        return src.get("source_uid")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ensure_source_for_job failed: %s", exc)
+        return None
 
 
 def _facts_index(meta: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -403,13 +447,71 @@ def decide(
         # whole submission". validation_logs writes stay inline since
         # they're cheap Postgres inserts.
         bulk_module = None
+        dedup_lookup = None
+        attach_source = None
         try:
-            from api.storage.elasticsearch.facts import bulk_create_facts
+            from api.storage.elasticsearch.facts import (
+                attach_source_to_fact,
+                bulk_create_facts,
+                find_fact_by_spo,
+            )
             bulk_module = bulk_create_facts
+            dedup_lookup = find_fact_by_spo
+            attach_source = attach_source_to_fact
         except Exception as exc:  # noqa: BLE001
             logger.warning("ES facts module unavailable: %s", exc)
 
+        # B-48a: one source_uid per job (the job's URL → one Source doc).
+        source_uid = _ensure_source_for_job(job, str(ks.id))
+
         pending_nodes: list[Any] = []
+        # B-48a: when dedup hits, we don't create a new fact — we push
+        # the source_uid onto the existing doc instead. Track these so
+        # they happen after the per-fact loop.
+        dedup_pushes: list[str] = []  # existing fact_uids to attach source_uid to
+        # Within a single submit, two accepts with the same S/P/O
+        # should also collapse — track the pending node's S/P/O.
+        pending_spo_to_node: dict[tuple[str, str, str], Any] = {}
+
+        def _key(node: Any) -> tuple[str, str, str]:
+            return (node.subject_uid, node.predicate, node.object_value)
+
+        def _route_node(node: Any, fact_uid: str) -> None:
+            """Decide whether `node` is a fresh insert, a dedup-hit
+            against an existing fact, or a collision with a same-submit
+            pending node. Mutates `pending_nodes` / `dedup_pushes` /
+            `pending_spo_to_node` accordingly."""
+            # 1. Same-submit collision: another node already buffered.
+            existing_pending = pending_spo_to_node.get(_key(node))
+            if existing_pending is not None:
+                # Two structure-stage facts collapse to one; the
+                # validation_log entries still record both fact_uids
+                # for audit, but ES sees a single doc.
+                if source_uid and source_uid not in existing_pending.source_uids:
+                    existing_pending.source_uids = list(
+                        existing_pending.source_uids,
+                    ) + [source_uid]
+                return
+            # 2. ES dedup: an already-validated fact in this KS.
+            if dedup_lookup is not None:
+                try:
+                    existing = dedup_lookup(
+                        str(ks.id),
+                        node.subject_uid,
+                        node.predicate,
+                        node.object_value,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("dedup lookup failed for %s: %s", fact_uid, exc)
+                    existing = None
+                if existing is not None:
+                    existing_uid = existing.get("fact_uid")
+                    if existing_uid:
+                        dedup_pushes.append(existing_uid)
+                        return
+            # 3. Genuine new fact.
+            pending_nodes.append(node)
+            pending_spo_to_node[_key(node)] = node
 
         for d in req.decisions:
             f = facts_by_uid.get(d.fact_uid)
@@ -423,8 +525,9 @@ def decide(
                             f, edited_claim=None, edited_metadata=None,
                             knowledge_space_id=str(ks.id),
                             validator_id=str(user.id),
+                            source_uid=source_uid,
                         )
-                        pending_nodes.append(node)
+                        _route_node(node, d.fact_uid)
                     except Exception as exc:  # noqa: BLE001
                         logger.exception(
                             "coerce(accept) failed for %s: %s", d.fact_uid, exc,
@@ -449,11 +552,12 @@ def decide(
                             edited_metadata=d.edited_metadata,
                             knowledge_space_id=str(ks.id),
                             validator_id=str(user.id),
+                            source_uid=source_uid,
                         )
                         # The original claim is preserved as an alias so search
                         # still hits the original wording (DR-036).
                         node.aliases = list(node.aliases) + [f["claim"]]
-                        pending_nodes.append(node)
+                        _route_node(node, d.fact_uid)
                     except Exception as exc:  # noqa: BLE001
                         logger.exception(
                             "coerce(edit) failed for %s: %s",
@@ -485,6 +589,20 @@ def decide(
                     "bulk_create_facts failed (%d nodes): %s",
                     len(pending_nodes), exc,
                 )
+
+        # B-48a: push source_uid onto every dedup-hit fact. One small
+        # update per hit — at dogfood scale (≤10 facts per submit, most
+        # are fresh) this is negligible; we can batch later if it
+        # ever shows up in latency.
+        if attach_source is not None and source_uid and dedup_pushes:
+            for existing_uid in dedup_pushes:
+                try:
+                    attach_source(existing_uid, source_uid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "attach_source_to_fact failed for %s: %s",
+                        existing_uid, exc,
+                    )
 
         # B-41 P0: mirror the related Objects into lucid_objects so the
         # recall label lookup can resolve canonical UUIDs to names.
@@ -579,20 +697,64 @@ def accept_all(
         pending_fact_uids = [u for u in facts_by_uid if u not in already_decided]
 
         try:
-            from api.storage.elasticsearch.facts import create_fact
+            from api.storage.elasticsearch.facts import (
+                attach_source_to_fact,
+                create_fact,
+                find_fact_by_spo,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("ES facts module unavailable for accept-all: %s", exc)
             create_fact = None  # type: ignore[assignment]
+            attach_source_to_fact = None  # type: ignore[assignment]
+            find_fact_by_spo = None  # type: ignore[assignment]
+
+        # B-48a: one source_uid per job.
+        source_uid = _ensure_source_for_job(job, str(ks.id))
+        # Track same-submit S/P/O collisions so two pending facts
+        # collapse to a single ES doc.
+        seen_spo: set[tuple[str, str, str]] = set()
 
         for fu in pending_fact_uids:
             f = facts_by_uid[fu]
-            if create_fact is not None:
+            if create_fact is None:
+                continue
+            try:
+                node = _coerce_fact_to_factnode(
+                    f, edited_claim=None, edited_metadata=None,
+                    knowledge_space_id=str(ks.id),
+                    validator_id=str(user.id),
+                    source_uid=source_uid,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("accept-all coerce failed for %s: %s", fu, exc)
+                continue
+            spo = (node.subject_uid, node.predicate, node.object_value)
+            if spo in seen_spo:
+                # Already handled in this submit (either an insert or
+                # an attach); skip.
+                continue
+            seen_spo.add(spo)
+            # ES dedup against already-validated facts.
+            existing_uid: str | None = None
+            if find_fact_by_spo is not None:
                 try:
-                    node = _coerce_fact_to_factnode(
-                        f, edited_claim=None, edited_metadata=None,
-                        knowledge_space_id=str(ks.id),
-                        validator_id=str(user.id),
+                    existing = find_fact_by_spo(
+                        str(ks.id), node.subject_uid, node.predicate, node.object_value,
                     )
+                    if existing is not None:
+                        existing_uid = existing.get("fact_uid")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("accept-all dedup lookup failed for %s: %s", fu, exc)
+            if existing_uid and attach_source_to_fact is not None and source_uid:
+                try:
+                    attach_source_to_fact(existing_uid, source_uid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "accept-all attach_source failed for %s: %s",
+                        existing_uid, exc,
+                    )
+            else:
+                try:
                     create_fact(node, with_embedding=False)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("accept-all create_fact failed for %s: %s", fu, exc)
