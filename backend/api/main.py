@@ -6,6 +6,8 @@ Route logic lands in later sprints; see AGENTS.md.
 """
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,7 +31,50 @@ logger = logging.getLogger("lucid")
 
 API_VERSION = "0.4.0"
 
-app = FastAPI(title="Lucid API", version=API_VERSION)
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """B-39 fix 2: ensure the three ES indexes exist on app boot.
+
+    `create_indexes()` is idempotent — it returns "exists" on indexes
+    that are already present, so a normal boot is a no-op. When the
+    indexes have been wiped (e.g. an integration test session leaked
+    `delete_indexes()` against dev ES; B-38 prefix-isolation prevents
+    that going forward, but a hand-wiped ES still needs the structure
+    back) the hook recreates lucid_facts / lucid_objects /
+    lucid_sources with the correct mappings — dense_vector(dims=1536)
+    on `embedding`, keyword on knowledge_space_id / validation_method,
+    nori-analyser on the Korean text fields.
+
+    If ES is unreachable at boot we log a warning and continue —
+    routes that don't need ES (auth, capture, jobs) still work, and
+    a subsequent ES restart picks up the indexes via the same path
+    on the next boot.
+    """
+    try:
+        from api.storage.elasticsearch import indexes
+        from api.storage.elasticsearch.client import reset_client
+
+        reset_client()
+        result = indexes.ensure_negation_fields()
+        # ensure_negation_fields handles the lucid_facts case
+        # specifically; create_indexes covers all three.
+        creation = indexes.create_indexes()
+        logger.info(
+            "B-39 startup: ES indexes %s (negation tip-up: %s)",
+            creation,
+            result,
+        )
+    except Exception as exc:  # noqa: BLE001 - boot must never crash here
+        logger.warning(
+            "B-39 startup: could not ensure ES indexes (%s). Routes that "
+            "depend on ES will return empty envelopes until the cluster "
+            "is reachable.",
+            exc,
+        )
+    yield
+
+
+app = FastAPI(title="Lucid API", version=API_VERSION, lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
