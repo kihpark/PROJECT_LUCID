@@ -108,3 +108,166 @@ describe('RecallView', () => {
     expect(btn.disabled).toBe(true);
   });
 });
+
+
+describe('RecallView — entity label + sort + badges (B-40)', () => {
+  const HIT_WITH_LABELS: RecallResponse = {
+    signature: 'As far as I know — 그래프에 3개 검증 사실이 있습니다',
+    total: 3,
+    expanded_count: 1,
+    facts: [
+      {
+        fact_uid: 'fn-entity-link',
+        claim: 'Goldman Sachs sponsored the SpaceX IPO.',
+        claim_en: null,
+        subject_uid: '6895dbc7-a533-4c4d-9b8c-1a2b3c4d5e6f',
+        subject_label: 'Goldman Sachs',
+        predicate: 'is_underwriter_for',
+        object_value: '11111111-2222-3333-4444-555555555555',
+        object_label: 'SpaceX IPO',
+        source_uids: [],
+        validated_at: new Date('2026-06-15T10:00:00Z').toISOString(),
+        validator_id: 'user-x',
+        validation_method: 'manual',
+        knowledge_space_id: 'ks-1',
+        negation_flag: false,
+        negation_scope: null,
+        score: 0.0,
+        match_kind: 'entity_link',
+      },
+      {
+        fact_uid: 'fn-embed-high',
+        claim: 'SpaceX raised 85.7 billion USD in its IPO.',
+        claim_en: null,
+        subject_uid: '11111111-2222-3333-4444-555555555555',
+        subject_label: 'SpaceX',
+        predicate: 'total_funds_raised',
+        object_value: '85.7 billion USD',
+        object_label: null,
+        source_uids: [],
+        validated_at: new Date('2026-06-15T09:00:00Z').toISOString(),
+        validator_id: 'user-x',
+        validation_method: 'manual',
+        knowledge_space_id: 'ks-1',
+        negation_flag: false,
+        negation_scope: null,
+        score: 0.92,
+        match_kind: 'embedding',
+      },
+      {
+        fact_uid: 'fn-embed-mid',
+        claim: 'SpaceX shares listed at $135 on Jan 12, 2026.',
+        claim_en: null,
+        subject_uid: '11111111-2222-3333-4444-555555555555',
+        subject_label: 'SpaceX',
+        predicate: 'set_ipo_price',
+        object_value: '135 USD per share',
+        object_label: null,
+        source_uids: [],
+        validated_at: new Date('2026-06-15T09:30:00Z').toISOString(),
+        validator_id: 'user-x',
+        validation_method: 'manual',
+        knowledge_space_id: 'ks-1',
+        negation_flag: false,
+        negation_scope: null,
+        score: 0.81,
+        match_kind: 'embedding',
+      },
+    ],
+  };
+
+  it('resolves UUID subject_uid to subject_label on every card', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(HIT_WITH_LABELS);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    expect(
+      await screen.findByTestId('recall-fact-fn-embed-high-subject'),
+    ).toHaveTextContent('SpaceX');
+    expect(
+      screen.queryByText('11111111-2222-3333-4444-555555555555'),
+    ).toBeNull();
+  });
+
+  it('renders match_kind badges differentiating embedding vs entity_link', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(HIT_WITH_LABELS);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    expect(await screen.findAllByTestId('recall-badge-embedding')).toHaveLength(2);
+    expect(screen.getAllByTestId('recall-badge-entity-link')).toHaveLength(1);
+  });
+
+  it('sorts facts by score DESC so high-similarity embedding hits land first', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(HIT_WITH_LABELS);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    await screen.findByTestId('recall-fact-fn-embed-high');
+    // Limit to article-shape cards so the score "span" and dd cells
+    // don't get caught up in the sort comparison.
+    const cards = Array.from(document.querySelectorAll('article[data-testid^="recall-fact-"]'));
+    const uidsInOrder = cards.map((c) => c.getAttribute('data-testid')!.replace('recall-fact-', ''));
+    expect(uidsInOrder[0]).toBe('fn-embed-high');
+    expect(uidsInOrder[1]).toBe('fn-embed-mid');
+    expect(uidsInOrder[2]).toBe('fn-entity-link');
+  });
+
+  it('shows the threshold note above the result list with expanded count', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(HIT_WITH_LABELS);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const note = await screen.findByTestId('recall-threshold-note');
+    expect(note).toHaveTextContent(/0\.72 이상/);
+    expect(note).toHaveTextContent(/엔티티 연결로 추가된 1건/);
+  });
+
+  it('marks an unresolved UUID subject with the (미해석) marker', async () => {
+    const unresolved: RecallResponse = {
+      signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
+      total: 1,
+      facts: [{
+        fact_uid: 'fn-orphan',
+        claim: 'Some orphan fact.',
+        claim_en: null,
+        subject_uid: 'deadbeef-1234-5678-9abc-def012345678',
+        subject_label: null,
+        predicate: 'x',
+        object_value: 'literal',
+        object_label: null,
+        source_uids: [],
+        validated_at: new Date().toISOString(),
+        validator_id: 'u',
+        validation_method: 'manual',
+        knowledge_space_id: 'ks-1',
+        negation_flag: false,
+        negation_scope: null,
+        score: 0.85,
+        match_kind: 'embedding',
+      }],
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(unresolved);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'x' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    expect(
+      await screen.findByTestId('recall-fact-fn-orphan-subject'),
+    ).toHaveTextContent(/\(미해석\)/);
+  });
+});

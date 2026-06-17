@@ -38,14 +38,15 @@ class RecallFact(LucidBaseModel):
     negation_scope: Literal["full", "partial"] | None = None
     score: float
     # B-25 stage 2 / B-35 wiring: how this fact reached the response.
-    #   "embedding"   — kNN against the query embedding
-    #   "entity_link" — the kNN matches surfaced an entity uid and this
-    #                   fact references the SAME canonical Object uid
-    #                   on subject or object_value (the cross-fact /
-    #                   cross-job graph join enabled by B-35).
-    # Frontend uses this to label expanded facts so the user understands
-    # why a fact appears even when its claim text didn't directly match.
     match_kind: Literal["embedding", "entity_link"] = "embedding"
+    # B-40 defect 1: server-resolved entity labels. The route looks each
+    # subject_uid / entity-shape object_value up in lucid_objects and
+    # serialises the human-readable name here so RecallView doesn't
+    # have to do a second round-trip. None when the entity is unknown
+    # (or when object_value is a literal — the frontend then falls
+    # back to the raw object_value, which is the literal).
+    subject_label: str | None = None
+    object_label: str | None = None
 
 
 class RecallResponse(LucidBaseModel):

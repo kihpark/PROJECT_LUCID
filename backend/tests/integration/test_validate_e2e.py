@@ -174,12 +174,16 @@ def test_e2e_pending_with_edit_preserves_aliases(client, auth_context):
     job_id = _seed_structured_job(user_id, space_id, with_facts=1)
 
     captured: list = []
-    def _capture(node, with_embedding=False):
-        captured.append(node)
-        return node.fact_uid
+
+    def _capture(nodes, with_embedding=False):
+        # B-40: /decide now batches accept+edit nodes and calls
+        # bulk_create_facts once. We extend captured with the whole
+        # batch so assertions stay the same shape.
+        captured.extend(nodes)
+        return [n.fact_uid for n in nodes]
 
     with patch(
-        "api.storage.elasticsearch.facts.create_fact",
+        "api.storage.elasticsearch.facts.bulk_create_facts",
         side_effect=_capture,
     ):
         resp = client.post(
@@ -197,7 +201,7 @@ def test_e2e_pending_with_edit_preserves_aliases(client, auth_context):
     body = resp.json()
     assert body["edited_facts"] == ["fn-1"]
     # The original claim ("Test claim 1") must appear in aliases.
-    assert captured, "create_fact was not called"
+    assert captured, "bulk_create_facts was not called"
     assert "Test claim 1" in captured[0].aliases
 
 

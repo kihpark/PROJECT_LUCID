@@ -222,6 +222,69 @@ def _hit_to_fact(hit: dict[str, Any]) -> RecallFact | None:
         return None
 
 
+def _enrich_with_labels(
+    facts: list[RecallFact], knowledge_space_id: str,
+) -> list[RecallFact]:
+    """Look up the human-readable name for every entity uid the facts
+    reference, then return a new list with subject_label / object_label
+    populated. Uses a single ES mget so the cost is one round-trip
+    regardless of how many facts we resolve.
+
+    Literals on `object_value` (anything that doesn't look like an
+    entity ref) are left untouched — object_label is None and the
+    client renders the literal as-is.
+    """
+    if not facts:
+        return facts
+
+    uids: dict[str, None] = {}
+    for f in facts:
+        if f.subject_uid:
+            uids[f.subject_uid] = None
+        if f.object_value and _is_entity_ref(f.object_value):
+            uids[f.object_value] = None
+    if not uids:
+        return facts
+
+    name_by_uid: dict[str, str] = {}
+    try:
+        from api.storage.elasticsearch.client import LUCID_OBJECTS
+        client = get_client()
+        # mget by id — when an id doesn't exist the hit is `found=False`
+        # and we just skip it. Faster than running multiple `get` calls.
+        resp = client.mget(
+            index=LUCID_OBJECTS,
+            body={"ids": list(uids.keys())},
+        )
+        for doc in resp.get("docs", []):
+            if not doc.get("found"):
+                continue
+            src = doc.get("_source") or {}
+            uid = src.get("object_uid") or doc.get("_id")
+            name = src.get("name")
+            if uid and name:
+                name_by_uid[uid] = name
+    except Exception as exc:  # noqa: BLE001 - degrade quietly
+        logger.warning("recall: label lookup failed: %s", exc)
+        return facts
+
+    out: list[RecallFact] = []
+    for f in facts:
+        subject_label = name_by_uid.get(f.subject_uid) if f.subject_uid else None
+        object_label = (
+            name_by_uid.get(f.object_value)
+            if f.object_value and _is_entity_ref(f.object_value)
+            else None
+        )
+        out.append(
+            f.model_copy(update={
+                "subject_label": subject_label,
+                "object_label": object_label,
+            })
+        )
+    return out
+
+
 @router.get("/recall", response_model=RecallResponse)
 def recall(
     space_id: uuid.UUID,
@@ -301,6 +364,8 @@ def recall(
         fact = fact.model_copy(update={"match_kind": "entity_link"})
         facts.append(fact)
         expansion_count += 1
+
+    facts = _enrich_with_labels(facts, str(ks.id))
 
     return RecallResponse(
         signature=SIGNATURE_HIT_TEMPLATE.format(n=len(facts)),

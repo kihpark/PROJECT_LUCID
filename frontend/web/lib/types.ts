@@ -175,10 +175,18 @@ export interface RecallFact {
   negation_flag: boolean;
   negation_scope: 'full' | 'partial' | null;
   score: number;
+  // B-25 stage 2 / B-35 wiring.
+  match_kind?: 'embedding' | 'entity_link';
+  // B-40 defect 1: server-resolved entity labels for subject/object.
+  // Null when the uid isn't in lucid_objects or when object_value is a literal.
+  subject_label?: string | null;
+  object_label?: string | null;
 }
 
 export interface RecallResponse {
   signature: string;
   facts: RecallFact[];
   total: number;
+  // B-25 stage 2: how many of `facts` came in via the entity-link pass.
+  expanded_count?: number;
 }
