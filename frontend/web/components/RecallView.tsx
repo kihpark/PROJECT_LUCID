@@ -297,8 +297,9 @@ function FacetPanel({ facets, activeEntityUids, onToggleEntity }: FacetPanelProp
     ? (['organization', 'person', 'place', 'other'] as const)
     : [];
 
-  const allEntityCounts = entities
-    ? Object.values(entities).flatMap((arr) => arr.map((e) => e.count))
+  const allEntityCounts: number[] = entities
+    ? ([entities.organization, entities.person, entities.place, entities.other]
+        .flatMap((arr) => arr.map((e) => e.count)))
     : [];
   const maxEntityCount = allEntityCounts.length > 0 ? Math.max(...allEntityCounts) : 0;
   const maxPredicateCount = predicates.length > 0 ? Math.max(...predicates.map((p) => p.count)) : 0;
