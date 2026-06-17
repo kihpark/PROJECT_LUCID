@@ -35,21 +35,37 @@ interface Props {
   reviewMode?: boolean;
 }
 
+function buildDefaultDecisions(
+  facts: PendingJobDetail['facts'],
+): Record<string, FactDecisionDraft> {
+  // B-31: every fact lands "accepted" by default — the user only
+  // touches exceptions. Normal path is enter -> Submit (2 clicks).
+  const next: Record<string, FactDecisionDraft> = {};
+  for (const f of facts) {
+    const uid = f.fact_uid || f.uid || '';
+    if (!uid) continue;
+    next[uid] = { action: 'accept' };
+  }
+  return next;
+}
+
 /**
- * Decide Overlay — single shared state model (B-28 + B-29).
+ * Decide Overlay — B-31 checkbox model.
  *
- * Per-fact state held in one map:
- *   factDecisions[uid] absent           -> undecided
- *   factDecisions[uid].action === 'accept'  -> accepted
- *   factDecisions[uid].action === 'edit'    -> edited
- *   factDecisions[uid].action === 'discard' -> discarded
+ * Per-fact state held in one map (B-28 shared-state contract):
+ *   factDecisions[uid].action === 'accept'  -> will land in the graph
+ *   factDecisions[uid].action === 'edit'    -> will land with editedClaim
+ *   factDecisions[uid].action === 'discard' -> will NOT land
  *
- * B-29 defect 2 collapsed the previous accept-all / review tabs
- * into a SINGLE Review surface. The Accept-all action is now a
- * button rendered ABOVE the fact list, never a separate tab. The
- * user always sees the facts before the bulk button is offered —
- * DR-083 (no bulk-accept without seeing) is satisfied by surface,
- * not by guard. Submit is a sticky footer button.
+ * On entry every fact is pre-seeded with `{action: 'accept'}` so the
+ * user only touches the exceptions. The card's checkbox toggles
+ * accept <-> discard; Edit pops a textarea; the sticky Submit button
+ * persists the whole map in one request.
+ *
+ * DR-083 (no bulk-accept without seeing): satisfied structurally —
+ * the user has to navigate to this page, which always renders every
+ * fact, before Submit is available. There is no off-screen path that
+ * can ship a job.
  */
 export function DecideOverlay({
   spaceId,
@@ -60,7 +76,7 @@ export function DecideOverlay({
   const [lang, setLang] = useState<Lang>('en');
   const [factDecisions, setFactDecisions] = useState<
     Record<string, FactDecisionDraft>
-  >({});
+  >(() => buildDefaultDecisions(initial.facts));
   const [objectDecisions, setObjectDecisions] = useState<
     Record<string, ObjectDecisionDraft>
   >({});
@@ -75,88 +91,39 @@ export function DecideOverlay({
     let accepted = 0;
     let edited = 0;
     let discarded = 0;
-    let undecided = 0;
     for (const f of facts) {
       const uid = f.fact_uid || f.uid || '';
       if (!uid) continue;
       const d = factDecisions[uid];
-      if (!d) undecided++;
-      else if (d.action === 'accept') accepted++;
+      if (!d || d.action === 'accept') accepted++;
       else if (d.action === 'edit') edited++;
       else if (d.action === 'discard') discarded++;
     }
-    return { accepted, edited, discarded, undecided, total: facts.length };
+    return { accepted, edited, discarded, total: facts.length };
   }, [facts, factDecisions]);
 
-  const hasDirtyDecisions =
-    Object.keys(factDecisions).length + Object.keys(objectDecisions).length > 0;
+  // Always dirty in B-31: landing populates every fact with a
+  // default decision, so the user can hit Submit immediately. The
+  // beforeunload guard now also fires from the moment the page
+  // loads — that matches the model: leaving without Submit means
+  // discarding the implicit acceptance.
+  const hasDirtyDecisions = Object.keys(factDecisions).length > 0;
 
-  // beforeunload guard
   useEffect(() => {
-    if (!hasDirtyDecisions) return;
+    if (!hasDirtyDecisions || result !== null) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [hasDirtyDecisions]);
+  }, [hasDirtyDecisions, result]);
 
   const onFactChange = (
     uid: string,
     next: { action: FactAction; editedClaim?: string },
   ) => {
     setFactDecisions((prev) => ({ ...prev, [uid]: next }));
-  };
-
-  const onFactUndo = (uid: string) => {
-    setFactDecisions((prev) => {
-      if (!(uid in prev)) return prev;
-      const next = { ...prev };
-      delete next[uid];
-      return next;
-    });
-  };
-
-  // Accept-all: B-28 behaviour preserved. State transition (undecided
-  // -> accept, preserve edited/discarded) followed by submit.
-  const onAcceptAllAndSubmit = async () => {
-    if (facts.length === 0 || counts.undecided === 0) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const nextDecisions: Record<string, FactDecisionDraft> = {
-        ...factDecisions,
-      };
-      for (const f of facts) {
-        const uid = f.fact_uid || f.uid || '';
-        if (!uid) continue;
-        if (!(uid in nextDecisions)) {
-          nextDecisions[uid] = { action: 'accept' };
-        }
-      }
-      setFactDecisions(nextDecisions);
-      const r = await submitDecisions(spaceId, jobId, {
-        decisions: Object.entries(nextDecisions).map(([fact_uid, d]) => ({
-          fact_uid,
-          action: d.action,
-          edited_claim: d.action === 'edit' ? d.editedClaim : undefined,
-        })),
-        object_decisions: Object.entries(objectDecisions).map(
-          ([candidate_id, d]) => ({
-            candidate_id,
-            action: d.action,
-            merge_target_uid:
-              d.action === 'merge_with' ? d.mergeTargetUid : undefined,
-          }),
-        ),
-      });
-      setResult(r);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
   };
 
   const onDiscardJob = async () => {
@@ -234,7 +201,6 @@ export function DecideOverlay({
         <span>accepted: <span className="text-text-primary">{counts.accepted}</span></span>
         <span>edited: <span className="text-text-primary">{counts.edited}</span></span>
         <span>discarded: <span className="text-text-primary">{counts.discarded}</span></span>
-        <span>undecided: <span className="text-text-primary">{counts.undecided}</span></span>
       </div>
 
       {result && (
@@ -284,40 +250,31 @@ export function DecideOverlay({
 
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium">
-            {facts.length} pending fact(s)
+            {facts.length} fact(s) — uncheck or edit only the ones you disagree with
           </h2>
-          <div className="flex gap-2">
-            <ActionButton
-              variant="primary"
-              disabled={busy || facts.length === 0 || counts.undecided === 0}
-              onClick={onAcceptAllAndSubmit}
-            >
-              Accept all {counts.undecided} undecided
-            </ActionButton>
-            <ActionButton
-              variant="danger"
-              disabled={busy}
-              onClick={onDiscardJob}
-            >
-              Discard job
-            </ActionButton>
-          </div>
+          <ActionButton
+            variant="danger"
+            disabled={busy}
+            onClick={onDiscardJob}
+          >
+            Discard job
+          </ActionButton>
         </div>
 
         <div className="mb-4">
           {facts.map((f) => {
             const uid = f.fact_uid || f.uid || '';
             if (!uid) return null;
+            const decision = factDecisions[uid] ?? { action: 'accept' as FactAction };
             return (
               <FactCard
                 key={uid}
                 fact={f}
                 objects={initial.objects}
                 lang={lang}
-                action={factDecisions[uid]?.action}
-                editedClaim={factDecisions[uid]?.editedClaim}
+                action={decision.action}
+                editedClaim={decision.editedClaim}
                 onChange={(next) => onFactChange(uid, next)}
-                onUndo={() => onFactUndo(uid)}
                 reviewMode={reviewMode}
                 spaceId={spaceId}
               />
@@ -328,7 +285,7 @@ export function DecideOverlay({
         <div className="sticky bottom-0 bg-bg-base/95 py-4 -mx-4 px-4 border-t border-border-subtle">
           <ActionButton
             variant="primary"
-            disabled={busy || !hasDirtyDecisions}
+            disabled={busy || facts.length === 0 || result !== null}
             onClick={onSubmit}
           >
             Submit decisions
