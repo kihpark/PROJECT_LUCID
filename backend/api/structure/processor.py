@@ -38,6 +38,7 @@ Idempotency:
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -166,17 +167,48 @@ def _remap_links(
     return fact_object, fact_fact
 
 
-def _serialize_struct_fact(f: StructureFact) -> dict[str, Any]:
+# B-35: shape check for an LLM placeholder uid like "obj-1" / "obj-12".
+# Object values that DON'T match this pattern are literals
+# ("85.7 billion USD", "흑자", "1938-01-01") and stay untouched.
+_OBJ_PLACEHOLDER_RE = re.compile(r"^obj-\d+$", re.IGNORECASE)
+
+
+def _serialize_struct_fact(
+    f: StructureFact,
+    uid_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Pydantic StructureFact -> dict suitable for JSONB.
 
     `model_dump(by_alias=True, mode='json')` rewrites `type_` -> `type`
     and turns enums/datetimes into strings. The Decide Overlay's
     FactCard reads `fact.fact_uid || fact.uid` so we also project
     `uid` -> `fact_uid` to match the FactNode terminology.
+
+    B-35: when `uid_map` is supplied, the fact's `subject_uid` is
+    remapped through it (LLM placeholder "obj-1" -> canonical Object
+    UID issued by `match_or_create_object`), and `object_value` is
+    likewise remapped IF it matches the obj-N shape — pure literal
+    object values (numbers, dates, "흑자" etc.) are left as-is.
+    This is what fuses the cross-fact and cross-job entity graph:
+    a fact whose subject is "SpaceX" in one article will share its
+    subject_uid with another fact (potentially from a different
+    article) whose object is also "SpaceX", because both ran through
+    the same KS-scoped object matcher.
     """
     d = f.model_dump(by_alias=True, mode="json")
     if "uid" in d and "fact_uid" not in d:
         d["fact_uid"] = d["uid"]
+    if uid_map:
+        subject = d.get("subject_uid")
+        if isinstance(subject, str) and subject in uid_map:
+            d["subject_uid"] = uid_map[subject]
+        obj_val = d.get("object_value")
+        if (
+            isinstance(obj_val, str)
+            and _OBJ_PLACEHOLDER_RE.match(obj_val)
+            and obj_val in uid_map
+        ):
+            d["object_value"] = uid_map[obj_val]
     return d
 
 
@@ -281,7 +313,7 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         # structure metadata; before chore 5 these were never written, so
         # the UI showed "0 pending fact(s)" even on a successful structure.
         facts_payload = [
-            _serialize_struct_fact(f) for f in decomp.facts
+            _serialize_struct_fact(f, uid_map=uid_map) for f in decomp.facts
         ]
         objects_payload = [
             _serialize_struct_object(o) for o in decomp.objects
