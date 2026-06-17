@@ -134,10 +134,14 @@ Run these IN ORDER on the input text:
           NEGATES is directional (the negating party carries
           negation_flag=true and points TO the affirmed statement
           it negates, if both appear in the text).
-  Step 7. Extract time metadata: valid_from only (when a time-bound
-          claim became true). NEVER emit valid_until, is_stale, or
-          stale_at — those fields have been retired from the schema
-          (DR-053).
+  Step 7. DO NOT emit time metadata fields on facts. DR-053 retired
+          valid_from, valid_until, is_stale, and stale_at from the
+          schema. Time information BELONGS INSIDE the claim text and
+          the predicate (e.g. "2024-12" as part of the claim string,
+          or as_of inside an Object metric's properties dict).
+          The structure pipeline's defence layer silently drops
+          unknown fact-level keys, so emitting valid_from doesn't
+          break the parse — but every token spent on it is wasted.
 
 # Failure modes — be honest
 

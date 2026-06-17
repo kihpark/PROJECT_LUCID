@@ -30,7 +30,7 @@
 const WEB_BASE = 'http://localhost:3000';
 const POLL_INTERVAL_MS = 1000;
 const POLL_MAX_ATTEMPTS = 60;
-const FADE_OUT_MS = 5000;
+const FADE_OUT_MS = 12000;
 
 type Status =
   | 'pending_extract'
@@ -178,7 +178,7 @@ function makeReviewLink(jobId: string): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'lucid-toast-link';
-  btn.textContent = 'Review →';
+  btn.textContent = '검토하기 →';
   btn.addEventListener('click', () => {
     chrome.runtime.sendMessage({
       type: 'open_review',
@@ -217,16 +217,16 @@ function renderInitial(status: Status, jobId: string | undefined, error: string 
   switch (status) {
     case 'pending_extract':
     case 'extracting':
-      setStatusText('Saving to Lucid...');
+      setStatusText('Lucid 에 저장 중…');
       setDetail(jobId ? `job ${jobId.slice(0, 8)}` : null);
       break;
     case 'extracted':
     case 'structuring':
-      setStatusText('Analyzing...');
+      setStatusText('분석 중…');
       setDetail(jobId ? `job ${jobId.slice(0, 8)}` : null);
       break;
     case 'structured':
-      setStatusText('Saved to graph');
+      setStatusText('분석 완료');
       if (jobId) {
         setDetail(makeReviewLink(jobId));
       }
@@ -235,8 +235,8 @@ function renderInitial(status: Status, jobId: string | undefined, error: string 
     case 'extract_failed':
     case 'structure_failed':
     case 'capture_failed':
-      setStatusText('Save failed', true);
-      setDetail(error || 'Retry from the popup.');
+      setStatusText('저장 실패', true);
+      setDetail(error || '팝업에서 다시 시도하세요.');
       scheduleFadeOut();
       break;
   }
@@ -245,22 +245,28 @@ function renderInitial(status: Status, jobId: string | undefined, error: string 
 async function updateFromStatus(body: JobStatusBody, jobId: string): Promise<void> {
   const status = body.status;
   if (status === 'structured') {
-    setStatusText('Saved to graph');
-    let factDetail: string | null = null;
+    setStatusText('분석 완료');
+    let factCount: number | null = null;
     try {
       const summary = (await chrome.runtime.sendMessage({
         type: 'get_structured_summary',
         job_id: jobId,
       })) as SummaryResponse;
       if (summary?.ok && summary.summary) {
-        factDetail = `${summary.summary.fact_count} facts found`;
+        factCount = summary.summary.fact_count;
       }
     } catch {
       // ignore — keep generic message
     }
     const wrapper = document.createElement('span');
-    if (factDetail) {
-      wrapper.textContent = `${factDetail}  `;
+    // B-36: the 0-facts case had previously fallen through to the
+    // same wording ("0 facts found") that looked like an in-progress
+    // state to the user. Surface the empty-decompose explicitly so
+    // the PO can navigate to the Decide page and see why.
+    if (factCount === 0) {
+      wrapper.textContent = '추출된 사실 없음 · ';
+    } else if (factCount !== null && factCount > 0) {
+      wrapper.textContent = `${factCount}건 추출됨 · `;
     }
     wrapper.appendChild(makeReviewLink(jobId));
     setDetail(wrapper);
@@ -270,8 +276,8 @@ async function updateFromStatus(body: JobStatusBody, jobId: string): Promise<voi
     status === 'extract_failed'
     || status === 'structure_failed'
   ) {
-    setStatusText('Save failed', true);
-    setDetail(body.error_message || 'Check the Pending Queue.');
+    setStatusText('저장 실패', true);
+    setDetail(body.error_message || 'Pending Queue 에서 확인하세요.');
     stopPolling();
     scheduleFadeOut();
   } else {
@@ -286,8 +292,8 @@ function startPolling(jobId: string): void {
     attempts++;
     if (attempts > POLL_MAX_ATTEMPTS) {
       stopPolling();
-      setStatusText('Still working');
-      setDetail('Check the Pending Queue for the latest status.');
+      setStatusText('처리 지연');
+      setDetail('Pending Queue 에서 최신 상태를 확인하세요.');
       scheduleFadeOut();
       return;
     }
