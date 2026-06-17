@@ -34,6 +34,9 @@ def test_reset_client_drops_singleton():
 
 def test_index_name_constants():
     """The three index name constants are stable strings."""
-    assert es_client.LUCID_FACTS == "lucid_facts"
-    assert es_client.LUCID_OBJECTS == "lucid_objects"
-    assert es_client.LUCID_SOURCES == "lucid_sources"
+    # B-38: LUCID_FACTS = f"{LUCID_INDEX_PREFIX}lucid_facts". The
+    # name resolves to "lucid_facts" by default and to e.g.
+    # "test_lucid_facts" when the integration conftest is in effect.
+    assert es_client.LUCID_FACTS.endswith("lucid_facts")
+    assert es_client.LUCID_OBJECTS.endswith("lucid_objects")
+    assert es_client.LUCID_SOURCES.endswith("lucid_sources")
