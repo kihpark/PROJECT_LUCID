@@ -27,7 +27,6 @@ import { recall as apiRecall, ApiError } from '@/lib/api';
 import type {
   EntityBrief,
   EntityBriefGroup,
-  EntityFactRef,
   EntityFacetItem,
   PredicateFacetItem,
   RecallFact,
