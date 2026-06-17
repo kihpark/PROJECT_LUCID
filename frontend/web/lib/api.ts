@@ -12,6 +12,7 @@ import type {
   PendingJobDetail,
   PendingListFilters,
   PendingPage,
+  RecallResponse,
 } from './types';
 
 // Client-side fetch only — lib/api is imported by use-client components.
@@ -164,5 +165,18 @@ export function deleteNote(
   return request<void>(
     `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/notes/${noteId}`,
     { method: 'DELETE' },
+  );
+}
+
+export function recall(
+  spaceId: string,
+  q: string,
+  limit = 10,
+): Promise<RecallResponse> {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  params.set('limit', String(limit));
+  return request<RecallResponse>(
+    `/api/spaces/${spaceId}/recall?${params.toString()}`,
   );
 }
