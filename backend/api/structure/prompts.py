@@ -88,6 +88,28 @@ Run these IN ORDER on the input text:
   Step 3. Decompose every assertion into one or more AtomicFact
           candidates (proposition or procedure). Each fact must be a
           SINGLE falsifiable statement.
+  Step 3a. COORDINATED SUBJECTS / OBJECTS (B-33):
+          When a clause carries a coordinated subject or object
+          ("A와 B가 ~", "A and B ~", "A, B, and C did X"), emit ONE
+          AtomicFact PER coordinated entity, each with a single
+          subject (or object), the SAME predicate, and the SAME
+          object value. Keep the original claim text on every emitted
+          fact so the audit trail is preserved.
+          EXAMPLE — distributive (SPLIT):
+            "Goldman Sachs와 Morgan Stanley가 SpaceX의 주관사단에
+            포함되어 있다."
+            -> 2 facts:
+               (Goldman Sachs)  --is_underwriter_for--> (SpaceX IPO)
+               (Morgan Stanley) --is_underwriter_for--> (SpaceX IPO)
+          EXCEPTION — joint / reciprocal relations (DO NOT SPLIT):
+            "Disney와 Fox는 2019년에 합병했다."
+            -> 1 fact:
+               (Disney) --merged_with--> (Fox)
+            Splitting destroys the relation: "Disney merged" alone
+            is meaningless. Use these predicate families as the
+            non-split signal: merge, partner, collaborate, ally,
+            married_to, competed_against, equals, tied_with,
+            mutually_*, reciprocally_*.
   Step 4. NEGATION DETECTION (DCR-001):
           - Scan the fact for negation tokens (English: not, no, never,
             n't, prohibit, forbid, deny, banned, illegal, fail to, lack,
