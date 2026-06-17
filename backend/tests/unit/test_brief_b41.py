@@ -36,7 +36,7 @@ def test_build_brief_returns_none_when_entity_not_found():
     from api.routes.recall import _build_entity_brief
 
     with patch(
-        "api.routes.recall._resolve_entity_by_name", return_value=None,
+        "api.routes.recall._resolve_entities_by_name", return_value=[],
     ):
         out = _build_entity_brief("unknown name", "ks-1")
     assert out is None
@@ -87,7 +87,7 @@ def test_build_brief_groups_facts_by_predicate_with_role_split():
             return mget_docs
 
     with patch(
-        "api.routes.recall._resolve_entity_by_name", return_value=entity_doc,
+        "api.routes.recall._resolve_entities_by_name", return_value=[entity_doc],
     ), patch(
         "api.routes.recall._facts_for_entity", return_value=hits,
     ), patch("api.routes.recall.get_client", return_value=_FakeClient()):
@@ -131,7 +131,7 @@ def test_build_brief_zero_facts_still_returns_envelope():
         "class": "concept",
     }
     with patch(
-        "api.routes.recall._resolve_entity_by_name", return_value=entity_doc,
+        "api.routes.recall._resolve_entities_by_name", return_value=[entity_doc],
     ), patch(
         "api.routes.recall._facts_for_entity", return_value=[],
     ):
@@ -158,7 +158,7 @@ def test_build_brief_drops_facts_unrelated_to_entity_uid():
     )
 
     with patch(
-        "api.routes.recall._resolve_entity_by_name", return_value=entity_doc,
+        "api.routes.recall._resolve_entities_by_name", return_value=[entity_doc],
     ), patch(
         "api.routes.recall._facts_for_entity", return_value=[stranger_hit],
     ):

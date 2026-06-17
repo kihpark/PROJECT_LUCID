@@ -349,12 +349,75 @@ def _resolve_entity_by_name(
         return None
 
 
-def _facts_for_entity(
-    entity_uid: str, knowledge_space_id: str, *, max_hits: int = 200,
+def _resolve_entities_by_name(
+    q: str, knowledge_space_id: str, *, max_hits: int = 25,
 ) -> list[dict[str, Any]]:
-    """Every manual fact in this KS where the entity sits on subject
-    or object_value. ES `_score` is irrelevant here; we sort the
-    brief by predicate."""
+    """Return EVERY entity in the KS whose name (or name_en) matches `q`.
+
+    Ordered canonical UUID4 first, then everything else, so a brief
+    representative pick (`[0]`) prefers the canonical document. The
+    brief itself uses the WHOLE list (not just `[0]`) to find facts —
+    that's the keystone of B-49b: when an old LLM-placeholder Object
+    and a new canonical-UUID Object share a name (e.g. "SpaceX"), the
+    facts attached to either side must surface together.
+    """
+    if not q or not q.strip():
+        return []
+    q_norm = q.strip().lower()
+    body: dict[str, Any] = {
+        "size": max_hits,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"knowledge_space_id": knowledge_space_id}},
+                ],
+                "should": [
+                    {"term": {"name.keyword": q.strip()}},
+                    {"term": {"name_en.keyword": q.strip()}},
+                ],
+                "minimum_should_match": 1,
+            },
+        },
+    }
+    try:
+        from api.storage.elasticsearch.client import LUCID_OBJECTS
+        client = get_client()
+        resp = client.search(index=LUCID_OBJECTS, body=body)
+        hits = list(resp["hits"]["hits"])
+        if not hits:
+            body["query"]["bool"]["should"] = [  # type: ignore[index]
+                {"wildcard": {"name": f"*{q_norm}*"}},
+                {"wildcard": {"name_en": f"*{q_norm}*"}},
+            ]
+            resp = client.search(index=LUCID_OBJECTS, body=body)
+            hits = list(resp["hits"]["hits"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: multi-entity lookup failed: %s", exc)
+        return []
+    sources = [h.get("_source") or {} for h in hits]
+
+    # Sort so canonical UUID4 uids land first. This is the same
+    # `_UUID4_RE` the rest of the route uses to gate entity-link work.
+    def _is_canonical(doc: dict[str, Any]) -> bool:
+        uid = doc.get("object_uid") or ""
+        return bool(_UUID4_RE.match(uid))
+
+    sources.sort(key=lambda d: 0 if _is_canonical(d) else 1)
+    return sources
+
+
+def _facts_for_entity(
+    entity_uids: str | list[str], knowledge_space_id: str, *, max_hits: int = 200,
+) -> list[dict[str, Any]]:
+    """Every manual fact in this KS where ANY of `entity_uids` sits on
+    subject_uid or object_value. Single string accepted for backward
+    compatibility with the pre-B-49b callers."""
+    if isinstance(entity_uids, str):
+        uids = [entity_uids]
+    else:
+        uids = list(entity_uids)
+    if not uids:
+        return []
     body: dict[str, Any] = {
         "query": {
             "bool": {
@@ -363,8 +426,8 @@ def _facts_for_entity(
                     {"term": {"validation_method": "manual"}},
                     {"bool": {
                         "should": [
-                            {"term": {"subject_uid": entity_uid}},
-                            {"term": {"object_value": entity_uid}},
+                            {"terms": {"subject_uid": uids}},
+                            {"terms": {"object_value": uids}},
                         ],
                         "minimum_should_match": 1,
                     }},
@@ -385,21 +448,36 @@ def _facts_for_entity(
 def _build_entity_brief(
     q: str, knowledge_space_id: str,
 ) -> EntityBrief | None:
-    """Resolve `q` to a known entity and group its facts."""
-    entity = _resolve_entity_by_name(q, knowledge_space_id)
-    if not entity:
-        return None
-    entity_uid = entity.get("object_uid") or ""
-    entity_name = str(entity.get("name") or entity_uid)
-    entity_class = entity.get("class")
-    if not entity_uid:
+    """Resolve `q` to every matching entity in the KS and group its facts.
+
+    B-49b: when two Object documents share the same name (e.g. an old
+    LLM-placeholder "SpaceX" and a B-35-canonical "SpaceX"), the brief
+    must show facts attached to EITHER uid — that's what makes it
+    agree with the facet panel + flat fact list, which already see
+    both sides. The representative `entity_uid` on the response is the
+    canonical-preferred pick so the UI labels make sense.
+    """
+    matches = _resolve_entities_by_name(q, knowledge_space_id)
+    if not matches:
         return None
 
-    hits = _facts_for_entity(entity_uid, knowledge_space_id)
+    # All uids that share this name. _resolve_entities_by_name has
+    # already sorted canonical UUID4 first.
+    entity_uids: list[str] = [
+        m["object_uid"] for m in matches
+        if isinstance(m.get("object_uid"), str)
+    ]
+    if not entity_uids:
+        return None
+    rep = matches[0]
+    rep_uid = str(rep.get("object_uid") or entity_uids[0])
+    entity_name = str(rep.get("name") or rep_uid)
+    entity_class = rep.get("class")
+
+    hits = _facts_for_entity(entity_uids, knowledge_space_id)
     if not hits:
-        # The entity exists but has zero verified facts on either side.
         return EntityBrief(
-            entity_uid=entity_uid,
+            entity_uid=rep_uid,
             entity_name=entity_name,
             entity_class=entity_class,
             total_facts=0,
@@ -407,14 +485,18 @@ def _build_entity_brief(
             as_object=[],
         )
 
+    # The set of "us" uids — any of these on subject or object means the
+    # fact belongs to this brief.
+    us = set(entity_uids)
+
     # Resolve labels for the OTHER side of each fact in one mget.
     other_uids: set[str] = set()
     for h in hits:
         src = h.get("_source") or {}
-        if src.get("subject_uid") and src["subject_uid"] != entity_uid:
+        if src.get("subject_uid") and src["subject_uid"] not in us:
             other_uids.add(src["subject_uid"])
         ov = src.get("object_value")
-        if ov and ov != entity_uid and _is_entity_ref(ov):
+        if ov and ov not in us and _is_entity_ref(ov):
             other_uids.add(ov)
     label_by_uid: dict[str, str] = {}
     if other_uids:
@@ -442,7 +524,7 @@ def _build_entity_brief(
         subj = src.get("subject_uid", "")
         obj = src.get("object_value", "")
 
-        if subj == entity_uid:
+        if subj in us:
             other = obj
             ref = EntityFactRef(
                 fact_uid=fact_uid,
@@ -452,7 +534,7 @@ def _build_entity_brief(
                 other_label=label_by_uid.get(other) if _is_entity_ref(other) else None,
             )
             subject_groups.setdefault(predicate, []).append(ref)
-        elif obj == entity_uid:
+        elif obj in us:
             other = subj
             ref = EntityFactRef(
                 fact_uid=fact_uid,
@@ -464,7 +546,7 @@ def _build_entity_brief(
             object_groups.setdefault(predicate, []).append(ref)
 
     return EntityBrief(
-        entity_uid=entity_uid,
+        entity_uid=rep_uid,
         entity_name=entity_name,
         entity_class=entity_class,
         total_facts=sum(len(v) for v in subject_groups.values())
