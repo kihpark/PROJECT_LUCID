@@ -489,7 +489,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     const secondCall = (api.recall as ReturnType<typeof vi.fn>).mock.calls[1];
     expect(secondCall[0]).toBe('ks-1');
     expect(secondCall[1]).toBe('SpaceX');
-    expect(secondCall[2]).toEqual({ entity: ['uid-spacex'] });
+    expect(secondCall[2]).toEqual(expect.objectContaining({ entity: ['uid-spacex'] }));
   });
 
   it('renders an active filter chip after drill-down + removes on ✕', async () => {
@@ -511,7 +511,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     fireEvent.click(screen.getByTestId('filter-chip-uid-goldman-remove'));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual({ entity: [] });
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual(expect.objectContaining({ entity: [] }));
   });
 
   it('"모두 지우기" wipes the entity filter array', async () => {
@@ -532,7 +532,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     fireEvent.click(screen.getByTestId('filter-clear-all'));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(4));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[3][2]).toEqual({ entity: [] });
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[3][2]).toEqual(expect.objectContaining({ entity: [] }));
     expect(screen.queryByTestId('active-filter-chips')).toBeNull();
   });
 
@@ -546,11 +546,184 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2]).toEqual({ entity: ['uid-spacex'] });
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2]).toEqual(expect.objectContaining({ entity: ['uid-spacex'] }));
 
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual({ entity: [] });
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual(expect.objectContaining({ entity: [] }));
+  });
+});
+
+describe('RecallView — left search controls (B-50)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // ★ helper: render + run an initial recall so the controls have a
+  // submittedQuery to attach to. Subsequent control changes will
+  // re-fire recall against that query.
+  async function bootstrap() {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+    // initial call carries default controls (0.72 threshold, both kinds)
+    const firstOpts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[0][2];
+    expect(firstOpts).toEqual(
+      expect.objectContaining({
+        entity: [],
+        scoreThreshold: 0.72,
+        matchKinds: ['embedding', 'entity_link'],
+      }),
+    );
+  }
+
+  it('renders the four control groups in the left rail', async () => {
+    await bootstrap();
+    expect(screen.getByTestId('search-controls')).toBeInTheDocument();
+    expect(screen.getByTestId('control-threshold-slider')).toBeInTheDocument();
+    expect(screen.getByTestId('control-date-from')).toBeInTheDocument();
+    expect(screen.getByTestId('control-date-to')).toBeInTheDocument();
+    expect(screen.getByTestId('control-match-embedding')).toBeInTheDocument();
+    expect(screen.getByTestId('control-match-entity-link')).toBeInTheDocument();
+    expect(screen.getByTestId('control-keyword2')).toBeInTheDocument();
+    // ★ default threshold value rendered next to the slider
+    expect(screen.getByTestId('control-threshold-value')).toHaveTextContent('0.72');
+  });
+
+  it('★ similarity slider change re-fires recall with score_threshold', async () => {
+    await bootstrap();
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    fireEvent.change(screen.getByTestId('control-threshold-slider'), {
+      target: { value: '0.85' },
+    });
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+    const opts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2];
+    expect(opts.scoreThreshold).toBeCloseTo(0.85, 2);
+    // and the rendered value updates in step
+    expect(screen.getByTestId('control-threshold-value')).toHaveTextContent('0.85');
+  });
+
+  it('★ date range change re-fires recall with date_from/date_to ISO', async () => {
+    await bootstrap();
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    fireEvent.change(screen.getByTestId('control-date-from'), {
+      target: { value: '2026-01-01' },
+    });
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    fireEvent.change(screen.getByTestId('control-date-to'), {
+      target: { value: '2026-12-31' },
+    });
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
+    const opts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2];
+    // start-of-day on date_from, end-of-day on date_to — inclusive window
+    expect(opts.dateFrom).toBe('2026-01-01T00:00:00Z');
+    expect(opts.dateTo).toBe('2026-12-31T23:59:59Z');
+  });
+
+  it('★ match_kind toggle disables the embedding pass (or entity-link)', async () => {
+    await bootstrap();
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    // turn off embedding
+    fireEvent.click(screen.getByTestId('control-match-embedding')
+      .querySelector('input[type=checkbox]')!);
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2].matchKinds)
+      .toEqual(['entity_link']);
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    // turn embedding back on and turn entity_link off
+    fireEvent.click(screen.getByTestId('control-match-embedding')
+      .querySelector('input[type=checkbox]')!);
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    fireEvent.click(screen.getByTestId('control-match-entity-link')
+      .querySelector('input[type=checkbox]')!);
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(4));
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[3][2].matchKinds)
+      .toEqual(['embedding']);
+  });
+
+  it('★ secondary keyword filters in-result without a second recall call', async () => {
+    await bootstrap();
+    // After the initial recall, BOTH RECALL_HIT facts are rendered.
+    expect(screen.getByTestId('recall-fact-fn-1')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-fn-2')).toBeInTheDocument();
+
+    // Typing a keyword that matches only fn-1 hides fn-2 — no API call.
+    fireEvent.change(screen.getByTestId('control-keyword2'), {
+      target: { value: '기준금리' },
+    });
+    await waitFor(() =>
+      expect(screen.queryByTestId('recall-fact-fn-2')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('recall-fact-fn-1')).toBeInTheDocument();
+    // Still exactly one call (the initial recall).
+    expect(api.recall).toHaveBeenCalledTimes(1);
+  });
+
+  it('★ secondary keyword that matches nothing shows the empty hint', async () => {
+    await bootstrap();
+    fireEvent.change(screen.getByTestId('control-keyword2'), {
+      target: { value: 'zzz-no-such-claim' },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('recall-keyword-empty')).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('recall-fact-fn-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('recall-fact-fn-2')).not.toBeInTheDocument();
+  });
+
+  it('★ control changes preserve the active entity filter (AND combine)', async () => {
+    // Use a self-contained faceted response so a drill-down chip can
+    // be applied; the goal is to prove the entity filter survives a
+    // later control change (AND-combine, not OR/reset).
+    const FACETED: RecallResponse = {
+      signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
+      total: 1,
+      facts: [{
+        fact_uid: 'fn-a', claim: 'SpaceX raised 85.7B USD.', claim_en: null,
+        subject_uid: 'uid-spacex', subject_label: 'SpaceX',
+        predicate: 'total_funds_raised',
+        object_value: '85.7 billion USD', object_label: null,
+        source_uids: [], validated_at: new Date('2026-06-15T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.91, match_kind: 'embedding',
+      }],
+      facets: {
+        entities: {
+          organization: [{ uid: 'uid-spacex', name: 'SpaceX', count: 1 }],
+          person: [], place: [], other: [],
+        },
+        predicates: [{ name: 'total_funds_raised', count: 1 }],
+      },
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    // Drill into uid-spacex
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+
+    // Now change the threshold — entity filter MUST survive
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.change(screen.getByTestId('control-threshold-slider'), {
+      target: { value: '0.80' },
+    });
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
+    const opts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2];
+    expect(opts).toEqual(
+      expect.objectContaining({
+        entity: ['uid-spacex'],
+        scoreThreshold: 0.8,
+      }),
+    );
   });
 });

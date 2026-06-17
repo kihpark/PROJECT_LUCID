@@ -14,19 +14,29 @@ Pipeline:
                                                        returned. This is the
                                                        zero-hallucination
                                                        guarantee.
-        score              >= RECALL_SCORE_FLOOR
+        score              >= score_threshold       <- default RECALL_SCORE_FLOOR;
+                                                       B-50 allows the caller
+                                                       to override per request.
   4. Build the response envelope with the signature line.
 
 When the query yields no facts (zero stored OR all under threshold),
 the response is identical: facts=[], signature="검증된 사실이 없습니다".
 The route MUST NOT paraphrase or generate. The branding of the
 endpoint is "if we did not see it, we will not say it."
+
+B-50: the caller can refine recall through additive query params —
+score_threshold (similarity floor), date_from / date_to (validated_at
+window), match_kinds (subset of {"embedding","entity_link"}). Defaults
+preserve the pre-B-50 behaviour exactly: omitting them gives the same
+result as before. Empty match_kinds list is treated as "both" so the
+client can probe the surface without disabling recall by accident.
 """
 from __future__ import annotations
 
 import logging
 import re
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -127,34 +137,56 @@ def _collect_entity_uids(facts: list[RecallFact]) -> list[str]:
     return list(seen.keys())
 
 
+def _date_range_filter(
+    date_from: datetime | None, date_to: datetime | None,
+) -> dict[str, Any] | None:
+    """B-50: build an ES range clause for validated_at, or None when
+    both bounds are absent. The clause is the same regardless of which
+    pipeline (embedding kNN / entity-link expansion) calls it, so we
+    keep it in one place."""
+    if date_from is None and date_to is None:
+        return None
+    bounds: dict[str, Any] = {}
+    if date_from is not None:
+        bounds["gte"] = date_from.isoformat()
+    if date_to is not None:
+        bounds["lte"] = date_to.isoformat()
+    return {"range": {"validated_at": bounds}}
+
+
 def _entity_link_facts(
     entity_uids: list[str],
     knowledge_space_id: str,
     *,
     exclude_fact_uids: set[str],
     max_hits: int = 50,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Return hit dicts for every validated fact whose subject_uid OR
     object_value matches any of `entity_uids`. Excludes facts already
-    in the embedding pass."""
+    in the embedding pass.
+
+    B-50: optional `date_from` / `date_to` clip the result set to a
+    validated_at window. Both bounds are inclusive."""
     if not entity_uids:
         return []
+    filters: list[dict[str, Any]] = [
+        {"term": {"knowledge_space_id": knowledge_space_id}},
+        {"term": {"validation_method": "manual"}},
+        {"bool": {
+            "should": [
+                {"terms": {"subject_uid": entity_uids}},
+                {"terms": {"object_value": entity_uids}},
+            ],
+            "minimum_should_match": 1,
+        }},
+    ]
+    date_clause = _date_range_filter(date_from, date_to)
+    if date_clause is not None:
+        filters.append(date_clause)
     body: dict[str, Any] = {
-        "query": {
-            "bool": {
-                "filter": [
-                    {"term": {"knowledge_space_id": knowledge_space_id}},
-                    {"term": {"validation_method": "manual"}},
-                    {"bool": {
-                        "should": [
-                            {"terms": {"subject_uid": entity_uids}},
-                            {"terms": {"object_value": entity_uids}},
-                        ],
-                        "minimum_should_match": 1,
-                    }},
-                ],
-            },
-        },
+        "query": {"bool": {"filter": filters}},
         "size": max_hits,
     }
     client = get_client()
@@ -175,12 +207,17 @@ def _knn_facts_validated_only(
     k: int,
     *,
     entity_filter_uids: list[str] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """ES kNN with hard filters: space + validation_method=manual.
 
     B-49: when `entity_filter_uids` is supplied, every hit MUST
     reference EVERY entity uid on subject_uid OR object_value (AND
     intersection). Pure ES query — no app-side loop.
+
+    B-50: optional `date_from` / `date_to` clip the result set to a
+    validated_at window. Both bounds are inclusive.
     """
     filters: list[dict[str, Any]] = [
         {"term": {"knowledge_space_id": knowledge_space_id}},
@@ -191,6 +228,9 @@ def _knn_facts_validated_only(
             {"term": {"subject_uid": uid}},
             {"term": {"object_value": uid}},
         ], "minimum_should_match": 1}})
+    date_clause = _date_range_filter(date_from, date_to)
+    if date_clause is not None:
+        filters.append(date_clause)
     body: dict[str, Any] = {
         "knn": {
             "field": "embedding",
@@ -671,12 +711,54 @@ def _facets_for(
     )
 
 
+_VALID_MATCH_KINDS: set[str] = {"embedding", "entity_link"}
+
+
+def _resolve_match_kinds(raw: Any) -> set[str]:
+    """B-50: the client sends an explicit subset of match kinds it
+    wants surfaced. None or empty list means "both" — preserving the
+    pre-B-50 behaviour where the route always ran both passes.
+
+    `raw` is typed `Any` because tests call `recall()` directly and
+    Python supplies the Query/FieldInfo sentinel object as the default,
+    which is neither None nor a list. Any non-list reaches us as
+    "leave defaults alone" and resolves to both passes.
+
+    Unknown string values are dropped silently rather than 400-ing
+    because the overall contract is degrade-quietly: a typo in the
+    query string shouldn't break recall, just ignore the unknown
+    filter.
+    """
+    if not isinstance(raw, list) or not raw:
+        return set(_VALID_MATCH_KINDS)
+    cleaned = {v for v in raw if v in _VALID_MATCH_KINDS}
+    if not cleaned:
+        # All values were unknown — treat as "both" rather than empty
+        # so the user sees results instead of silent zero.
+        return set(_VALID_MATCH_KINDS)
+    return cleaned
+
+
 @router.get("/recall", response_model=RecallResponse)
 def recall(
     space_id: uuid.UUID,
     q: str = Query(..., min_length=1, max_length=2000, description="Query"),
     limit: int = Query(default=RECALL_DEFAULT_K, ge=1, le=RECALL_MAX_K),
     entity: list[str] = Query(default_factory=list, alias="entity"),
+    score_threshold: float | None = Query(
+        default=None, ge=0.0, le=1.0,
+        description="Similarity floor (default RECALL_SCORE_FLOOR=0.72)",
+    ),
+    date_from: datetime | None = Query(
+        default=None, description="validated_at >= date_from (inclusive)",
+    ),
+    date_to: datetime | None = Query(
+        default=None, description="validated_at <= date_to (inclusive)",
+    ),
+    match_kinds: list[str] | None = Query(
+        default=None, alias="match_kinds",
+        description="Subset of {'embedding','entity_link'} to include",
+    ),
     user: User = Depends(get_current_user),
 ) -> RecallResponse:
     """Return validated facts whose embedding is close to `q`.
@@ -687,10 +769,17 @@ def recall(
         the index (enforced inside the ES kNN filter clause AND
         re-checked in the serialiser).
       - 0 hits — whether the index is empty, the query is irrelevant,
-        or every hit is below RECALL_SCORE_FLOOR — produces the same
+        or every hit is below the threshold — produces the same
         empty envelope. We do NOT generate, paraphrase, or augment.
       - Korean queries work first-class because the embedding model
         (OpenAI text-embedding-3-small) is multilingual.
+
+    B-50 refinements (all additive):
+      - score_threshold: override RECALL_SCORE_FLOOR per request.
+      - date_from / date_to: validated_at window (inclusive on both
+        sides; either side may be omitted).
+      - match_kinds: subset of {'embedding','entity_link'}. Omitting
+        or empty list preserves the default (both passes run).
 
     Failure-mode handling: any infrastructure error (no embedding API,
     ES down) returns the empty envelope rather than a 500. Recall must
@@ -703,6 +792,24 @@ def recall(
     finally:
         session.close()
 
+    # Defensive normalize: tests call this route directly without going
+    # through FastAPI dependency resolution, so the Query() sentinel
+    # objects leak in as defaults for list-typed params. Coerce to
+    # plain lists so downstream `list(entity)` and similar never trip.
+    entity_uids_in: list[str] = entity if isinstance(entity, list) else []
+    threshold = score_threshold if isinstance(score_threshold, (int, float)) else RECALL_SCORE_FLOOR
+    df = date_from if isinstance(date_from, datetime) else None
+    dt = date_to if isinstance(date_to, datetime) else None
+    enabled_kinds = _resolve_match_kinds(match_kinds)
+
+    # B-50: when the user disables the embedding pass we skip kNN and
+    # the brief lookup entirely; the entity-link pass on its own has
+    # no seed entity uids, so the result is empty by construction. The
+    # route returns the empty envelope in that case — same shape as
+    # "no facts above threshold".
+    if "embedding" not in enabled_kinds:
+        return _empty("embedding_disabled")
+
     embedding = get_embedding(q)
     if embedding is None:
         return _empty("embedding_unavailable")
@@ -710,7 +817,9 @@ def recall(
     try:
         hits = _knn_facts_validated_only(
             list(embedding), str(ks.id), limit,
-            entity_filter_uids=list(entity),
+            entity_filter_uids=list(entity_uids_in),
+            date_from=df,
+            date_to=dt,
         )
     except Exception as exc:  # noqa: BLE001 - degrade quietly
         logger.warning("recall: ES kNN failed: %s", exc)
@@ -719,7 +828,7 @@ def recall(
     facts: list[RecallFact] = []
     for hit in hits:
         score = float(hit.get("_score") or 0.0)
-        if score < RECALL_SCORE_FLOOR:
+        if score < threshold:
             # Hits are sorted by score desc; first below-floor → stop.
             break
         fact = _hit_to_fact(hit)
@@ -733,37 +842,40 @@ def recall(
     # in this knowledge_space that references any of the same
     # canonical Object uids. This is the graph join PO asked for —
     # "SpaceX 검색 -> SpaceX 가 subject 든 object 든 등장하는 fact 전부".
-    # Degrade quietly on any ES error — the embedding matches above
-    # are already a complete answer.
-    entity_uids = _collect_entity_uids(facts)
-    already = {f.fact_uid for f in facts}
+    # B-50: skipped entirely when the user turned the entity-link pass
+    # off in the left panel.
     expansion_count = 0
-    try:
-        link_hits = _entity_link_facts(
-            entity_uids, str(ks.id),
-            exclude_fact_uids=already,
-            max_hits=max(RECALL_MAX_K, limit * 5),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("recall: entity-link expansion failed: %s", exc)
-        link_hits = []
-    for hit in link_hits:
-        fact = _hit_to_fact(hit)
-        if fact is None:
-            continue
-        # B-49: entity filter is AND. Drop expanded facts that don't
-        # reference every active filter uid.
-        if entity:
-            src = hit.get("_source") or {}
-            ok = all(
-                src.get("subject_uid") == uid or src.get("object_value") == uid
-                for uid in entity
+    if "entity_link" in enabled_kinds:
+        entity_uids = _collect_entity_uids(facts)
+        already = {f.fact_uid for f in facts}
+        try:
+            link_hits = _entity_link_facts(
+                entity_uids, str(ks.id),
+                exclude_fact_uids=already,
+                max_hits=max(RECALL_MAX_K, limit * 5),
+                date_from=df,
+                date_to=dt,
             )
-            if not ok:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall: entity-link expansion failed: %s", exc)
+            link_hits = []
+        for hit in link_hits:
+            fact = _hit_to_fact(hit)
+            if fact is None:
                 continue
-        fact = fact.model_copy(update={"match_kind": "entity_link"})
-        facts.append(fact)
-        expansion_count += 1
+            # B-49: entity filter is AND. Drop expanded facts that don't
+            # reference every active filter uid.
+            if entity_uids_in:
+                src = hit.get("_source") or {}
+                ok = all(
+                    src.get("subject_uid") == uid or src.get("object_value") == uid
+                    for uid in entity_uids_in
+                )
+                if not ok:
+                    continue
+            fact = fact.model_copy(update={"match_kind": "entity_link"})
+            facts.append(fact)
+            expansion_count += 1
 
     facts = _enrich_with_labels(facts, str(ks.id))
 
