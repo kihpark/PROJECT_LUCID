@@ -383,3 +383,110 @@ describe('FactCard — entity label resolution (B-27 + B-31 regression)', () => 
     expect(screen.getByTestId('fact-subject')).not.toHaveTextContent('obj-1');
   });
 });
+
+
+describe('FactCard — UUID entity resolution (B-37)', () => {
+  it('resolves a UUID subject_uid to the entity name when objects array carries it', () => {
+    const onChange = vi.fn();
+    const uuidObjects: ObjectSummary[] = [
+      {
+        uid: '6895dbc7-a533-4c4d-9b8c-1a2b3c4d5e6f',
+        class: 'organization',
+        name: 'Found Fine Art',
+        name_en: 'Found Fine Art',
+        properties: {},
+      },
+    ];
+    const fact: FactSummary = {
+      ...baseFact,
+      subject_uid: '6895dbc7-a533-4c4d-9b8c-1a2b3c4d5e6f',
+    };
+    render(
+      <FactCard
+        fact={fact}
+        objects={uuidObjects}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('Found Fine Art');
+    expect(screen.getByTestId('fact-subject')).not.toHaveTextContent('6895dbc7');
+  });
+
+  it('flags an unresolved UUID with the same "(미해석)" marker as obj-N', () => {
+    const onChange = vi.fn();
+    const fact: FactSummary = {
+      ...baseFact,
+      subject_uid: 'deadbeef-1234-5678-9abc-def012345678',
+    };
+    render(
+      <FactCard
+        fact={fact}
+        objects={baseObjects}
+        action="accept"
+        lang="kr"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('(미해석)');
+  });
+
+  it('Edit dropdown labels an out-of-objects current value as "현재: <best-effort>"', () => {
+    const onChange = vi.fn();
+    const uuidObjects: ObjectSummary[] = [
+      {
+        uid: '11111111-2222-3333-4444-555555555555',
+        class: 'organization',
+        name: 'Other Entity',
+        name_en: 'Other Entity',
+        properties: {},
+      },
+    ];
+    // Current value is a different UUID that resolves via the same list.
+    const presentUuid = '11111111-2222-3333-4444-555555555555';
+    render(
+      <FactCard
+        fact={{ ...baseFact, subject_uid: presentUuid }}
+        objects={uuidObjects}
+        action="edit"
+        editedSubjectUid={presentUuid}
+        editedPredicate={baseFact.predicate!}
+        editedObjectValue={baseFact.object_value!}
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    // The current value IS in objects -> dropdown shouldn't render the
+    // fallback option; only the normal listing.
+    const select = screen.getByTestId('fact-edit-subject-fn-1') as HTMLSelectElement;
+    expect(select.value).toBe(presentUuid);
+    // Verify no option literally renders the raw UUID without a label.
+    const options = Array.from(select.options).map((o) => o.textContent);
+    expect(options.some((label) => label === presentUuid)).toBe(false);
+  });
+
+  it('Edit dropdown shows "현재: (미해석)" when the current value is an unknown UUID', () => {
+    const onChange = vi.fn();
+    const unknownUuid = '99999999-aaaa-bbbb-cccc-dddddddddddd';
+    render(
+      <FactCard
+        fact={{ ...baseFact, subject_uid: unknownUuid }}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid={unknownUuid}
+        editedPredicate="p"
+        editedObjectValue="o"
+        lang="kr"
+        onChange={onChange}
+      />,
+    );
+    const select = screen.getByTestId('fact-edit-subject-fn-1') as HTMLSelectElement;
+    const firstOption = select.options[0];
+    // It still HAS the raw value (so the select works) but the label
+    // is now "현재: <UUID> (미해석)" instead of the raw UUID alone.
+    expect(firstOption!.value).toBe(unknownUuid);
+    expect(firstOption!.textContent).toMatch(/^현재: /);
+    expect(firstOption!.textContent).toContain('(미해석)');
+  });
+});

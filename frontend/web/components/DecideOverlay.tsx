@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import type { Route } from 'next';
 import { ActionButton } from './ActionButton';
 import { LangToggle, type Lang } from './LangToggle';
 import { FactCard } from './FactCard';
@@ -236,13 +238,30 @@ export function DecideOverlay({
       </div>
 
       {result && (
-        <div className="mb-4 rounded-md border border-accent-success/40 bg-accent-success/5 p-3 text-sm">
-          Decisions recorded —{' '}
-          <code className="font-mono">
-            {result.accepted_facts.length} accepted,{' '}
-            {result.edited_facts.length} edited,{' '}
-            {result.discarded_facts.length} discarded
-          </code>
+        <div
+          className="mb-6 rounded-md border-2 border-accent-success/60 bg-accent-success/10 p-6 text-base"
+          data-testid="decisions-recorded-panel"
+          role="status"
+          aria-live="polite"
+        >
+          <h2 className="text-lg font-medium text-accent-success mb-2">
+            ✓ 검증 완료
+          </h2>
+          <p className="text-sm mb-4">
+            <code className="font-mono">
+              {result.accepted_facts.length}건 accept ·{' '}
+              {result.edited_facts.length}건 edit ·{' '}
+              {result.discarded_facts.length}건 discard
+            </code>
+            {' '}— validation_logs 에 영구 기록됨.
+          </p>
+          <Link
+            href={'/pending' as Route}
+            data-testid="back-to-pending"
+            className="inline-flex items-center gap-1 text-sm text-accent-cool hover:underline"
+          >
+            ← Pending Queue 로 돌아가기
+          </Link>
         </div>
       )}
       {error && (
@@ -254,6 +273,7 @@ export function DecideOverlay({
         </div>
       )}
 
+      {result === null && (
       <section aria-label="Review">
         {disambig.length > 0 && (
           <div className="mb-6">
@@ -320,13 +340,14 @@ export function DecideOverlay({
         <div className="sticky bottom-0 bg-bg-base/95 py-4 -mx-4 px-4 border-t border-border-subtle">
           <ActionButton
             variant="primary"
-            disabled={busy || facts.length === 0 || result !== null}
+            disabled={busy || facts.length === 0}
             onClick={onSubmit}
           >
             Submit decisions
           </ActionButton>
         </div>
       </section>
+      )}
     </div>
   );
 }

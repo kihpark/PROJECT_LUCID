@@ -47,7 +47,13 @@ function displayClaim(fact: FactSummary, lang: Lang): string {
   return fact.claim;
 }
 
-const OBJECT_REF_PATTERN = /^obj-\d+$/i;
+// B-37: an entity reference can be an LLM-emitted placeholder
+// ("obj-12"), a canonical UUID4 produced by the B-35 remap
+// ("6895dbc7-a533-..."), or a UUID-shaped string with non-strict
+// version bits (older create_new path). All three resolve through
+// labelMap; failing that we show a "(미해석)" marker rather than
+// dump the raw uid on the user.
+const OBJECT_REF_PATTERN = /^(?:obj-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 function buildLabelMap(
   objects: ObjectSummary[] | undefined,
@@ -263,10 +269,15 @@ export function FactCard({
                 + 'focus:border-accent-cool'
               }
             >
-              {/* Allow the current value even if it's not in objects (defensive) */}
+              {/* B-37: when the current value isn't in objects (e.g. canonical
+                UUID was assigned post-decompose), still keep the value selectable
+                but label it humanely. resolveEntity already does the heavy
+                lifting; the dropdown just shows its output. */}
               {!objects?.some((o) => o.uid === currentSubject) && (
                 <option value={currentSubject}>
-                  {currentSubject || '(unset)'}
+                  {currentSubject
+                    ? `현재: ${resolveEntity(currentSubject, labelMap, lang)}`
+                    : '(unset)'}
                 </option>
               )}
               {(objects ?? []).map((o) => (

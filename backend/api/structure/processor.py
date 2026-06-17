@@ -212,15 +212,29 @@ def _serialize_struct_fact(
     return d
 
 
-def _serialize_struct_object(o: StructureObject) -> dict[str, Any]:
+def _serialize_struct_object(
+    o: StructureObject,
+    uid_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Pydantic StructureObject -> dict suitable for JSONB.
 
     `class_` -> `class` is handled by `by_alias=True`. We also
     coerce `properties` to a plain dict so `extra='forbid'` re-validation
     in tests doesn't trip on Mapping subclasses.
+
+    B-37 defect 2: when `uid_map` is supplied (the same map the
+    decomposer uses to remap fact.subject_uid via B-35), the object's
+    `uid` is rewritten too. Without this, fact triples carry canonical
+    UUIDs while the objects array keeps LLM "obj-N" placeholders, so
+    the Decide overlay's label lookup fails and FactCard shows raw
+    UUIDs to the user.
     """
     d = o.model_dump(by_alias=True, mode="json")
     d["properties"] = dict(d.get("properties") or {})
+    if uid_map:
+        original = d.get("uid")
+        if isinstance(original, str) and original in uid_map:
+            d["uid"] = uid_map[original]
     return d
 
 
@@ -316,7 +330,7 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             _serialize_struct_fact(f, uid_map=uid_map) for f in decomp.facts
         ]
         objects_payload = [
-            _serialize_struct_object(o) for o in decomp.objects
+            _serialize_struct_object(o, uid_map=uid_map) for o in decomp.objects
         ]
         fact_object_links_detail = [
             {
