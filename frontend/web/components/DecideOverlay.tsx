@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
 import { ActionButton } from './ActionButton';
 import { LangToggle, type Lang } from './LangToggle';
@@ -93,6 +94,19 @@ export function DecideOverlay({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DecideResponse | null>(null);
+  const router = useRouter();
+
+  // B-37 (PO re-issue): after a successful Submit, leave the success
+  // panel up for 1 s so the user can see the counts, then route to
+  // /pending where the B-29 list filter has already hidden this job.
+  // Manual nav via the back-link is still available the whole time.
+  useEffect(() => {
+    if (result === null) return undefined;
+    const t = window.setTimeout(() => {
+      router.push('/pending' as unknown as Route);
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [result, router]);
 
   const facts = initial.facts;
   const disambig = initial.disambiguation_pending;

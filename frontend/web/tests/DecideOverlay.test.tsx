@@ -3,6 +3,11 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { DecideOverlay } from '@/components/DecideOverlay';
 import type { PendingJobDetail } from '@/lib/types';
 
+const pushMock = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: pushMock, refresh: vi.fn(), replace: vi.fn() }),
+}));
+
 vi.mock('@/lib/api', () => ({
   acceptAll: vi.fn(),
   discardJob: vi.fn(async () => ({
@@ -67,6 +72,7 @@ const baseJob: PendingJobDetail = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  pushMock.mockReset();
 });
 
 describe('DecideOverlay — checkbox-by-default landing (B-31)', () => {
@@ -183,5 +189,32 @@ describe('DecideOverlay — submit success panel (B-37)', () => {
     const panel = screen.getByTestId('decisions-recorded-panel');
     expect(panel).toHaveTextContent(/1건 accept/);
     expect(panel).toHaveTextContent(/1건 discard/);
+  });
+});
+
+
+describe('DecideOverlay — auto-redirect after Submit (B-37 re-issue)', () => {
+  it('routes to /pending ~1s after the success panel appears', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    fireEvent.click(screen.getByText('Submit decisions'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('decisions-recorded-panel')).not.toBeNull(),
+    );
+    // Right after success, no redirect yet.
+    expect(pushMock).not.toHaveBeenCalled();
+    // Advance one second: the redirect timer fires.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pushMock).toHaveBeenCalledWith('/pending');
+    vi.useRealTimers();
+  });
+
+  it('does NOT redirect when there was no successful submit', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    // Just sit on the page without clicking Submit.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(pushMock).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });
