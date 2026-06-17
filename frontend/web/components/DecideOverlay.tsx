@@ -19,6 +19,14 @@ import type {
 interface FactDecisionDraft {
   action: FactAction;
   editedClaim?: string;
+  // B-34: structured edits. Each is optional — when the user toggles
+  // Edit and only changes one field, the others fall back to the
+  // fact's original triple. On submit we wrap the populated ones into
+  // `edited_metadata` so the backend's `_coerce_fact_to_factnode`
+  // overrides only the touched fields.
+  editedSubjectUid?: string;
+  editedPredicate?: string;
+  editedObjectValue?: string;
 }
 
 interface ObjectDecisionDraft {
@@ -121,7 +129,13 @@ export function DecideOverlay({
 
   const onFactChange = (
     uid: string,
-    next: { action: FactAction; editedClaim?: string },
+    next: {
+      action: FactAction;
+      editedClaim?: string;
+      editedSubjectUid?: string;
+      editedPredicate?: string;
+      editedObjectValue?: string;
+    },
   ) => {
     setFactDecisions((prev) => ({ ...prev, [uid]: next }));
   };
@@ -148,11 +162,29 @@ export function DecideOverlay({
     setError(null);
     try {
       const payload = {
-        decisions: Object.entries(factDecisions).map(([fact_uid, d]) => ({
-          fact_uid,
-          action: d.action,
-          edited_claim: d.action === 'edit' ? d.editedClaim : undefined,
-        })),
+        decisions: Object.entries(factDecisions).map(([fact_uid, d]) => {
+          const edited_metadata: Record<string, unknown> = {};
+          if (d.action === 'edit') {
+            if (d.editedSubjectUid !== undefined) {
+              edited_metadata.subject_uid = d.editedSubjectUid;
+            }
+            if (d.editedPredicate !== undefined) {
+              edited_metadata.predicate = d.editedPredicate;
+            }
+            if (d.editedObjectValue !== undefined) {
+              edited_metadata.object_value = d.editedObjectValue;
+            }
+          }
+          return {
+            fact_uid,
+            action: d.action,
+            edited_claim: d.action === 'edit' ? d.editedClaim : undefined,
+            edited_metadata:
+              d.action === 'edit' && Object.keys(edited_metadata).length > 0
+                ? edited_metadata
+                : undefined,
+          };
+        }),
         object_decisions: Object.entries(objectDecisions).map(
           ([candidate_id, d]) => ({
             candidate_id,
@@ -274,6 +306,9 @@ export function DecideOverlay({
                 lang={lang}
                 action={decision.action}
                 editedClaim={decision.editedClaim}
+                editedSubjectUid={decision.editedSubjectUid}
+                editedPredicate={decision.editedPredicate}
+                editedObjectValue={decision.editedObjectValue}
                 onChange={(next) => onFactChange(uid, next)}
                 reviewMode={reviewMode}
                 spaceId={spaceId}
