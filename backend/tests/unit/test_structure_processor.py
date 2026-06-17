@@ -236,7 +236,12 @@ def test_processor_persists_facts_content():
         # by_alias resolves type_ -> type
         assert fact["type"] == "proposition"
         assert fact["claim"].startswith("Claim ")
-        assert fact["subject_uid"] == "obj-1"
+        # B-35: subject_uid is now the canonical Object UID returned by
+        # match_or_create_object (here mocked as "obj-X") rather than
+        # the LLM's per-decompose placeholder "obj-1". This is what
+        # lets a later fact about the same entity share a graph node
+        # with this one.
+        assert fact["subject_uid"] == "obj-X"
         assert fact["predicate"] == "has_property"
         assert fact["fact_uid"] == f"fn-{i}"
         # The original Pydantic field also lands so the route's
