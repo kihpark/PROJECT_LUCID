@@ -29,6 +29,20 @@ DEV_DB_NAME = "lucid"
 TEST_DB_NAME = "lucid_test"
 
 
+def _force_test_es_index_prefix_env() -> None:
+    """Set LUCID_INDEX_PREFIX so every ES index name the backend
+    constructs during this test session is prefixed `test_`.
+    Mirrors `_force_test_database_url_env`: the override is in place
+    BEFORE any fixture runs, so module-level captures of
+    LUCID_FACTS / LUCID_OBJECTS / LUCID_SOURCES land on the test
+    namespace.
+    """
+    os.environ["LUCID_INDEX_PREFIX"] = "test_"
+
+
+_force_test_es_index_prefix_env()
+
+
 def _force_test_database_url_env() -> None:
     """Rewrite DATABASE_URL in os.environ to point at lucid_test.
 

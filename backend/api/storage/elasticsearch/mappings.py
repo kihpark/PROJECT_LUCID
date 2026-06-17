@@ -11,6 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from api.storage.elasticsearch.client import (
+    LUCID_FACTS,
+    LUCID_OBJECTS,
+    LUCID_SOURCES,
+)
+
 EMBEDDING_DIMS = 1536  # OpenAI text-embedding-3-small
 
 KOREAN_ANALYZER_SETTINGS: dict[str, Any] = {
@@ -133,7 +139,10 @@ LUCID_SOURCES_MAPPING: dict[str, Any] = {
 
 
 INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
-    "lucid_facts": LUCID_FACTS_MAPPING,
-    "lucid_objects": LUCID_OBJECTS_MAPPING,
-    "lucid_sources": LUCID_SOURCES_MAPPING,
+    # B-38: keys reflect the LUCID_INDEX_PREFIX in effect at import,
+    # so create_indexes() / delete_indexes() looking up by prefixed
+    # name (e.g. "test_lucid_facts") still find the mapping.
+    LUCID_FACTS: LUCID_FACTS_MAPPING,
+    LUCID_OBJECTS: LUCID_OBJECTS_MAPPING,
+    LUCID_SOURCES: LUCID_SOURCES_MAPPING,
 }

@@ -11,11 +11,11 @@ from api.storage.elasticsearch.mappings import (
 
 
 def test_three_indexes_defined():
-    assert set(INDEX_MAPPINGS.keys()) == {
-        "lucid_facts",
-        "lucid_objects",
-        "lucid_sources",
-    }
+    """B-38: keys now reflect the LUCID_INDEX_PREFIX in effect. We
+    assert the SUFFIXES match the canonical names so the test passes
+    both under prod (no prefix) and integration (test_ prefix)."""
+    suffixes = {k.split("lucid_")[-1] for k in INDEX_MAPPINGS}
+    assert suffixes == {"facts", "objects", "sources"}
 
 
 def test_lucid_facts_uses_nori_for_korean_and_aliases():

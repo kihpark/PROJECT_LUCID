@@ -13,9 +13,16 @@ from elasticsearch import Elasticsearch
 
 logger = logging.getLogger("lucid.es")
 
-LUCID_FACTS = "lucid_facts"
-LUCID_OBJECTS = "lucid_objects"
-LUCID_SOURCES = "lucid_sources"
+# B-38: an optional prefix lets the integration test suite operate
+# on test_lucid_facts / test_lucid_objects / test_lucid_sources so its
+# session-scoped index teardown can never wipe dev ES. Production /
+# the running app leaves LUCID_INDEX_PREFIX unset and gets the bare
+# index names exactly as before. The conftest sets the env at import
+# time before any app import lands.
+_INDEX_PREFIX = os.getenv("LUCID_INDEX_PREFIX", "")
+LUCID_FACTS = f"{_INDEX_PREFIX}lucid_facts"
+LUCID_OBJECTS = f"{_INDEX_PREFIX}lucid_objects"
+LUCID_SOURCES = f"{_INDEX_PREFIX}lucid_sources"
 
 _client: Elasticsearch | None = None
 _client_lock = Lock()
