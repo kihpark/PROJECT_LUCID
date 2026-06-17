@@ -171,11 +171,14 @@ export function deleteNote(
 export function recall(
   spaceId: string,
   q: string,
-  limit = 10,
+  options: { limit?: number; entity?: string[] } = {},
 ): Promise<RecallResponse> {
   const params = new URLSearchParams();
   params.set('q', q);
-  params.set('limit', String(limit));
+  params.set('limit', String(options.limit ?? 10));
+  for (const uid of options.entity ?? []) {
+    params.append('entity', uid);
+  }
   return request<RecallResponse>(
     `/api/spaces/${spaceId}/recall?${params.toString()}`,
   );

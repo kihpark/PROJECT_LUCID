@@ -34,7 +34,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from api.models.recall import (
     EntityBrief,
     EntityBriefGroup,
+    EntityFacetItem,
+    EntityFacets,
     EntityFactRef,
+    PredicateFacetItem,
+    RecallFacets,
     RecallFact,
     RecallResponse,
 )
@@ -166,25 +170,34 @@ def _entity_link_facts(
 
 
 def _knn_facts_validated_only(
-    embedding: list[float], knowledge_space_id: str, k: int,
+    embedding: list[float],
+    knowledge_space_id: str,
+    k: int,
+    *,
+    entity_filter_uids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """ES kNN with hard filters: space + validation_method=manual.
 
-    Returns [{_source, _score}] hit dicts so the caller can apply the
-    score floor + serialise. The validation_method filter is enforced
-    inside the ES `knn.filter` clause, not as a post-fetch Python
-    filter, so non-manual facts can never leak even on a partial fail.
+    B-49: when `entity_filter_uids` is supplied, every hit MUST
+    reference EVERY entity uid on subject_uid OR object_value (AND
+    intersection). Pure ES query — no app-side loop.
     """
+    filters: list[dict[str, Any]] = [
+        {"term": {"knowledge_space_id": knowledge_space_id}},
+        {"term": {"validation_method": "manual"}},
+    ]
+    for uid in entity_filter_uids or []:
+        filters.append({"bool": {"should": [
+            {"term": {"subject_uid": uid}},
+            {"term": {"object_value": uid}},
+        ], "minimum_should_match": 1}})
     body: dict[str, Any] = {
         "knn": {
             "field": "embedding",
             "query_vector": embedding,
             "k": k,
             "num_candidates": max(50, k * 5),
-            "filter": [
-                {"term": {"knowledge_space_id": knowledge_space_id}},
-                {"term": {"validation_method": "manual"}},
-            ],
+            "filter": filters,
         },
         "size": k,
     }
@@ -467,11 +480,121 @@ def _build_entity_brief(
     )
 
 
+_OBJECT_CLASS_BUCKET = {
+    "organization": "organization",
+    "person": "person",
+    "place": "place",
+}
+
+
+def _bucket_for(class_name: str | None) -> str:
+    if not class_name:
+        return "other"
+    return _OBJECT_CLASS_BUCKET.get(class_name.lower(), "other")
+
+
+def _facets_for(
+    fact_uids: list[str], knowledge_space_id: str, *, top_n: int = 25,
+) -> RecallFacets:
+    """Single ES aggregation pass over the CURRENT filtered fact set.
+
+    Three terms aggs: subject_uid, object_value, predicate. The
+    object_value bucket is post-filtered by the entity-ref regex so
+    literals never leak into the facet panel. Entity names + classes
+    come from a single mget against lucid_objects, keyed by the
+    aggregated uids.
+    """
+    if not fact_uids:
+        return RecallFacets()
+    body: dict[str, Any] = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"knowledge_space_id": knowledge_space_id}},
+                    {"term": {"validation_method": "manual"}},
+                    {"terms": {"fact_uid": fact_uids}},
+                ],
+            },
+        },
+        "aggs": {
+            "subjects": {"terms": {"field": "subject_uid", "size": top_n}},
+            "objects": {"terms": {"field": "object_value", "size": top_n}},
+            "predicates": {"terms": {"field": "predicate", "size": top_n}},
+        },
+    }
+    try:
+        client = get_client()
+        resp = client.search(index=LUCID_FACTS, body=body)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: facet aggregation failed: %s", exc)
+        return RecallFacets()
+
+    aggs = resp.get("aggregations") or {}
+    counts: dict[str, int] = {}
+    for b in (aggs.get("subjects") or {}).get("buckets", []):
+        key = b.get("key")
+        if isinstance(key, str):
+            counts[key] = counts.get(key, 0) + int(b.get("doc_count") or 0)
+    for b in (aggs.get("objects") or {}).get("buckets", []):
+        key = b.get("key")
+        if isinstance(key, str) and _is_entity_ref(key):
+            counts[key] = counts.get(key, 0) + int(b.get("doc_count") or 0)
+
+    predicates_buckets = (aggs.get("predicates") or {}).get("buckets", [])
+    predicates = [
+        PredicateFacetItem(
+            name=str(b.get("key") or ""), count=int(b.get("doc_count") or 0),
+        )
+        for b in predicates_buckets if b.get("key")
+    ]
+
+    if not counts:
+        return RecallFacets(predicates=predicates)
+
+    # Single mget for entity {name, class}.
+    label_class: dict[str, tuple[str, str | None]] = {}
+    try:
+        from api.storage.elasticsearch.client import LUCID_OBJECTS
+        client = get_client()
+        resp = client.mget(index=LUCID_OBJECTS, body={"ids": list(counts.keys())})
+        for d in resp.get("docs", []):
+            if not d.get("found"):
+                continue
+            src = d.get("_source") or {}
+            uid = src.get("object_uid") or d.get("_id")
+            if uid and src.get("name"):
+                label_class[uid] = (src["name"], src.get("class"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: facet label mget failed: %s", exc)
+
+    buckets: dict[str, list[EntityFacetItem]] = {
+        "organization": [], "person": [], "place": [], "other": [],
+    }
+    for uid, c in counts.items():
+        name, cls = label_class.get(uid, (uid, None))
+        item = EntityFacetItem(uid=uid, name=name, count=c)
+        buckets[_bucket_for(cls)].append(item)
+    for v in buckets.values():
+        v.sort(key=lambda i: (-i.count, i.name.lower()))
+
+    return RecallFacets(
+        entities=EntityFacets(
+            organization=buckets["organization"],
+            person=buckets["person"],
+            place=buckets["place"],
+            other=buckets["other"],
+        ),
+        predicates=predicates,
+    )
+
+
 @router.get("/recall", response_model=RecallResponse)
 def recall(
     space_id: uuid.UUID,
     q: str = Query(..., min_length=1, max_length=2000, description="Query"),
     limit: int = Query(default=RECALL_DEFAULT_K, ge=1, le=RECALL_MAX_K),
+    entity: list[str] = Query(default_factory=list, alias="entity"),
     user: User = Depends(get_current_user),
 ) -> RecallResponse:
     """Return validated facts whose embedding is close to `q`.
@@ -503,7 +626,10 @@ def recall(
         return _empty("embedding_unavailable")
 
     try:
-        hits = _knn_facts_validated_only(list(embedding), str(ks.id), limit)
+        hits = _knn_facts_validated_only(
+            list(embedding), str(ks.id), limit,
+            entity_filter_uids=list(entity),
+        )
     except Exception as exc:  # noqa: BLE001 - degrade quietly
         logger.warning("recall: ES kNN failed: %s", exc)
         return _empty("es_unavailable")
@@ -543,6 +669,16 @@ def recall(
         fact = _hit_to_fact(hit)
         if fact is None:
             continue
+        # B-49: entity filter is AND. Drop expanded facts that don't
+        # reference every active filter uid.
+        if entity:
+            src = hit.get("_source") or {}
+            ok = all(
+                src.get("subject_uid") == uid or src.get("object_value") == uid
+                for uid in entity
+            )
+            if not ok:
+                continue
         fact = fact.model_copy(update={"match_kind": "entity_link"})
         facts.append(fact)
         expansion_count += 1
@@ -557,10 +693,13 @@ def recall(
         logger.warning("recall: brief synthesis failed: %s", exc)
         brief = None
 
+    facets = _facets_for([f.fact_uid for f in facts], str(ks.id))
+
     return RecallResponse(
         signature=SIGNATURE_HIT_TEMPLATE.format(n=len(facts)),
         facts=facts,
         total=len(facts),
         expanded_count=expansion_count,
         entity_brief=brief,
+        facets=facets,
     )

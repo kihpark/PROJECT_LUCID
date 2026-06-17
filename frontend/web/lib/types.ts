@@ -205,12 +205,35 @@ export interface EntityBrief {
   as_object: EntityBriefGroup[];
 }
 
+export interface EntityFacetItem {
+  uid: string;
+  name: string;
+  count: number;
+}
+
+export interface EntityFacets {
+  organization: EntityFacetItem[];
+  person: EntityFacetItem[];
+  place: EntityFacetItem[];
+  other: EntityFacetItem[];
+}
+
+export interface PredicateFacetItem {
+  name: string;
+  count: number;
+}
+
+export interface RecallFacets {
+  entities: EntityFacets;
+  predicates: PredicateFacetItem[];
+}
+
 export interface RecallResponse {
   signature: string;
   facts: RecallFact[];
   total: number;
-  // B-25 stage 2: how many of `facts` came in via the entity-link pass.
   expanded_count?: number;
-  // B-41 P1: present when the query resolved to a known entity.
   entity_brief?: EntityBrief | null;
+  // B-49: aggregations for the right-rail facet panel.
+  facets?: RecallFacets;
 }

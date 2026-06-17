@@ -73,6 +73,8 @@ class RecallResponse(LucidBaseModel):
     # predicate, splitting subject-role from object-role. Pure
     # re-arrangement of validated facts — NO generation, NO inference.
     entity_brief: EntityBrief | None = None
+    # B-49: aggregations for the right-rail facet panel.
+    facets: RecallFacets = Field(default_factory=lambda: RecallFacets())
 
 
 class EntityFactRef(LucidBaseModel):
@@ -115,3 +117,37 @@ class EntityBrief(LucidBaseModel):
     as_subject: list[EntityBriefGroup] = Field(default_factory=list)
     # ...and the object on these.
     as_object: list[EntityBriefGroup] = Field(default_factory=list)
+
+
+class EntityFacetItem(LucidBaseModel):
+    """One drillable entity bar inside a class bucket on RecallFacets."""
+
+    uid: str
+    name: str
+    count: int
+
+
+class EntityFacets(LucidBaseModel):
+    """Class-bucketed entity facets. Four canonical buckets in beta."""
+
+    organization: list[EntityFacetItem] = Field(default_factory=list)
+    person: list[EntityFacetItem] = Field(default_factory=list)
+    place: list[EntityFacetItem] = Field(default_factory=list)
+    other: list[EntityFacetItem] = Field(default_factory=list)
+
+
+class PredicateFacetItem(LucidBaseModel):
+    name: str
+    count: int
+
+
+class RecallFacets(LucidBaseModel):
+    """Aggregations over the CURRENT filtered result set.
+
+    Recomputed on every recall call so the drill-down (entities[])
+    narrows the facet view at the same time as the central result
+    list. No bucket is sticky.
+    """
+
+    entities: EntityFacets = Field(default_factory=lambda: EntityFacets())
+    predicates: list[PredicateFacetItem] = Field(default_factory=list)

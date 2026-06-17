@@ -418,3 +418,139 @@ describe('RecallView — entity brief panel (B-41)', () => {
     expect(brief).toHaveTextContent(/검증된 사실이 없습니다/);
   });
 });
+
+
+describe('RecallView — facets + drill-down (B-49)', () => {
+  const FACETED: RecallResponse = {
+    signature: 'As far as I know — 그래프에 4개 검증 사실이 있습니다',
+    total: 4,
+    facts: [
+      {
+        fact_uid: 'fn-a', claim: 'SpaceX raised 85.7B USD.', claim_en: null,
+        subject_uid: 'uid-spacex', subject_label: 'SpaceX',
+        predicate: 'total_funds_raised',
+        object_value: '85.7 billion USD', object_label: null,
+        source_uids: [], validated_at: new Date('2026-06-15T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.91, match_kind: 'embedding',
+      },
+    ],
+    facets: {
+      entities: {
+        organization: [
+          { uid: 'uid-spacex', name: 'SpaceX', count: 3 },
+          { uid: 'uid-goldman', name: 'Goldman Sachs', count: 2 },
+        ],
+        person: [
+          { uid: 'uid-elon', name: 'Elon Musk', count: 1 },
+        ],
+        place: [],
+        other: [],
+      },
+      predicates: [
+        { name: 'total_funds_raised', count: 1 },
+        { name: 'is_underwriter_for', count: 2 },
+      ],
+    },
+  };
+
+  it('renders the right-rail facet panel with class buckets', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    expect(await screen.findByTestId('facet-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('facet-bucket-organization')).toHaveTextContent('SpaceX');
+    expect(screen.getByTestId('facet-bucket-organization')).toHaveTextContent('Goldman Sachs');
+    expect(screen.getByTestId('facet-bucket-person')).toHaveTextContent('Elon Musk');
+    expect(screen.getByTestId('facet-bucket-place')).toHaveTextContent('(없음)');
+    expect(screen.getByTestId('facet-predicate-total_funds_raised')).toBeInTheDocument();
+  });
+
+  it('clicking an entity bar triggers a second recall call with entity filter', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    // Mock the second response (drill-down).
+    const DRILLDOWN: RecallResponse = {
+      ...FACETED,
+      signature: 'As far as I know — 그래프에 2개 검증 사실이 있습니다',
+      total: 2,
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(DRILLDOWN);
+
+    fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+
+    const secondCall = (api.recall as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(secondCall[0]).toBe('ks-1');
+    expect(secondCall[1]).toBe('SpaceX');
+    expect(secondCall[2]).toEqual({ entity: ['uid-spacex'] });
+  });
+
+  it('renders an active filter chip after drill-down + removes on ✕', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(await screen.findByTestId('facet-entity-uid-goldman'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+
+    const chip = await screen.findByTestId('filter-chip-uid-goldman');
+    expect(chip).toHaveTextContent('Goldman Sachs');
+    expect(chip).toHaveTextContent('조직');
+
+    // ✕ removes only that chip and triggers a fresh recall.
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(screen.getByTestId('filter-chip-uid-goldman-remove'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual({ entity: [] });
+  });
+
+  it('"모두 지우기" wipes the entity filter array', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(await screen.findByTestId('facet-entity-uid-goldman'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(screen.getByTestId('filter-clear-all'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(4));
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[3][2]).toEqual({ entity: [] });
+    expect(screen.queryByTestId('active-filter-chips')).toBeNull();
+  });
+
+  it('toggling an entity bar twice removes it (idempotent toggle)', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2]).toEqual({ entity: ['uid-spacex'] });
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual({ entity: [] });
+  });
+});
