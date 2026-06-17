@@ -75,7 +75,7 @@ describe('FactCard — checkbox model (B-31)', () => {
     expect(cb.checked).toBe(true);
   });
 
-  it('renders a checked checkbox when action is edit (editing still keeps the fact)', () => {
+  it('renders a checked checkbox when action is edit', () => {
     const onChange = vi.fn();
     render(
       <FactCard
@@ -104,31 +104,6 @@ describe('FactCard — checkbox model (B-31)', () => {
     expect(onChange).toHaveBeenCalledWith({ action: 'discard' });
   });
 
-  it('re-checking a discarded fact restores accept', () => {
-    const onChange = vi.fn();
-    render(<FactCard fact={baseFact} action="discard" lang="en" onChange={onChange} />);
-    fireEvent.click(screen.getByTestId('fact-checkbox-fn-1'));
-    expect(onChange).toHaveBeenCalledWith({ action: 'accept' });
-  });
-
-  it('re-checking a discarded fact restores the editedClaim when one exists', () => {
-    const onChange = vi.fn();
-    render(
-      <FactCard
-        fact={baseFact}
-        action="discard"
-        editedClaim="my refinement"
-        lang="en"
-        onChange={onChange}
-      />,
-    );
-    fireEvent.click(screen.getByTestId('fact-checkbox-fn-1'));
-    expect(onChange).toHaveBeenCalledWith({
-      action: 'edit',
-      editedClaim: 'my refinement',
-    });
-  });
-
   it('Edit button is disabled on a discarded fact', () => {
     const onChange = vi.fn();
     render(<FactCard fact={baseFact} action="discard" lang="en" onChange={onChange} />);
@@ -142,13 +117,173 @@ describe('FactCard — checkbox model (B-31)', () => {
   });
 });
 
-describe('FactCard — Edit textarea (regression)', () => {
-  it('switches to edit mode on Edit click', () => {
+describe('FactCard — structured S/P/O editor (B-34)', () => {
+  it('Edit click reveals subject / predicate / object inputs', () => {
     const onChange = vi.fn();
-    render(<FactCard fact={baseFact} action="accept" lang="en" onChange={onChange} />);
+    const { rerender } = render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
     fireEvent.click(screen.getByText('Edit'));
+    // The Edit click emits an `edit` action with the current triple seeded.
+    rerender(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-edit-subject-fn-1')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-edit-predicate-fn-1')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-edit-object-fn-1')).toBeInTheDocument();
+  });
+
+  it('does not render a free-text claim textarea any more', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.queryByPlaceholderText(/Edited claim/i)).toBeNull();
+  });
+
+  it('changing the subject dropdown emits editedSubjectUid + regenerated claim', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: 'obj-2' },
+    });
     expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'edit' }),
+      expect.objectContaining({
+        action: 'edit',
+        editedSubjectUid: 'obj-2',
+        editedPredicate: 'will_replace',
+        editedObjectValue: 'jobs',
+        // claim regenerated: subject label is now "operating hours" (en mode)
+        editedClaim: expect.stringContaining('operating hours'),
+      }),
+    );
+  });
+
+  it('changing the predicate emits the new predicate + regenerated claim', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('fact-edit-predicate-fn-1'), {
+      target: { value: 'may_replace' },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'edit',
+        editedPredicate: 'may_replace',
+        editedClaim: expect.stringContaining('may_replace'),
+      }),
+    );
+  });
+
+  it('typing a known entity name into object auto-resolves to its uid', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('fact-edit-object-fn-1'), {
+      target: { value: '운영시간' },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        editedObjectValue: 'obj-2',
+      }),
+    );
+  });
+
+  it('typing a literal value into object keeps it as a literal', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('fact-edit-object-fn-1'), {
+      target: { value: '85.7 billion USD' },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        editedObjectValue: '85.7 billion USD',
+      }),
+    );
+  });
+
+  it('preview line reflects the live triple', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-edit-preview-fn-1')).toHaveTextContent(
+      /Seoul FX Market Operations Council\s*\|\s*will_replace\s*\|\s*jobs/,
     );
   });
 });
@@ -203,25 +338,19 @@ describe('FactCard — entity label resolution (B-27 + B-31 regression)', () => 
     expect(screen.getByTestId('fact-subject')).toHaveTextContent('(미해석)');
   });
 
-  it('einfomax SpaceX/Goldman Sachs regression: two different obj refs resolve to two different names', () => {
-    // The einfomax SpaceX IPO article (B-31 reproduction case) emitted
-    // facts whose subject_uid was obj-1 (SpaceX) on one fact and
-    // obj-2 (Goldman Sachs) on another. The PO saw raw "obj-N" on
-    // screen and assumed they were the same entity. This test pins the
-    // resolver: each obj-N MUST resolve to its own distinct label, and
-    // raw "obj-N" MUST NOT leak when the objects array carries them.
+  it('einfomax SpaceX/Goldman Sachs regression: distinct refs resolve to distinct labels', () => {
     const spacexFacts: FactSummary[] = [
       {
         fact_uid: 'fn-1',
         claim: 'SpaceX의 상장 주관사단이 그린슈 옵션을 행사했다.',
-        subject_uid: 'obj-2', // Goldman Sachs (the underwriting bank)
+        subject_uid: 'obj-2',
         predicate: 'exercised',
         object_value: 'greenshoe option',
       },
       {
         fact_uid: 'fn-2',
         claim: 'SpaceX는 총 857억달러를 조달했다.',
-        subject_uid: 'obj-1', // SpaceX itself
+        subject_uid: 'obj-1',
         predicate: 'total_funds_raised',
         object_value: '85.7 billion USD',
       },
