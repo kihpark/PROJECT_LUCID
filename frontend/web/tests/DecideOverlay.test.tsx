@@ -153,3 +153,35 @@ describe('DecideOverlay — Edit + Discard buttons (B-31)', () => {
     expect(cb.checked).toBe(false);
   });
 });
+
+
+describe('DecideOverlay — submit success panel (B-37)', () => {
+  it('replaces the review surface with the success panel after Submit', async () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    expect(screen.getByText('Submit decisions')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-card-fn-1')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Submit decisions'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('decisions-recorded-panel')).not.toBeNull(),
+    );
+    // The fact cards are gone — no more chance of double-submitting.
+    expect(screen.queryByTestId('fact-card-fn-1')).toBeNull();
+    expect(screen.queryByTestId('fact-card-fn-2')).toBeNull();
+    // The Pending Queue back-link is the post-submit affordance.
+    const back = screen.getByTestId('back-to-pending') as HTMLAnchorElement;
+    expect(back.getAttribute('href')).toBe('/pending');
+  });
+
+  it('success panel includes the counts of accepted / edited / discarded', async () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    // Discard fn-2 so the counts aren't all in one bucket.
+    fireEvent.click(screen.getByTestId('fact-checkbox-fn-2'));
+    fireEvent.click(screen.getByText('Submit decisions'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('decisions-recorded-panel')).not.toBeNull(),
+    );
+    const panel = screen.getByTestId('decisions-recorded-panel');
+    expect(panel).toHaveTextContent(/1건 accept/);
+    expect(panel).toHaveTextContent(/1건 discard/);
+  });
+});
