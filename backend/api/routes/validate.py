@@ -263,6 +263,77 @@ def get_pending_detail(
 # B. Decide
 # ===========================================================================
 
+def _upsert_referenced_objects(
+    nodes: list[Any],
+    *,
+    meta: dict[str, Any],
+    knowledge_space_id: str,
+) -> None:
+    """Index every Object referenced by `nodes` into lucid_objects.
+
+    Idempotent: ES doc id is `object_uid`, so re-running on the same
+    nodes overwrites with the same payload. Only entity-shape refs
+    qualify — literals on object_value are skipped via the same
+    regex the recall route uses.
+    """
+    import re
+
+    from api.models.objects import Object, ObjectClass
+    from api.storage.elasticsearch.objects import create_object
+
+    struct = meta.get("structure") or {}
+    objects_by_uid: dict[str, dict[str, Any]] = {}
+    for o in struct.get("objects") or []:
+        uid = o.get("uid") or o.get("object_uid")
+        if uid:
+            objects_by_uid[uid] = o
+
+    if not objects_by_uid:
+        return
+
+    OBJECT_REF_RE = re.compile(
+        r"^(?:obj-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+        re.IGNORECASE,
+    )
+
+    seen: set[str] = set()
+    for node in nodes:
+        candidates = [getattr(node, "subject_uid", None)]
+        ov = getattr(node, "object_value", None)
+        if isinstance(ov, str) and OBJECT_REF_RE.match(ov):
+            candidates.append(ov)
+        for uid in candidates:
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            src = objects_by_uid.get(uid)
+            if src is None:
+                continue
+            try:
+                cls_value = src.get("class") or src.get("class_") or "concept"
+                cls = ObjectClass(cls_value) if not isinstance(
+                    cls_value, ObjectClass
+                ) else cls_value
+            except ValueError:
+                cls = ObjectClass.CONCEPT
+            try:
+                obj = Object.model_validate(
+                    {
+                        "object_uid": uid,
+                        "class": cls,
+                        "name": src.get("name") or uid,
+                        "name_en": src.get("name_en"),
+                        "properties": src.get("properties") or {},
+                        "knowledge_space_id": knowledge_space_id,
+                    },
+                )
+                create_object(obj, with_embedding=False)
+            except Exception as exc:  # noqa: BLE001 - keep going
+                logger.warning(
+                    "B-41: upsert object %s failed: %s", uid, exc,
+                )
+
+
 def _coerce_fact_to_factnode(
     fact_summary: dict[str, Any],
     *,
@@ -413,6 +484,22 @@ def decide(
                 logger.exception(
                     "bulk_create_facts failed (%d nodes): %s",
                     len(pending_nodes), exc,
+                )
+
+        # B-41 P0: mirror the related Objects into lucid_objects so the
+        # recall label lookup can resolve canonical UUIDs to names.
+        # `objects` lives on the structure metadata under canonical
+        # uids (B-35 + B-37 serialiser); we just copy each one over.
+        if pending_nodes:
+            try:
+                _upsert_referenced_objects(
+                    pending_nodes,
+                    meta=meta,
+                    knowledge_space_id=str(ks.id),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "B-41: upsert_referenced_objects failed: %s", exc,
                 )
 
         created_objs: list[str] = []

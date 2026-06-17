@@ -183,10 +183,34 @@ export interface RecallFact {
   object_label?: string | null;
 }
 
+export interface EntityFactRef {
+  fact_uid: string;
+  claim: string;
+  predicate: string;
+  other_uid: string;
+  other_label?: string | null;
+}
+
+export interface EntityBriefGroup {
+  predicate: string;
+  facts: EntityFactRef[];
+}
+
+export interface EntityBrief {
+  entity_uid: string;
+  entity_name: string;
+  entity_class?: string | null;
+  total_facts: number;
+  as_subject: EntityBriefGroup[];
+  as_object: EntityBriefGroup[];
+}
+
 export interface RecallResponse {
   signature: string;
   facts: RecallFact[];
   total: number;
   // B-25 stage 2: how many of `facts` came in via the entity-link pass.
   expanded_count?: number;
+  // B-41 P1: present when the query resolved to a known entity.
+  entity_brief?: EntityBrief | null;
 }
