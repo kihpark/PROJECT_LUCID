@@ -343,7 +343,7 @@ export function DecideOverlay({
             disabled={busy || facts.length === 0}
             onClick={onSubmit}
           >
-            Submit decisions
+            {busy ? "처리 중…" : "Submit decisions"}
           </ActionButton>
         </div>
       </section>

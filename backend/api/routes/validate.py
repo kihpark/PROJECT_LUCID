@@ -326,11 +326,19 @@ def decide(
         discarded: list[str] = []
         log_count = 0
 
+        # B-40 defect 3: collect FactNodes to bulk-index in one ES call
+        # at the end of the per-fact loop. This drops Submit latency
+        # from "1 HTTP+refresh per fact" to "1 HTTP+refresh for the
+        # whole submission". validation_logs writes stay inline since
+        # they're cheap Postgres inserts.
+        bulk_module = None
         try:
-            from api.storage.elasticsearch.facts import create_fact
+            from api.storage.elasticsearch.facts import bulk_create_facts
+            bulk_module = bulk_create_facts
         except Exception as exc:  # noqa: BLE001
             logger.warning("ES facts module unavailable: %s", exc)
-            create_fact = None  # type: ignore[assignment]
+
+        pending_nodes: list[Any] = []
 
         for d in req.decisions:
             f = facts_by_uid.get(d.fact_uid)
@@ -338,17 +346,17 @@ def decide(
                 logger.info("decide: unknown fact %s in job %s", d.fact_uid, job_id)
                 continue
             if d.action == "accept":
-                if create_fact is not None:
+                if bulk_module is not None:
                     try:
                         node = _coerce_fact_to_factnode(
                             f, edited_claim=None, edited_metadata=None,
                             knowledge_space_id=str(ks.id),
                             validator_id=str(user.id),
                         )
-                        create_fact(node, with_embedding=False)
+                        pending_nodes.append(node)
                     except Exception as exc:  # noqa: BLE001
                         logger.exception(
-                            "create_fact failed for %s: %s", d.fact_uid, exc,
+                            "coerce(accept) failed for %s: %s", d.fact_uid, exc,
                         )
                 accepted.append(d.fact_uid)
                 record_validation_decision(
@@ -363,7 +371,7 @@ def decide(
                         status_code=400,
                         detail=f"edit on {d.fact_uid} requires edited_claim",
                     )
-                if create_fact is not None:
+                if bulk_module is not None:
                     try:
                         node = _coerce_fact_to_factnode(
                             f, edited_claim=d.edited_claim,
@@ -374,10 +382,10 @@ def decide(
                         # The original claim is preserved as an alias so search
                         # still hits the original wording (DR-036).
                         node.aliases = list(node.aliases) + [f["claim"]]
-                        create_fact(node, with_embedding=False)
+                        pending_nodes.append(node)
                     except Exception as exc:  # noqa: BLE001
                         logger.exception(
-                            "create_fact (edit) failed for %s: %s",
+                            "coerce(edit) failed for %s: %s",
                             d.fact_uid, exc,
                         )
                 edited.append(d.fact_uid)
@@ -396,6 +404,16 @@ def decide(
                     object_uid=None, action="discard",
                 )
                 log_count += 1
+
+        # Single ES round-trip for all accept + edit nodes.
+        if bulk_module is not None and pending_nodes:
+            try:
+                bulk_module(pending_nodes, with_embedding=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "bulk_create_facts failed (%d nodes): %s",
+                    len(pending_nodes), exc,
+                )
 
         created_objs: list[str] = []
         merged_objs: list[str] = []
