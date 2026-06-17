@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from api.models.base import UID, LucidBaseModel
 from api.models.facts import FactType
@@ -51,7 +51,24 @@ class StructureObject(LucidBaseModel):
 
 
 class StructureFact(LucidBaseModel):
-    """One AtomicFact emitted by the decomposer."""
+    """One AtomicFact emitted by the decomposer.
+
+    B-36 defence: `extra='ignore'` overrides the project-wide
+    `extra='forbid'` policy specifically for the LLM-intermediate
+    layer. The LLM has been observed emitting fields that
+    DR-053 retired (`valid_from`) or that were never in the
+    schema (`source_quote`, `confidence`, `valid_until`). Silently
+    dropping them lets the parse succeed; the persistence layer
+    (FactNode in `api.storage.elasticsearch.facts`) still keeps
+    `extra='forbid'`, so retired fields never reach the graph.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        validate_assignment=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
 
     uid: UID
     claim: str
@@ -76,7 +93,20 @@ class StructureFactObjectLink(LucidBaseModel):
 
 
 class StructureFactFactLink(LucidBaseModel):
-    """One Fact -> Fact edge (7 link types incl. NEGATES from DCR-001)."""
+    """One Fact -> Fact edge (7 link types incl. NEGATES from DCR-001).
+
+    B-36 defence: like StructureFact, accepts and ignores extra
+    fields the LLM may emit (e.g. an empty `properties` dict copied
+    over from the Fact -> Object link shape). The persistence layer
+    keeps the strict shape.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        validate_assignment=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
 
     from_uid: UID
     to_uid: UID
