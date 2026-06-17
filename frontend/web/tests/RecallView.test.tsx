@@ -271,3 +271,150 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
     ).toHaveTextContent(/\(미해석\)/);
   });
 });
+
+
+describe('RecallView — entity brief panel (B-41)', () => {
+  const BRIEF_RESPONSE: RecallResponse = {
+    signature: 'As far as I know — 그래프에 3개 검증 사실이 있습니다',
+    total: 3,
+    expanded_count: 2,
+    entity_brief: {
+      entity_uid: '11111111-2222-3333-4444-555555555555',
+      entity_name: 'SpaceX',
+      entity_class: 'organization',
+      total_facts: 3,
+      as_subject: [
+        {
+          predicate: 'total_funds_raised',
+          facts: [
+            {
+              fact_uid: 'fn-1',
+              claim: 'SpaceX raised 85.7 billion USD.',
+              predicate: 'total_funds_raised',
+              other_uid: '85.7 billion USD',
+              other_label: null,
+            },
+          ],
+        },
+        {
+          predicate: 'set_ipo_price',
+          facts: [
+            {
+              fact_uid: 'fn-2',
+              claim: 'SpaceX priced its IPO at 135 USD per share.',
+              predicate: 'set_ipo_price',
+              other_uid: '135 USD per share',
+              other_label: null,
+            },
+          ],
+        },
+      ],
+      as_object: [
+        {
+          predicate: 'is_underwriter_for',
+          facts: [
+            {
+              fact_uid: 'fn-3',
+              claim: 'Goldman Sachs is an underwriter for SpaceX IPO.',
+              predicate: 'is_underwriter_for',
+              other_uid: '6895dbc7-a533-4c4d-9b8c-1a2b3c4d5e6f',
+              other_label: 'Goldman Sachs',
+            },
+          ],
+        },
+      ],
+    },
+    facts: [
+      {
+        fact_uid: 'fn-1',
+        claim: 'SpaceX raised 85.7 billion USD.',
+        claim_en: null,
+        subject_uid: '11111111-2222-3333-4444-555555555555',
+        subject_label: 'SpaceX',
+        predicate: 'total_funds_raised',
+        object_value: '85.7 billion USD',
+        object_label: null,
+        source_uids: [],
+        validated_at: new Date('2026-06-15T09:00:00Z').toISOString(),
+        validator_id: 'u',
+        validation_method: 'manual',
+        knowledge_space_id: 'ks-1',
+        negation_flag: false,
+        negation_scope: null,
+        score: 0.92,
+        match_kind: 'embedding',
+      },
+    ],
+  };
+
+  it('renders the entity brief panel above the flat fact list', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const brief = await screen.findByTestId('entity-brief');
+    expect(brief).toHaveTextContent('SpaceX');
+    expect(brief).toHaveTextContent('organization');
+    expect(brief).toHaveTextContent(/3개 검증 사실/);
+    expect(brief).toHaveTextContent(/생성 0/);
+  });
+
+  it('shows subject-role and object-role groups separately', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    expect(await screen.findByTestId('brief-as-subject')).toBeInTheDocument();
+    expect(screen.getByTestId('brief-as-object')).toBeInTheDocument();
+    expect(screen.getByTestId('brief-group-subject-total_funds_raised'))
+      .toBeInTheDocument();
+    expect(screen.getByTestId('brief-group-subject-set_ipo_price'))
+      .toBeInTheDocument();
+    expect(screen.getByTestId('brief-group-object-is_underwriter_for'))
+      .toBeInTheDocument();
+  });
+
+  it('displays the other-entity label when the related side resolved', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const fact3 = await screen.findByTestId('brief-fact-fn-3');
+    expect(fact3).toHaveTextContent('Goldman Sachs');
+  });
+
+  it('renders the empty entity case with the no-facts notice', async () => {
+    const emptyEntity: RecallResponse = {
+      signature: '검증된 사실이 없습니다',
+      total: 0,
+      facts: [],
+      entity_brief: {
+        entity_uid: 'e-x',
+        entity_name: 'Nobody',
+        entity_class: 'person',
+        total_facts: 0,
+        as_subject: [],
+        as_object: [],
+      },
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(emptyEntity);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'Nobody' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const brief = await screen.findByTestId('entity-brief');
+    expect(brief).toHaveTextContent('Nobody');
+    expect(brief).toHaveTextContent(/검증된 사실이 없습니다/);
+  });
+});

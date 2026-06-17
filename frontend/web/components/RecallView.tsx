@@ -24,7 +24,13 @@
 import { useMemo, useState } from 'react';
 import { ActionButton } from './ActionButton';
 import { recall as apiRecall, ApiError } from '@/lib/api';
-import type { RecallFact, RecallResponse } from '@/lib/types';
+import type {
+  EntityBrief,
+  EntityBriefGroup,
+  EntityFactRef,
+  RecallFact,
+  RecallResponse,
+} from '@/lib/types';
 
 interface Props {
   spaceId: string;
@@ -131,6 +137,102 @@ function RecallFactCard({ fact }: { fact: RecallFact }) {
   );
 }
 
+function BriefGroup({
+  group, role,
+}: { group: EntityBriefGroup; role: 'subject' | 'object' }) {
+  return (
+    <details
+      data-testid={`brief-group-${role}-${group.predicate}`}
+      className="rounded border border-border-subtle bg-bg-card mb-2"
+      open
+    >
+      <summary className="cursor-pointer px-3 py-2 text-sm flex items-baseline gap-2">
+        <code className="font-mono text-accent-cool">{group.predicate}</code>
+        <span className="text-text-muted text-xxs">({group.facts.length})</span>
+      </summary>
+      <ul className="px-4 pb-3 space-y-1">
+        {group.facts.map((f) => (
+          <li key={f.fact_uid} className="text-sm" data-testid={`brief-fact-${f.fact_uid}`}>
+            <span lang="ko">{f.claim}</span>
+            {f.other_label && (
+              <span className="ml-2 text-xxs font-mono text-text-muted">
+                ↔ {f.other_label}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+
+function EntityBriefPanel({ brief }: { brief: EntityBrief }) {
+  if (brief.total_facts === 0) {
+    return (
+      <section
+        aria-label="entity brief"
+        data-testid="entity-brief"
+        className="rounded-lg border border-accent-cool/40 bg-accent-cool/5 p-4 mb-6"
+      >
+        <h2 className="text-lg font-medium mb-1">
+          <span data-testid="brief-entity-name">{brief.entity_name}</span>
+          {brief.entity_class && (
+            <span className="ml-2 text-xxs font-mono text-text-muted">
+              {brief.entity_class}
+            </span>
+          )}
+        </h2>
+        <p className="text-sm text-text-muted">
+          이 엔티티에 대한 검증된 사실이 없습니다.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section
+      aria-label="entity brief"
+      data-testid="entity-brief"
+      className="rounded-lg border border-accent-cool/40 bg-accent-cool/5 p-4 mb-6"
+    >
+      <header className="mb-3">
+        <h2 className="text-lg font-medium">
+          <span data-testid="brief-entity-name">{brief.entity_name}</span>
+          {brief.entity_class && (
+            <span className="ml-2 text-xxs font-mono text-text-muted">
+              {brief.entity_class}
+            </span>
+          )}
+        </h2>
+        <p className="text-xxs text-text-muted font-mono">
+          {brief.total_facts}개 검증 사실 · 술어별 그룹 · 생성 0
+        </p>
+      </header>
+      {brief.as_subject.length > 0 && (
+        <div className="mb-3" data-testid="brief-as-subject">
+          <h3 className="text-xs font-medium text-text-secondary mb-2">
+            주어로서 ({brief.as_subject.reduce((n, g) => n + g.facts.length, 0)})
+          </h3>
+          {brief.as_subject.map((g) => (
+            <BriefGroup key={`s-${g.predicate}`} group={g} role="subject" />
+          ))}
+        </div>
+      )}
+      {brief.as_object.length > 0 && (
+        <div data-testid="brief-as-object">
+          <h3 className="text-xs font-medium text-text-secondary mb-2">
+            목적어로서 ({brief.as_object.reduce((n, g) => n + g.facts.length, 0)})
+          </h3>
+          {brief.as_object.map((g) => (
+            <BriefGroup key={`o-${g.predicate}`} group={g} role="object" />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+
 function sortFacts(facts: RecallFact[]): RecallFact[] {
   // Score DESC. The backend already returns embedding matches first
   // and entity_link expansion last, but explicit sort guards against
@@ -207,20 +309,25 @@ export function RecallView({ spaceId }: Props) {
           >
             {result.signature}
           </p>
-          {sortedFacts.length > 0 && (
-            <p
-              data-testid="recall-threshold-note"
-              className="text-xxs text-text-muted mb-4 font-mono"
-            >
-              관련도 0.72 이상 매치만 표시 · 점수 내림차순 정렬
-              {result.expanded_count && result.expanded_count > 0
-                ? ` · 엔티티 연결로 추가된 ${result.expanded_count}건 포함`
-                : ''}
-            </p>
+          {result.entity_brief && (
+            <EntityBriefPanel brief={result.entity_brief} />
           )}
-          {sortedFacts.map((f) => (
-            <RecallFactCard key={f.fact_uid} fact={f} />
-          ))}
+          {sortedFacts.length > 0 && (
+            <>
+              <p
+                data-testid="recall-threshold-note"
+                className="text-xxs text-text-muted mb-4 font-mono"
+              >
+                관련도 0.72 이상 매치만 표시 · 점수 내림차순 정렬
+                {result.expanded_count && result.expanded_count > 0
+                  ? ` · 엔티티 연결로 추가된 ${result.expanded_count}건 포함`
+                  : ''}
+              </p>
+              {sortedFacts.map((f) => (
+                <RecallFactCard key={f.fact_uid} fact={f} />
+              ))}
+            </>
+          )}
         </section>
       )}
     </main>

@@ -31,7 +31,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from api.models.recall import RecallFact, RecallResponse
+from api.models.recall import (
+    EntityBrief,
+    EntityBriefGroup,
+    EntityFactRef,
+    RecallFact,
+    RecallResponse,
+)
 from api.security import get_current_user
 from api.storage.elasticsearch.client import LUCID_FACTS, get_client
 from api.storage.elasticsearch.embeddings import get_embedding
@@ -285,6 +291,182 @@ def _enrich_with_labels(
     return out
 
 
+def _resolve_entity_by_name(
+    q: str, knowledge_space_id: str,
+) -> dict[str, Any] | None:
+    """Exact-name lookup (lowercased) over lucid_objects scoped to KS.
+    Returns the matched object source dict or None."""
+    if not q or not q.strip():
+        return None
+    q_norm = q.strip().lower()
+    body = {
+        "size": 1,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"knowledge_space_id": knowledge_space_id}},
+                ],
+                "should": [
+                    {"term": {"name.keyword": q.strip()}},
+                    {"term": {"name_en.keyword": q.strip()}},
+                ],
+                "minimum_should_match": 1,
+            },
+        },
+    }
+    try:
+        from api.storage.elasticsearch.client import LUCID_OBJECTS
+        client = get_client()
+        resp = client.search(index=LUCID_OBJECTS, body=body)
+        hits = list(resp["hits"]["hits"])
+        if not hits:
+            # Fall back to lowercased keyword field; if the index
+            # mapping doesn't have one we still attempt a wildcard.
+            body["query"]["bool"]["should"] = [  # type: ignore[index]
+                {"wildcard": {"name": f"*{q_norm}*"}},
+                {"wildcard": {"name_en": f"*{q_norm}*"}},
+            ]
+            resp = client.search(index=LUCID_OBJECTS, body=body)
+            hits = list(resp["hits"]["hits"])
+        if not hits:
+            return None
+        return hits[0].get("_source") or None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: entity-name lookup failed: %s", exc)
+        return None
+
+
+def _facts_for_entity(
+    entity_uid: str, knowledge_space_id: str, *, max_hits: int = 200,
+) -> list[dict[str, Any]]:
+    """Every manual fact in this KS where the entity sits on subject
+    or object_value. ES `_score` is irrelevant here; we sort the
+    brief by predicate."""
+    body: dict[str, Any] = {
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"knowledge_space_id": knowledge_space_id}},
+                    {"term": {"validation_method": "manual"}},
+                    {"bool": {
+                        "should": [
+                            {"term": {"subject_uid": entity_uid}},
+                            {"term": {"object_value": entity_uid}},
+                        ],
+                        "minimum_should_match": 1,
+                    }},
+                ],
+            },
+        },
+        "size": max_hits,
+    }
+    try:
+        client = get_client()
+        resp = client.search(index=LUCID_FACTS, body=body)
+        return list(resp["hits"]["hits"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: brief fact lookup failed: %s", exc)
+        return []
+
+
+def _build_entity_brief(
+    q: str, knowledge_space_id: str,
+) -> EntityBrief | None:
+    """Resolve `q` to a known entity and group its facts."""
+    entity = _resolve_entity_by_name(q, knowledge_space_id)
+    if not entity:
+        return None
+    entity_uid = entity.get("object_uid") or ""
+    entity_name = str(entity.get("name") or entity_uid)
+    entity_class = entity.get("class")
+    if not entity_uid:
+        return None
+
+    hits = _facts_for_entity(entity_uid, knowledge_space_id)
+    if not hits:
+        # The entity exists but has zero verified facts on either side.
+        return EntityBrief(
+            entity_uid=entity_uid,
+            entity_name=entity_name,
+            entity_class=entity_class,
+            total_facts=0,
+            as_subject=[],
+            as_object=[],
+        )
+
+    # Resolve labels for the OTHER side of each fact in one mget.
+    other_uids: set[str] = set()
+    for h in hits:
+        src = h.get("_source") or {}
+        if src.get("subject_uid") and src["subject_uid"] != entity_uid:
+            other_uids.add(src["subject_uid"])
+        ov = src.get("object_value")
+        if ov and ov != entity_uid and _is_entity_ref(ov):
+            other_uids.add(ov)
+    label_by_uid: dict[str, str] = {}
+    if other_uids:
+        try:
+            from api.storage.elasticsearch.client import LUCID_OBJECTS
+            client = get_client()
+            resp = client.mget(index=LUCID_OBJECTS, body={"ids": list(other_uids)})
+            for d in resp.get("docs", []):
+                if not d.get("found"):
+                    continue
+                s = d.get("_source") or {}
+                uid = s.get("object_uid") or d.get("_id")
+                if uid and s.get("name"):
+                    label_by_uid[uid] = s["name"]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall brief: label mget failed: %s", exc)
+
+    subject_groups: dict[str, list[EntityFactRef]] = {}
+    object_groups: dict[str, list[EntityFactRef]] = {}
+    for h in hits:
+        src = h.get("_source") or {}
+        fact_uid = str(src.get("fact_uid") or h.get("_id") or "")
+        claim = src.get("claim", "")
+        predicate = src.get("predicate", "?")
+        subj = src.get("subject_uid", "")
+        obj = src.get("object_value", "")
+
+        if subj == entity_uid:
+            other = obj
+            ref = EntityFactRef(
+                fact_uid=fact_uid,
+                claim=claim,
+                predicate=predicate,
+                other_uid=other,
+                other_label=label_by_uid.get(other) if _is_entity_ref(other) else None,
+            )
+            subject_groups.setdefault(predicate, []).append(ref)
+        elif obj == entity_uid:
+            other = subj
+            ref = EntityFactRef(
+                fact_uid=fact_uid,
+                claim=claim,
+                predicate=predicate,
+                other_uid=other,
+                other_label=label_by_uid.get(other),
+            )
+            object_groups.setdefault(predicate, []).append(ref)
+
+    return EntityBrief(
+        entity_uid=entity_uid,
+        entity_name=entity_name,
+        entity_class=entity_class,
+        total_facts=sum(len(v) for v in subject_groups.values())
+        + sum(len(v) for v in object_groups.values()),
+        as_subject=[
+            EntityBriefGroup(predicate=p_, facts=fs)
+            for p_, fs in sorted(subject_groups.items())
+        ],
+        as_object=[
+            EntityBriefGroup(predicate=p_, facts=fs)
+            for p_, fs in sorted(object_groups.items())
+        ],
+    )
+
+
 @router.get("/recall", response_model=RecallResponse)
 def recall(
     space_id: uuid.UUID,
@@ -367,9 +549,18 @@ def recall(
 
     facts = _enrich_with_labels(facts, str(ks.id))
 
+    # B-41 P1: entity brief. Quietly returns None when q doesn't match
+    # a known entity — RecallView falls back to the flat fact list.
+    try:
+        brief = _build_entity_brief(q, str(ks.id))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: brief synthesis failed: %s", exc)
+        brief = None
+
     return RecallResponse(
         signature=SIGNATURE_HIT_TEMPLATE.format(n=len(facts)),
         facts=facts,
         total=len(facts),
         expanded_count=expansion_count,
+        entity_brief=brief,
     )

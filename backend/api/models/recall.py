@@ -68,3 +68,50 @@ class RecallResponse(LucidBaseModel):
     # B-25 stage 2: how many of `facts` came in via the entity-link
     # second pass. 0 when the result set is pure semantic-match.
     expanded_count: int = 0
+    # B-41 P1: when the query resolves to a known entity, the route
+    # builds a brief that re-groups the entity's verified facts by
+    # predicate, splitting subject-role from object-role. Pure
+    # re-arrangement of validated facts — NO generation, NO inference.
+    entity_brief: EntityBrief | None = None
+
+
+class EntityFactRef(LucidBaseModel):
+    """A single verified-fact reference inside an EntityBrief group.
+
+    The full RecallFact body lives elsewhere on the response (in
+    `facts`); this struct just carries the join key (fact_uid) and
+    the rendered triple so the brief can be drawn standalone."""
+
+    fact_uid: str
+    claim: str
+    predicate: str
+    other_uid: str
+    other_label: str | None = None
+
+
+class EntityBriefGroup(LucidBaseModel):
+    """All verified facts that share a predicate, on the entity-as-side."""
+
+    predicate: str
+    facts: list[EntityFactRef] = Field(default_factory=list)
+
+
+class EntityBrief(LucidBaseModel):
+    """Aggregated, role-split view of an entity's verified facts.
+
+    PO directive (DR-085 aha-C surface = entity synthesis): when the
+    user types an entity name, recall should not just list facts; it
+    should present a brief that groups them by predicate and splits
+    "entity is the subject" from "entity is the object". Generation
+    is forbidden — this struct is built entirely from manual facts
+    already in `lucid_facts`.
+    """
+
+    entity_uid: str
+    entity_name: str
+    entity_class: str | None = None
+    total_facts: int
+    # Two role buckets — the entity is the subject on these...
+    as_subject: list[EntityBriefGroup] = Field(default_factory=list)
+    # ...and the object on these.
+    as_object: list[EntityBriefGroup] = Field(default_factory=list)

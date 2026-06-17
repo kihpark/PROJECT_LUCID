@@ -36,9 +36,11 @@ from typing import Any
 from sqlalchemy import select
 
 from api.models.facts import FactNode, FactType
+from api.models.objects import Object, ObjectClass
 from api.storage.elasticsearch.client import LUCID_FACTS, get_client
 from api.storage.elasticsearch.embeddings import get_embedding
 from api.storage.elasticsearch.facts import create_fact
+from api.storage.elasticsearch.objects import create_object
 from api.storage.postgres.orm import SourceJobORM, ValidationLog
 from api.storage.postgres.session import make_sessionmaker
 
@@ -91,6 +93,52 @@ def _coerce_to_factnode(
     )
 
 
+def _upsert_objects_for_job(
+    job: SourceJobORM,
+    *,
+    knowledge_space_id: str,
+    seen_uids: set[str],
+) -> int:
+    """Idempotent ES upsert for every object stored on the job's
+    structure metadata. Returns the count of NEW uids written this
+    call (already-seen uids are skipped to keep the running counter
+    accurate across multiple replay rounds)."""
+    meta = job.extracted_metadata or {}
+    struct = meta.get("structure") or {}
+    objects = struct.get("objects") or []
+    written = 0
+    for o in objects:
+        uid = o.get("uid") or o.get("object_uid")
+        if not uid or uid in seen_uids:
+            continue
+        try:
+            cls_value = o.get("class") or o.get("class_") or "concept"
+            try:
+                cls = (
+                    ObjectClass(cls_value)
+                    if not isinstance(cls_value, ObjectClass)
+                    else cls_value
+                )
+            except ValueError:
+                cls = ObjectClass.CONCEPT
+            obj = Object.model_validate(
+                {
+                    "object_uid": uid,
+                    "class": cls,
+                    "name": o.get("name") or uid,
+                    "name_en": o.get("name_en"),
+                    "properties": o.get("properties") or {},
+                    "knowledge_space_id": knowledge_space_id,
+                },
+            )
+            create_object(obj, with_embedding=False)
+            seen_uids.add(uid)
+            written += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("replay: upsert object %s failed: %s", uid, exc)
+    return written
+
+
 def replay_validation_logs() -> dict[str, Any]:
     """Replay accept + edit validation_logs into lucid_facts.
 
@@ -107,6 +155,7 @@ def replay_validation_logs() -> dict[str, Any]:
     skipped_no_job = 0
     errors: list[str] = []
     indexed_uids: set[str] = set()
+    upserted_object_uids: set[str] = set()
 
     try:
         # Pull accept + edit logs only; one row per (fact, action) pair.
@@ -178,6 +227,14 @@ def replay_validation_logs() -> dict[str, Any]:
                 )
                 indexed += 1
                 indexed_uids.add(node.fact_uid)
+                # B-41: idempotently mirror this job's Objects into
+                # lucid_objects so the recall label lookup can resolve
+                # canonical UUIDs to names.
+                _upsert_objects_for_job(
+                    job,
+                    knowledge_space_id=str(job.knowledge_space_id),
+                    seen_uids=upserted_object_uids,
+                )
             except Exception as exc:  # noqa: BLE001 - keep going
                 errors.append(f"{log.fact_uid}: {exc}")
                 logger.exception("replay failed for %s", log.fact_uid)
@@ -188,6 +245,7 @@ def replay_validation_logs() -> dict[str, Any]:
     summary = {
         "indexed": indexed,
         "unique_fact_uids": len(indexed_uids),
+        "objects_indexed": len(upserted_object_uids),
         "skipped_discard": skipped_discard,
         "skipped_fact_missing": skipped_no_fact,
         "skipped_job_missing": skipped_no_job,
