@@ -25,6 +25,7 @@ endpoint is "if we did not see it, we will not say it."
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -76,6 +77,86 @@ def _resolve_space(session: Any, space_id: uuid.UUID, user: User) -> KnowledgeSp
 def _empty(reason: str) -> RecallResponse:
     logger.info("recall: empty result (%s)", reason)
     return RecallResponse(signature=SIGNATURE_EMPTY, facts=[], total=0)
+
+
+# A canonical Object uid produced by new_uid() in api.models.base is a
+# UUID4 hex string ("550e8400-e29b-41d4-a716-446655440000"). This regex
+# screens object_value to decide whether it carries an entity ref (and
+# should participate in the expansion) or a literal ("85.7 billion USD",
+# "흑자") that must NOT be looked up as an entity. The LLM placeholder
+# "obj-N" is also accepted as a fallback for any FactNode written before
+# B-35's remap (it's harmless to query against — no hit means no link).
+_UUID4_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+_OBJ_PLACEHOLDER_RE = re.compile(r"^obj-\d+$", re.IGNORECASE)
+
+
+def _is_entity_ref(value: str | None) -> bool:
+    """True iff `value` looks like an Object uid (UUID4 or LLM-
+    placeholder obj-N). Literals always return False so they're
+    never used as ES `terms` lookup keys."""
+    if not value:
+        return False
+    return bool(_UUID4_RE.match(value) or _OBJ_PLACEHOLDER_RE.match(value))
+
+
+def _collect_entity_uids(facts: list[RecallFact]) -> list[str]:
+    """Extract the unique set of entity uids referenced by `facts`
+    (subject_uid always counts; object_value only when it's shaped
+    like an entity ref). Order is preserved so the same query is
+    deterministic across runs — useful for caching at a later stage."""
+    seen: dict[str, None] = {}
+    for f in facts:
+        if f.subject_uid and f.subject_uid not in seen:
+            seen[f.subject_uid] = None
+        if f.object_value and _is_entity_ref(f.object_value):
+            if f.object_value not in seen:
+                seen[f.object_value] = None
+    return list(seen.keys())
+
+
+def _entity_link_facts(
+    entity_uids: list[str],
+    knowledge_space_id: str,
+    *,
+    exclude_fact_uids: set[str],
+    max_hits: int = 50,
+) -> list[dict[str, Any]]:
+    """Return hit dicts for every validated fact whose subject_uid OR
+    object_value matches any of `entity_uids`. Excludes facts already
+    in the embedding pass."""
+    if not entity_uids:
+        return []
+    body: dict[str, Any] = {
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"knowledge_space_id": knowledge_space_id}},
+                    {"term": {"validation_method": "manual"}},
+                    {"bool": {
+                        "should": [
+                            {"terms": {"subject_uid": entity_uids}},
+                            {"terms": {"object_value": entity_uids}},
+                        ],
+                        "minimum_should_match": 1,
+                    }},
+                ],
+            },
+        },
+        "size": max_hits,
+    }
+    client = get_client()
+    resp = client.search(index=LUCID_FACTS, body=body)
+    hits = list(resp["hits"]["hits"])
+    out: list[dict[str, Any]] = []
+    for h in hits:
+        src = h.get("_source") or {}
+        if src.get("fact_uid") in exclude_fact_uids:
+            continue
+        out.append(h)
+    return out
 
 
 def _knn_facts_validated_only(
@@ -195,8 +276,35 @@ def recall(
     if not facts:
         return _empty("no_facts_above_floor")
 
+    # B-25 stage 2 / B-35 wiring: surface every other validated fact
+    # in this knowledge_space that references any of the same
+    # canonical Object uids. This is the graph join PO asked for —
+    # "SpaceX 검색 -> SpaceX 가 subject 든 object 든 등장하는 fact 전부".
+    # Degrade quietly on any ES error — the embedding matches above
+    # are already a complete answer.
+    entity_uids = _collect_entity_uids(facts)
+    already = {f.fact_uid for f in facts}
+    expansion_count = 0
+    try:
+        link_hits = _entity_link_facts(
+            entity_uids, str(ks.id),
+            exclude_fact_uids=already,
+            max_hits=max(RECALL_MAX_K, limit * 5),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: entity-link expansion failed: %s", exc)
+        link_hits = []
+    for hit in link_hits:
+        fact = _hit_to_fact(hit)
+        if fact is None:
+            continue
+        fact = fact.model_copy(update={"match_kind": "entity_link"})
+        facts.append(fact)
+        expansion_count += 1
+
     return RecallResponse(
         signature=SIGNATURE_HIT_TEMPLATE.format(n=len(facts)),
         facts=facts,
         total=len(facts),
+        expanded_count=expansion_count,
     )

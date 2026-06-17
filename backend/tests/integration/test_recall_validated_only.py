@@ -235,3 +235,113 @@ def test_recall_korean_query_is_first_class(client, auth_ctx, monkeypatch):
         assert "As far as I know" in body["signature"]
     finally:
         _delete_fact(uid)
+
+
+
+def test_recall_b35_expansion_pulls_facts_sharing_entity_uid(client, auth_ctx, monkeypatch):
+    """B-25 stage 2: when the embedding match yields a fact whose
+    subject_uid is a canonical Object uid, the response also surfaces
+    every OTHER validated fact in the same KS that references the same
+    entity — either on subject_uid or on object_value (entity-shaped).
+
+    Reproduction shape (einfomax SpaceX IPO):
+      seed:  fn-direct  (subject_uid=SpaceX, object_value=85.7B USD) — direct embed match
+             fn-other   (subject_uid=Goldman, object_value=SpaceX)    — only entity-link
+             fn-noise   (subject_uid=Apple,   object_value=literal)   — neither, must NOT appear
+    Expected:
+      facts returned: fn-direct (embedding) + fn-other (entity_link)
+      expanded_count: 1
+    """
+    headers, _user_id, ks_id = auth_ctx
+    ks = str(ks_id)
+
+    SPACEX_UID = "550e8400-e29b-41d4-a716-446655440000"
+    GOLDMAN_UID = "550e8400-e29b-41d4-a716-446655440001"
+    APPLE_UID = "550e8400-e29b-41d4-a716-446655440002"
+
+    monkeypatch.setattr(
+        "api.routes.recall.get_embedding",
+        lambda text: [0.1] * 1536,
+    )
+
+    direct_uid = f"fn-direct-{uuid.uuid4().hex[:8]}"
+    other_uid = f"fn-other-{uuid.uuid4().hex[:8]}"
+    noise_uid = f"fn-noise-{uuid.uuid4().hex[:8]}"
+
+    # All three carry the same query-aligned embedding so kNN would
+    # normally surface all of them — but we then constrain the embed
+    # match to ONLY fn-direct by giving the others a far-off embedding.
+    _index_fact_with_subject_object(
+        direct_uid, "SpaceX raised 85.7 billion USD in its IPO.",
+        ks, "manual", [0.1] * 1536, SPACEX_UID, "85.7 billion USD",
+    )
+    _index_fact_with_subject_object(
+        other_uid,  "Goldman Sachs sponsored the SpaceX IPO.",
+        ks, "manual", [-0.5] * 768 + [0.5] * 768, GOLDMAN_UID, SPACEX_UID,
+    )
+    _index_fact_with_subject_object(
+        noise_uid,  "Apple announced new products.",
+        ks, "manual", [-0.5] * 768 + [0.5] * 768, APPLE_UID, "iPhone 17",
+    )
+
+    try:
+        resp = client.get(
+            f"/api/spaces/{ks_id}/recall",
+            params={"q": "SpaceX IPO funding", "limit": 5},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        returned_uids = {f["fact_uid"] for f in body["facts"]}
+        assert direct_uid in returned_uids, "embed match must be present"
+        assert other_uid in returned_uids, (
+            "entity-link expansion must surface the SpaceX-as-object fact"
+        )
+        assert noise_uid not in returned_uids, (
+            "unrelated facts must not leak in via the expansion"
+        )
+
+        # match_kind labelling: direct is "embedding", expanded is "entity_link"
+        kinds = {f["fact_uid"]: f.get("match_kind", "embedding") for f in body["facts"]}
+        assert kinds[direct_uid] == "embedding"
+        assert kinds[other_uid] == "entity_link"
+        assert body["expanded_count"] >= 1
+    finally:
+        for u in (direct_uid, other_uid, noise_uid):
+            _delete_fact(u)
+
+
+def _index_fact_with_subject_object(
+    fact_uid: str,
+    claim: str,
+    knowledge_space_id: str,
+    validation_method: str,
+    embedding: list[float],
+    subject_uid: str,
+    object_value: str,
+) -> None:
+    """Variant of _index_fact that lets the caller set subject_uid +
+    object_value to canonical entity uids (the B-35 wire format)."""
+    from api.storage.elasticsearch.client import LUCID_FACTS, get_client
+    client = get_client()
+    doc = {
+        "fact_uid": fact_uid,
+        "claim": claim,
+        "claim_en": None,
+        "type": "proposition",
+        "subject_uid": subject_uid,
+        "predicate": "p",
+        "object_value": object_value,
+        "source_uids": ["src-seed-1"],
+        "validated_at": datetime.now(UTC).isoformat(),
+        "validator_id": "user-seed",
+        "validation_method": validation_method,
+        "knowledge_space_id": knowledge_space_id,
+        "negation_flag": False,
+        "negation_scope": None,
+        "embedding": embedding,
+        "tags": [],
+        "aliases": [],
+        "override_warning": False,
+    }
+    client.index(index=LUCID_FACTS, id=fact_uid, document=doc, refresh="wait_for")

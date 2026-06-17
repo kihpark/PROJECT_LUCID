@@ -37,6 +37,15 @@ class RecallFact(LucidBaseModel):
     negation_flag: bool = False
     negation_scope: Literal["full", "partial"] | None = None
     score: float
+    # B-25 stage 2 / B-35 wiring: how this fact reached the response.
+    #   "embedding"   — kNN against the query embedding
+    #   "entity_link" — the kNN matches surfaced an entity uid and this
+    #                   fact references the SAME canonical Object uid
+    #                   on subject or object_value (the cross-fact /
+    #                   cross-job graph join enabled by B-35).
+    # Frontend uses this to label expanded facts so the user understands
+    # why a fact appears even when its claim text didn't directly match.
+    match_kind: Literal["embedding", "entity_link"] = "embedding"
 
 
 class RecallResponse(LucidBaseModel):
@@ -55,3 +64,6 @@ class RecallResponse(LucidBaseModel):
     signature: str
     facts: list[RecallFact] = Field(default_factory=list)
     total: int
+    # B-25 stage 2: how many of `facts` came in via the entity-link
+    # second pass. 0 when the result set is pure semantic-match.
+    expanded_count: int = 0
