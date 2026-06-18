@@ -11,6 +11,11 @@ declare const chrome: {
   cookies: { get: ReturnType<typeof vi.fn> };
   tabs: { sendMessage: ReturnType<typeof vi.fn> };
   scripting: { executeScript: ReturnType<typeof vi.fn> };
+  notifications: { create: ReturnType<typeof vi.fn> };
+  action: {
+    setBadgeText: ReturnType<typeof vi.fn>;
+    setBadgeBackgroundColor: ReturnType<typeof vi.fn>;
+  };
 };
 
 interface CookieDetails { url: string; name: string }
@@ -22,6 +27,9 @@ beforeEach(() => {
   chrome.cookies.get.mockReset();
   chrome.tabs.sendMessage = vi.fn();
   chrome.scripting.executeScript = vi.fn();
+  chrome.notifications.create = vi.fn((_opts: unknown, cb?: () => void) => cb && cb());
+  chrome.action.setBadgeText = vi.fn((_d: unknown, cb?: () => void) => cb && cb());
+  chrome.action.setBadgeBackgroundColor = vi.fn((_d: unknown, cb?: () => void) => cb && cb());
   vi.unstubAllGlobals();
 });
 
@@ -473,5 +481,120 @@ describe('context-menu click — non-page items (regression)', () => {
     expect(msg).not.toMatch(/\[object Object\]/);
     expect(msg).not.toMatch(/^undefined$/);
     expect(msg).toContain('raw_payload_b64_invalid');
+  });
+});
+
+
+describe('toast dispatch fallback (B-45-fix2)', () => {
+  // Helper: drive the full image capture path so notifyTab runs.
+  async function runImageCapture() {
+    stubAuth();
+    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]);
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === 'https://threads.com/image.png') {
+        return { ok: true, arrayBuffer: async () => imageBytes.buffer };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          job_id: 'job-fb-1',
+          status_url: '/api/jobs/job-fb-1',
+          status: 'pending_extract',
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.image,
+        srcUrl: 'https://threads.com/image.png',
+        pageUrl: 'https://threads.com/post/123',
+      } as chrome.contextMenus.OnClickData,
+      { id: 99, url: 'https://threads.com/post/123' } as chrome.tabs.Tab,
+    );
+    return fetchMock;
+  }
+
+  it('★ when content script is absent, falls back to chrome.notifications', async () => {
+    // Threads etc. blocks content_scripts → sendMessage rejects.
+    chrome.tabs.sendMessage.mockRejectedValue(
+      new Error('Could not establish connection. Receiving end does not exist.'),
+    );
+
+    const fetchMock = await runImageCapture();
+
+    // Capture itself succeeded (2 fetches: image + capture POST) —
+    // toast delivery NEVER blocks the capture.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const captureCall = fetchMock.mock.calls.find(
+      (c: unknown[]) => c[0] === 'http://localhost:8000/api/capture',
+    );
+    expect(captureCall).toBeTruthy();
+
+    // System notification fired with a readable title + body.
+    expect(chrome.notifications.create).toHaveBeenCalled();
+    const notifCall = chrome.notifications.create.mock.calls[0]!;
+    const opts = notifCall[0] as {
+      type: string; iconUrl: string; title: string; message: string;
+    };
+    expect(opts.type).toBe('basic');
+    expect(opts.title).toMatch(/Lucid.*저장.*진행/);
+    expect(opts.message).toContain('Pending Queue');
+    expect(opts.message).toContain('job-fb-1'.slice(0, 8));
+  });
+
+  it('★ badge flashes "✓" on success even when toast and notification both fire', async () => {
+    chrome.tabs.sendMessage.mockResolvedValue(undefined); // toast succeeds
+    await runImageCapture();
+    // Badge gets the success mark — works on every page including
+    // CSP-locked ones, so this is the always-on ambient signal.
+    expect(chrome.action.setBadgeText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '✓' }),
+      expect.any(Function),
+    );
+    expect(chrome.action.setBadgeBackgroundColor).toHaveBeenCalled();
+  });
+
+  it('★ badge flashes "!" on capture_failed', async () => {
+    stubAuth();
+    // Make image fetch + page-context both fail → outcome=failed.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    vi.stubGlobal('fetch', fetchMock);
+    chrome.scripting.executeScript.mockResolvedValue([{
+      result: { ok: false, error: 'HTTP 403' },
+      frameId: 0, documentId: 'x',
+    }]);
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.image,
+        srcUrl: 'https://example.com/no.png',
+        pageUrl: 'https://example.com/p',
+      } as chrome.contextMenus.OnClickData,
+      { id: 77, url: 'https://example.com/p' } as chrome.tabs.Tab,
+    );
+
+    const badgeCalls = chrome.action.setBadgeText.mock.calls;
+    const flashedFail = badgeCalls.some(
+      (c: unknown[]) => (c[0] as { text?: string }).text === '!',
+    );
+    expect(flashedFail).toBe(true);
+  });
+
+  it('capture proceeds even when both notifyTab paths throw', async () => {
+    // Worst case: tab message rejects AND notifications.create rejects.
+    chrome.tabs.sendMessage.mockRejectedValue(new Error('tab gone'));
+    chrome.notifications.create = vi.fn(() => {
+      throw new Error('notifications permission denied');
+    });
+
+    const fetchMock = await runImageCapture();
+    // Capture POST still happened — toast failures cannot roll back
+    // a 202.
+    const captureCall = fetchMock.mock.calls.find(
+      (c: unknown[]) => c[0] === 'http://localhost:8000/api/capture',
+    );
+    expect(captureCall).toBeTruthy();
   });
 });

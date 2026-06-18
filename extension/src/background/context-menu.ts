@@ -397,19 +397,120 @@ export function installContextMenus(): void {
   }
 }
 
+/**
+ * B-45-fix2: deliver capture feedback through whichever channel is
+ * actually reachable.
+ *
+ * Primary: in-page toast (rich, beside the captured content).
+ * Fallback 1: system notification — "Lucid: capture started/failed"
+ *   in the OS notification tray. Works even when the page blocks
+ *   content scripts (Threads, CSP-strict pages, chrome://, inert
+ *   tabs).
+ * Fallback 2 (ambient): an icon badge that flips to "✓" / "!" so
+ *   the user gets a confirmation pinned to the toolbar even if
+ *   they dismissed the notification. Auto-clears after a few
+ *   seconds.
+ *
+ * The capture path NEVER throws because of toast delivery — the
+ * try/catch ladder swallows every failure into a console.info log
+ * so a missing notifications permission or a closed tab can never
+ * roll back a 202.
+ */
 async function notifyTab(
   tabId: number | undefined,
   message: Record<string, unknown>,
 ): Promise<void> {
-  if (tabId === undefined) return;
-  try {
-    await chrome.tabs.sendMessage(tabId, message);
-  } catch (err) {
-    // chrome:// tabs / closed tabs / tabs without the content script
-    // can't receive messages. The capture itself may already have
-    // landed; the SW log is enough.
-    console.info('[lucid] toast dispatch failed', err);
+  // Always flash the badge — it works on every page, including
+  // restricted URLs.
+  flashBadge(messageOutcome(message));
+
+  let delivered = false;
+  if (tabId !== undefined) {
+    try {
+      await chrome.tabs.sendMessage(tabId, message);
+      delivered = true;
+    } catch (err) {
+      console.info('[lucid] in-page toast unavailable, using fallback', err);
+    }
   }
+
+  if (!delivered) {
+    await showSystemNotification(message);
+  }
+}
+
+type ToastOutcome = 'pending' | 'failed';
+
+function messageOutcome(message: Record<string, unknown>): ToastOutcome {
+  const status = message['status'];
+  if (status === 'capture_failed') return 'failed';
+  return 'pending';
+}
+
+async function showSystemNotification(
+  message: Record<string, unknown>,
+): Promise<void> {
+  const notifications = (chrome as { notifications?: chrome.notifications.NotificationOptions }).notifications;
+  if (!notifications || typeof (notifications as { create?: unknown }).create !== 'function') {
+    return; // permission absent — badge is the only feedback we can give
+  }
+  const failed = messageOutcome(message) === 'failed';
+  const jobId = typeof message['job_id'] === 'string' ? (message['job_id'] as string) : '';
+  const errorDetail = typeof message['error'] === 'string' ? (message['error'] as string) : '';
+  const title = failed ? 'Lucid: 저장 실패' : 'Lucid: 저장 진행 중';
+  const body = failed
+    ? (errorDetail || '캡처를 처리할 수 없습니다.')
+    : (jobId ? `Pending → 잠시 후 Pending Queue 에서 확인하세요. (job ${jobId.slice(0, 8)})`
+              : 'Pending Queue 에서 진행 상태를 확인하세요.');
+  try {
+    await new Promise<void>((resolve) => {
+      (chrome.notifications.create as (opts: chrome.notifications.NotificationOptions, cb?: () => void) => void)(
+        {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('public/icons/icon-128.png'),
+          title,
+          message: body,
+        } as chrome.notifications.NotificationOptions,
+        () => resolve(),
+      );
+    });
+  } catch (err) {
+    console.info('[lucid] system notification failed', err);
+  }
+}
+
+const BADGE_CLEAR_MS = 6000;
+let badgeClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flashBadge(outcome: ToastOutcome): void {
+  const action = (chrome as { action?: chrome.action.ActionDisabledDetails }).action;
+  if (!action) return;
+  const text = outcome === 'failed' ? '!' : '✓';
+  const color = outcome === 'failed' ? '#cc4444' : '#1f8b6a';
+  try {
+    (chrome.action.setBadgeBackgroundColor as (
+      d: chrome.action.BadgeBackgroundColorDetails, cb?: () => void,
+    ) => void)({ color }, () => undefined);
+    (chrome.action.setBadgeText as (
+      d: chrome.action.BadgeTextDetails, cb?: () => void,
+    ) => void)({ text }, () => undefined);
+  } catch (err) {
+    console.info('[lucid] badge update failed', err);
+    return;
+  }
+  if (badgeClearTimer !== null) {
+    clearTimeout(badgeClearTimer);
+  }
+  badgeClearTimer = setTimeout(() => {
+    try {
+      (chrome.action.setBadgeText as (
+        d: chrome.action.BadgeTextDetails, cb?: () => void,
+      ) => void)({ text: '' }, () => undefined);
+    } catch {
+      // ignore
+    }
+    badgeClearTimer = null;
+  }, BADGE_CLEAR_MS);
 }
 
 export async function handleContextMenuClick(

@@ -22,7 +22,14 @@ export default defineManifest({
     service_worker: 'src/background/service-worker.ts',
     type: 'module',
   },
-  permissions: ['storage', 'cookies', 'contextMenus', 'activeTab', 'tabs', 'scripting'],
+  permissions: [
+    'storage', 'cookies', 'contextMenus', 'activeTab', 'tabs', 'scripting',
+    // B-45-fix2: when the in-page toast can't be delivered (content
+    // script absent / CSP-blocked / inert tab), fall back to a system
+    // notification + extension-icon badge so the user always knows
+    // whether the capture succeeded.
+    'notifications',
+  ],
   host_permissions: ['http://localhost:3000/*', 'http://localhost:8000/*'],
   content_scripts: [
     {
