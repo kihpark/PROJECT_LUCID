@@ -85,6 +85,28 @@ Run these IN ORDER on the input text:
 
   Step 1. Identify every Object mention in the text.
   Step 2. Assign each Object a class from the 13 above.
+
+  Step 2a. B-52 — PRESERVE THE SOURCE-LANGUAGE SURFACE FORM.
+          If you choose to normalize an Object's `name` into a
+          language other than the source text (e.g. emitting
+          `"name":"Ministry of Defense"` for a Korean article that
+          calls it "국방부"), you MUST add the source-language
+          surface form to the Object's `aliases` array.
+          Examples:
+            source: "국방부는 ..."
+              → {"name":"Ministry of Defense", "name_en":"Ministry of Defense",
+                 "aliases":["국방부"]}
+            source: "Bank of Korea announced ..."
+              → {"name":"한국은행", "name_en":"Bank of Korea",
+                 "aliases":["Bank of Korea"]}
+            source: "삼성전자는 ..."
+              → {"name":"삼성전자", "name_en":"Samsung Electronics",
+                 "aliases":[]}   # name already matches source, no alias needed
+          Also add common abbreviations / honorific-stripped variants
+          when the article uses them ("BOK" alongside "Bank of
+          Korea"; "박현주 회장" + "박현주").
+          An empty list (`"aliases": []`) is fine when the source
+          surface form equals `name`.
   Step 3. Decompose every assertion into one or more AtomicFact
           candidates (proposition or procedure). Each fact must be a
           SINGLE falsifiable statement.
@@ -175,6 +197,7 @@ it in markdown fences. Do NOT include any prose outside the JSON.
       "class": "person",
       "name": "Daniel Kahneman",
       "name_en": "Daniel Kahneman",
+      "aliases": [],
       "properties": {}
     }
   ],

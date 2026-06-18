@@ -421,6 +421,17 @@ def _resolve_entities_by_name(
     if not q or not q.strip():
         return []
     q_norm = q.strip().lower()
+    q_stripped = q.strip()
+    # B-52 — Korean ↔ English cross-language matching.
+    # The decomposer normalizes some entities into English ("Ministry
+    # of Defense") even when the source article is Korean. A user
+    # then searching for "국방부" must still surface those facts.
+    # Three-tier lookup:
+    #   1. Exact-keyword on name / name_en / aliases — fastest path,
+    #      survives even when the analyzer would chunk the term.
+    #   2. Analyzed match across the same three fields — picks up
+    #      partial / morpheme matches when the analyzer split tokens.
+    #   3. Wildcard fallback for substring queries.
     body: dict[str, Any] = {
         "size": max_hits,
         "query": {
@@ -429,8 +440,9 @@ def _resolve_entities_by_name(
                     {"term": {"knowledge_space_id": knowledge_space_id}},
                 ],
                 "should": [
-                    {"term": {"name.keyword": q.strip()}},
-                    {"term": {"name_en.keyword": q.strip()}},
+                    {"term": {"name.keyword": q_stripped}},
+                    {"term": {"name_en.keyword": q_stripped}},
+                    {"term": {"aliases.keyword": q_stripped}},
                 ],
                 "minimum_should_match": 1,
             },
@@ -441,10 +453,24 @@ def _resolve_entities_by_name(
         client = get_client()
         resp = client.search(index=LUCID_OBJECTS, body=body)
         hits = list(resp["hits"]["hits"])
+        # Tier 2: analyzed match — covers tokenizer-driven splits the
+        # exact term filter misses ("국방부" tokenized by nori).
+        if not hits:
+            body["query"]["bool"]["should"] = [  # type: ignore[index]
+                {"multi_match": {
+                    "query": q_stripped,
+                    "fields": ["name", "name_en", "aliases"],
+                    "type": "best_fields",
+                }},
+            ]
+            resp = client.search(index=LUCID_OBJECTS, body=body)
+            hits = list(resp["hits"]["hits"])
+        # Tier 3: wildcard substring fallback (last resort).
         if not hits:
             body["query"]["bool"]["should"] = [  # type: ignore[index]
                 {"wildcard": {"name": f"*{q_norm}*"}},
                 {"wildcard": {"name_en": f"*{q_norm}*"}},
+                {"wildcard": {"aliases.keyword": f"*{q_stripped}*"}},
             ]
             resp = client.search(index=LUCID_OBJECTS, body=body)
             hits = list(resp["hits"]["hits"])
