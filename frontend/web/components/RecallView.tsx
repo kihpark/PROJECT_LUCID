@@ -21,7 +21,7 @@
  *     the result list so the user understands the filtering policy.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActionButton } from './ActionButton';
 import {
   recall as apiRecall,
@@ -303,10 +303,12 @@ function FacetBar({ item, active, maxCount, onClick, testId, uid }: FacetBarProp
 }
 
 // ---------------------------------------------------------------------------
-// B-48b — fact detail panel (right-rail swap)
+// B-48c — fact detail MODAL (replaces the B-48b right-rail swap so the
+// right rail stays on facet / brief and the wider modal canvas can lay
+// the sources + meta out with proper section spacing for readability)
 // ---------------------------------------------------------------------------
 
-interface FactDetailPanelProps {
+interface FactDetailModalProps {
   detail: FactDetailResponse;
   onClose: () => void;
   onDetachSource: (sourceUid: string) => Promise<void>;
@@ -315,180 +317,271 @@ interface FactDetailPanelProps {
   busy: boolean;
 }
 
-function FactDetailPanel({
+function FactDetailModal({
   detail, onClose, onDetachSource, onRetract, onRestore, busy,
-}: FactDetailPanelProps) {
+}: FactDetailModalProps) {
   const { fact, entities, sources } = detail;
   const retracted = !!fact.retracted_at;
   const trusted = sources.length >= 2;
   const subject = entities.find((e) => e.role === 'subject');
   const object = entities.find((e) => e.role === 'object');
+
+  // ESC closes — global listener while the modal is mounted.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <aside
+    <div
+      role="dialog"
+      aria-modal="true"
       aria-label="fact detail"
-      data-testid="fact-detail-panel"
+      data-testid="fact-detail-modal"
       data-retracted={retracted ? 'true' : 'false'}
-      className="hidden lg:block sticky top-4 self-start w-72 shrink-0"
+      className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8 bg-black/40 backdrop-blur-sm"
+      // Click on the backdrop (not the content) closes.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <header className="flex items-center justify-between mb-2">
-        <h2 className="text-xxs uppercase tracking-wider text-text-muted font-mono">
-          Fact 상세
-        </h2>
+      <div
+        data-testid="fact-detail-modal-content"
+        className="relative max-w-3xl w-full max-h-[90vh] overflow-y-auto rounded-xl border border-border-subtle bg-bg-elevated shadow-xl"
+      >
+        {/* Close button — pinned top right */}
         <button
           type="button"
           data-testid="fact-detail-close"
           onClick={onClose}
           aria-label="close fact detail"
-          className="text-xxs text-text-muted hover:text-text-primary font-mono"
+          className="absolute top-3 right-3 text-text-muted hover:text-text-primary font-mono text-sm rounded p-1"
         >
-          ✕ 닫기
+          ✕
         </button>
-      </header>
 
-      <section
-        className={[
-          'rounded-lg border p-3 mb-3',
-          retracted
-            ? 'border-accent-error/40 bg-accent-error/5'
-            : 'border-border-subtle bg-bg-card',
-        ].join(' ')}
-      >
-        {retracted && (
-          <p
-            data-testid="fact-detail-retracted-banner"
-            className="text-xxs text-accent-error mb-2 font-mono"
-          >
-            철회된 사실 · {new Date(fact.retracted_at!).toLocaleString()}
-          </p>
-        )}
-        <p
-          data-testid="fact-detail-claim"
-          className="text-sm mb-2 leading-snug"
-          lang="ko"
-        >
-          {fact.claim}
-        </p>
-        <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-1 mb-2">
-          <div>
-            <dt className="opacity-60">subject</dt>
-            <dd data-testid="fact-detail-subject">
-              {subject?.name ?? fact.subject_label ?? fact.subject_uid}
-              {subject?.class && (
-                <span className="ml-1 text-xxs opacity-60">({subject.class})</span>
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt className="opacity-60">predicate</dt>
-            <dd>{fact.predicate}</dd>
-          </div>
-          <div>
-            <dt className="opacity-60">object</dt>
-            <dd data-testid="fact-detail-object">
-              {object?.name ?? fact.object_label ?? fact.object_value}
-              {object?.class && (
-                <span className="ml-1 text-xxs opacity-60">({object.class})</span>
-              )}
-            </dd>
-          </div>
-        </dl>
-        {(subject?.aliases?.length ?? 0) > 0 && (
-          <p className="text-xxs text-text-muted font-mono">
-            alias: {subject!.aliases!.join(', ')}
-          </p>
-        )}
-        <p className="text-xxs text-text-muted font-mono">
-          validated{' '}
-          <time dateTime={fact.validated_at}>
-            {new Date(fact.validated_at).toLocaleString()}
-          </time>
-        </p>
-      </section>
-
-      <section className="mb-3">
-        <header className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-medium">출처 ({sources.length})</h3>
-          {trusted && (
-            <span
-              data-testid="fact-detail-trust-badge"
-              className="rounded-full bg-accent-cool/15 text-accent-cool border border-accent-cool/40 px-2 py-0.5 text-xxs font-mono"
-              title="검증된 출처가 둘 이상"
+        {/* Header: claim hero + retracted banner */}
+        <header className="px-8 pt-8 pb-4 border-b border-border-subtle">
+          {retracted && (
+            <p
+              data-testid="fact-detail-retracted-banner"
+              className="text-xs text-accent-error mb-3 font-mono"
             >
-              ✓ 검증된 출처 {sources.length}건
-            </span>
+              철회된 사실 · {new Date(fact.retracted_at!).toLocaleString()}
+            </p>
+          )}
+          <p className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-2">
+            Fact 상세
+          </p>
+          <p
+            data-testid="fact-detail-claim"
+            className="text-xl leading-relaxed font-medium"
+            lang="ko"
+          >
+            {fact.claim}
+          </p>
+          {fact.claim_en && (
+            <p className="text-sm text-text-muted mt-2 leading-relaxed">
+              {fact.claim_en}
+            </p>
           )}
         </header>
-        {sources.length === 0 ? (
-          <p className="text-xxs text-text-muted py-1">(출처 없음)</p>
-        ) : (
-          <ul className="space-y-2">
-            {sources.map((s) => (
-              <li
-                key={s.source_uid}
-                data-testid={`fact-detail-source-${s.source_uid}`}
-                className="rounded border border-border-subtle bg-bg-card p-2 text-xxs"
-              >
-                <div className="flex justify-between gap-2 mb-1">
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-accent-cool underline truncate"
-                    title={s.url}
-                  >
-                    {s.domain || s.url.replace(/^https?:\/\//, '').slice(0, 40)}
-                  </a>
-                  <button
-                    type="button"
-                    data-testid={`fact-detail-detach-${s.source_uid}`}
-                    onClick={() => onDetachSource(s.source_uid)}
-                    disabled={busy}
-                    className="text-text-muted hover:text-accent-error font-mono shrink-0"
-                  >
-                    이 출처만 떼기
-                  </button>
-                </div>
-                {s.captured_at && (
-                  <p className="text-text-muted">
-                    captured{' '}
-                    <time dateTime={s.captured_at}>
-                      {new Date(s.captured_at).toLocaleString()}
-                    </time>
-                  </p>
-                )}
-                {s.snapshot_available && (
-                  <p className="text-text-muted opacity-70">스냅샷 보존</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
-      <footer className="flex justify-end">
-        {retracted ? (
-          <button
-            type="button"
-            data-testid="fact-detail-restore"
-            onClick={onRestore}
-            disabled={busy}
-            className="rounded border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-3 py-1 text-xs font-mono"
-          >
-            복구
-          </button>
-        ) : (
-          <button
-            type="button"
-            data-testid="fact-detail-retract"
-            onClick={onRetract}
-            disabled={busy}
-            className="rounded border border-accent-error/40 bg-accent-error/5 text-accent-error px-3 py-1 text-xs font-mono"
-          >
-            사실 철회
-          </button>
-        )}
-      </footer>
-    </aside>
+        {/* S → P → O relationship */}
+        <section className="px-8 py-5 border-b border-border-subtle">
+          <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-3">
+            관계
+          </h3>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span
+              data-testid="fact-detail-subject"
+              className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
+            >
+              <span className="font-medium">
+                {subject?.name ?? fact.subject_label ?? fact.subject_uid}
+              </span>
+              {subject?.class && (
+                <span className="ml-2 text-xxs text-text-muted font-mono">
+                  {subject.class}
+                </span>
+              )}
+            </span>
+            <span className="text-text-muted font-mono text-xs">→</span>
+            <span className="rounded-md bg-accent-cool/10 border border-accent-cool/30 text-accent-cool px-3 py-1.5 font-mono text-xs">
+              {fact.predicate}
+            </span>
+            <span className="text-text-muted font-mono text-xs">→</span>
+            <span
+              data-testid="fact-detail-object"
+              className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
+            >
+              <span className="font-medium">
+                {object?.name ?? fact.object_label ?? fact.object_value}
+              </span>
+              {object?.class && (
+                <span className="ml-2 text-xxs text-text-muted font-mono">
+                  {object.class}
+                </span>
+              )}
+            </span>
+          </div>
+        </section>
+
+        {/* Sources — the meat of the modal */}
+        <section className="px-8 py-5 border-b border-border-subtle">
+          <header className="flex items-center justify-between mb-3">
+            <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono">
+              출처 ({sources.length})
+            </h3>
+            {trusted && (
+              <span
+                data-testid="fact-detail-trust-badge"
+                className="rounded-full bg-accent-cool/15 text-accent-cool border border-accent-cool/40 px-3 py-1 text-xxs font-mono"
+                title="검증된 출처가 둘 이상"
+              >
+                ✓ 검증된 출처 {sources.length}건
+              </span>
+            )}
+          </header>
+          {sources.length === 0 ? (
+            <p className="text-xs text-text-muted py-2">(출처 없음)</p>
+          ) : (
+            <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {sources.map((s) => (
+                <li
+                  key={s.source_uid}
+                  data-testid={`fact-detail-source-${s.source_uid}`}
+                  className="rounded-lg border border-border-subtle bg-bg-card p-3"
+                >
+                  <div className="flex justify-between items-start gap-3 mb-2">
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-accent-cool underline break-all min-w-0"
+                      title={s.url}
+                    >
+                      {s.domain || s.url.replace(/^https?:\/\//, '').slice(0, 60)}
+                    </a>
+                    <button
+                      type="button"
+                      data-testid={`fact-detail-detach-${s.source_uid}`}
+                      onClick={() => onDetachSource(s.source_uid)}
+                      disabled={busy}
+                      className="text-xxs text-text-muted hover:text-accent-error font-mono shrink-0 underline"
+                    >
+                      이 출처만 떼기
+                    </button>
+                  </div>
+                  {s.title && (
+                    <p className="text-xs text-text-secondary mb-1 leading-snug">
+                      {s.title}
+                    </p>
+                  )}
+                  <dl className="text-xxs text-text-muted font-mono space-y-0.5">
+                    {s.captured_at && (
+                      <div>
+                        <dt className="inline opacity-60">captured: </dt>
+                        <dd className="inline">
+                          <time dateTime={s.captured_at}>
+                            {new Date(s.captured_at).toLocaleString()}
+                          </time>
+                        </dd>
+                      </div>
+                    )}
+                    {s.author && (
+                      <div>
+                        <dt className="inline opacity-60">author: </dt>
+                        <dd className="inline">{s.author}</dd>
+                      </div>
+                    )}
+                    {s.snapshot_available && (
+                      <div>
+                        <dt className="inline opacity-60">snapshot: </dt>
+                        <dd className="inline">보존됨</dd>
+                      </div>
+                    )}
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Meta — validated_at / entity class / alias / edit history */}
+        <section className="px-8 py-5">
+          <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-3">
+            메타
+          </h3>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-6 text-xs">
+            <div>
+              <dt className="text-text-muted font-mono opacity-60">등록 일시</dt>
+              <dd>
+                <time dateTime={fact.validated_at}>
+                  {new Date(fact.validated_at).toLocaleString()}
+                </time>
+              </dd>
+            </div>
+            {subject?.aliases && subject.aliases.length > 0 && (
+              <div>
+                <dt className="text-text-muted font-mono opacity-60">
+                  subject alias
+                </dt>
+                <dd className="font-mono text-xxs">
+                  {subject.aliases.join(', ')}
+                </dd>
+              </div>
+            )}
+            {object?.aliases && object.aliases.length > 0 && (
+              <div>
+                <dt className="text-text-muted font-mono opacity-60">
+                  object alias
+                </dt>
+                <dd className="font-mono text-xxs">
+                  {object.aliases.join(', ')}
+                </dd>
+              </div>
+            )}
+            {fact.edit_history && fact.edit_history.length > 0 && (
+              <div>
+                <dt className="text-text-muted font-mono opacity-60">
+                  편집 이력
+                </dt>
+                <dd>{fact.edit_history.length}건</dd>
+              </div>
+            )}
+          </dl>
+        </section>
+
+        {/* Action bar */}
+        <footer className="px-8 py-4 border-t border-border-subtle bg-bg-card/40 flex justify-end gap-2">
+          {retracted ? (
+            <button
+              type="button"
+              data-testid="fact-detail-restore"
+              onClick={onRestore}
+              disabled={busy}
+              className="rounded-md border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-4 py-2 text-sm font-medium"
+            >
+              복구
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="fact-detail-retract"
+              onClick={onRetract}
+              disabled={busy}
+              className="rounded-md border border-accent-error/40 bg-accent-error/5 text-accent-error px-4 py-2 text-sm font-medium"
+            >
+              사실 철회
+            </button>
+          )}
+        </footer>
+      </div>
+    </div>
   );
 }
 
@@ -1109,20 +1202,23 @@ export function RecallView({ spaceId }: Props) {
         )}
       </main>
 
-      {detail ? (
-        <FactDetailPanel
+      {/* B-48c: right rail stays on facet/brief unconditionally;
+          fact detail is rendered as a modal overlay outside the
+          flex row so it can use the full viewport width. */}
+      <FacetPanel
+        facets={result?.facets}
+        activeEntityUids={activeEntities}
+        onToggleEntity={onToggleEntity}
+      />
+
+      {detail && (
+        <FactDetailModal
           detail={detail}
           onClose={onCloseDetail}
           onDetachSource={onDetailDetachSource}
           onRetract={onDetailRetract}
           onRestore={onDetailRestore}
           busy={detailBusy}
-        />
-      ) : (
-        <FacetPanel
-          facets={result?.facets}
-          activeEntityUids={activeEntities}
-          onToggleEntity={onToggleEntity}
         />
       )}
     </div>

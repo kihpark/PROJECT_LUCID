@@ -845,19 +845,23 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
   }
 
-  it('★ clicking a fact card opens the detail panel with sources + trust badge', async () => {
+  it('★ clicking a fact card opens the detail modal with sources + trust badge', async () => {
     await bootstrap();
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
-    // FacetPanel is rendered before the click.
+    // B-48c: facet panel stays visible always; modal opens on top.
     expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('fact-detail-panel')).toBeNull();
+    expect(screen.queryByTestId('fact-detail-modal')).toBeNull();
 
     fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
     await waitFor(() => expect(api.getFactDetail).toHaveBeenCalledWith('ks-1', 'fn-1'));
 
-    // Panel swap happened — facet gone, detail showing.
-    expect(screen.queryByTestId('facet-panel')).toBeNull();
-    expect(await screen.findByTestId('fact-detail-panel')).toBeInTheDocument();
+    // Modal renders ABOVE the facet panel — the facet stays mounted
+    // so the user's drill-down state is never thrown away.
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+    const modal = await screen.findByTestId('fact-detail-modal');
+    expect(modal).toBeInTheDocument();
+    expect(modal).toHaveAttribute('role', 'dialog');
+    expect(modal).toHaveAttribute('aria-modal', 'true');
     expect(screen.getByTestId('fact-detail-claim')).toHaveTextContent('한국은행 기준금리');
     // ★ both sources listed with their domains
     expect(screen.getByTestId('fact-detail-source-src-A')).toHaveTextContent('hankyung.com');
@@ -866,22 +870,58 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     expect(screen.getByTestId('fact-detail-trust-badge')).toBeInTheDocument();
   });
 
-  it('★ close button swaps back to the facet panel', async () => {
+  it('★ X 닫기 버튼은 모달만 닫고 facet 패널은 그대로', async () => {
     await bootstrap();
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
     fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
-    await screen.findByTestId('fact-detail-panel');
+    await screen.findByTestId('fact-detail-modal');
 
     fireEvent.click(screen.getByTestId('fact-detail-close'));
-    expect(screen.queryByTestId('fact-detail-panel')).toBeNull();
+    expect(screen.queryByTestId('fact-detail-modal')).toBeNull();
     expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+  });
+
+  it('★ ESC 키로 모달 닫기', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByTestId('fact-detail-modal')).toBeNull(),
+    );
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+  });
+
+  it('★ 바깥 클릭(backdrop)으로 모달 닫기', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    const modal = await screen.findByTestId('fact-detail-modal');
+
+    // Click the backdrop itself (the overlay div, not its content).
+    fireEvent.click(modal);
+    expect(screen.queryByTestId('fact-detail-modal')).toBeNull();
+  });
+
+  it('모달 내용을 클릭해도 닫히지 않는다', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+
+    // Click the inner content — it bubbles to the backdrop but the
+    // close handler only fires when target === currentTarget.
+    fireEvent.click(screen.getByTestId('fact-detail-modal-content'));
+    expect(screen.queryByTestId('fact-detail-modal')).toBeInTheDocument();
   });
 
   it('★ "이 출처만 떼기" calls detachSource and refreshes', async () => {
     await bootstrap();
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
     fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
-    await screen.findByTestId('fact-detail-panel');
+    await screen.findByTestId('fact-detail-modal');
 
     // After detach, the refresh fetches a body with one fewer source.
     const afterDetach = {
@@ -911,7 +951,7 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     await bootstrap();
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
     fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
-    await screen.findByTestId('fact-detail-panel');
+    await screen.findByTestId('fact-detail-modal');
 
     const retracted = {
       ...detailWithTwoSources,
@@ -948,7 +988,7 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     };
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(retracted);
     fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
-    await screen.findByTestId('fact-detail-panel');
+    await screen.findByTestId('fact-detail-modal');
     expect(screen.getByTestId('fact-detail-restore')).toBeInTheDocument();
 
     (api.restoreFact as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -974,7 +1014,7 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     };
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(oneSource);
     fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
-    await screen.findByTestId('fact-detail-panel');
+    await screen.findByTestId('fact-detail-modal');
 
     // Detach returns auto_retracted=true; refresh shows retracted + no sources.
     const afterAuto = {
@@ -1007,7 +1047,7 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     };
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(oneSource);
     fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
-    await screen.findByTestId('fact-detail-panel');
+    await screen.findByTestId('fact-detail-modal');
     expect(screen.queryByTestId('fact-detail-trust-badge')).toBeNull();
     expect(screen.getByTestId('fact-detail-source-src-A')).toBeInTheDocument();
   });
