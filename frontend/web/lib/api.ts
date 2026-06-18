@@ -168,16 +168,38 @@ export function deleteNote(
   );
 }
 
+export interface RecallOptions {
+  limit?: number;
+  entity?: string[];
+  // B-50 controls — all additive; omitting any preserves prior behaviour.
+  scoreThreshold?: number;
+  dateFrom?: string;  // ISO 8601
+  dateTo?: string;    // ISO 8601
+  matchKinds?: ('embedding' | 'entity_link')[];
+}
+
 export function recall(
   spaceId: string,
   q: string,
-  options: { limit?: number; entity?: string[] } = {},
+  options: RecallOptions = {},
 ): Promise<RecallResponse> {
   const params = new URLSearchParams();
   params.set('q', q);
   params.set('limit', String(options.limit ?? 10));
   for (const uid of options.entity ?? []) {
     params.append('entity', uid);
+  }
+  if (options.scoreThreshold !== undefined) {
+    params.set('score_threshold', String(options.scoreThreshold));
+  }
+  if (options.dateFrom) {
+    params.set('date_from', options.dateFrom);
+  }
+  if (options.dateTo) {
+    params.set('date_to', options.dateTo);
+  }
+  for (const kind of options.matchKinds ?? []) {
+    params.append('match_kinds', kind);
   }
   return request<RecallResponse>(
     `/api/spaces/${spaceId}/recall?${params.toString()}`,

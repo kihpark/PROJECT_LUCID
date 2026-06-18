@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -136,6 +137,22 @@ def _retracted_clause(include_retracted: bool) -> dict[str, Any] | None:
     return {"bool": {"must_not": [{"exists": {"field": "retracted_at"}}]}}
 
 
+def _date_range_filter(
+    date_from: datetime | None, date_to: datetime | None,
+) -> dict[str, Any] | None:
+    """B-50: build an ES range clause for validated_at, or None when
+    both bounds are absent. Inclusive on both sides; either side may
+    be omitted."""
+    if date_from is None and date_to is None:
+        return None
+    bounds: dict[str, Any] = {}
+    if date_from is not None:
+        bounds["gte"] = date_from.isoformat()
+    if date_to is not None:
+        bounds["lte"] = date_to.isoformat()
+    return {"range": {"validated_at": bounds}}
+
+
 def _entity_link_facts(
     entity_uids: list[str],
     knowledge_space_id: str,
@@ -143,13 +160,18 @@ def _entity_link_facts(
     exclude_fact_uids: set[str],
     max_hits: int = 50,
     include_retracted: bool = False,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Return hit dicts for every validated fact whose subject_uid OR
     object_value matches any of `entity_uids`. Excludes facts already
     in the embedding pass.
 
     B-48a: retracted facts (retracted_at != null) are filtered out by
-    default; pass `include_retracted=True` to surface them."""
+    default; pass `include_retracted=True` to surface them.
+
+    B-50: optional `date_from` / `date_to` clip the result set to a
+    validated_at window. Both bounds inclusive."""
     if not entity_uids:
         return []
     filters: list[dict[str, Any]] = [
@@ -166,6 +188,9 @@ def _entity_link_facts(
     retract = _retracted_clause(include_retracted)
     if retract is not None:
         filters.append(retract)
+    date_clause = _date_range_filter(date_from, date_to)
+    if date_clause is not None:
+        filters.append(date_clause)
     body: dict[str, Any] = {
         "query": {"bool": {"filter": filters}},
         "size": max_hits,
@@ -189,6 +214,8 @@ def _knn_facts_validated_only(
     *,
     entity_filter_uids: list[str] | None = None,
     include_retracted: bool = False,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """ES kNN with hard filters: space + validation_method=manual.
 
@@ -197,6 +224,7 @@ def _knn_facts_validated_only(
     intersection). Pure ES query — no app-side loop.
 
     B-48a: retracted facts are filtered out by default.
+    B-50: optional date_from / date_to clip validated_at inclusively.
     """
     filters: list[dict[str, Any]] = [
         {"term": {"knowledge_space_id": knowledge_space_id}},
@@ -210,6 +238,9 @@ def _knn_facts_validated_only(
     retract = _retracted_clause(include_retracted)
     if retract is not None:
         filters.append(retract)
+    date_clause = _date_range_filter(date_from, date_to)
+    if date_clause is not None:
+        filters.append(date_clause)
     body: dict[str, Any] = {
         "knn": {
             "field": "embedding",
@@ -690,6 +721,20 @@ def _facets_for(
     )
 
 
+_VALID_MATCH_KINDS: set[str] = {"embedding", "entity_link"}
+
+
+def _resolve_match_kinds(raw: Any) -> set[str]:
+    """B-50: subset of {'embedding','entity_link'} the client wants
+    surfaced. None / empty / non-list / all-unknown → both passes
+    (preserves pre-B-50 behaviour and degrades quietly so a typo
+    can't zero recall)."""
+    if not isinstance(raw, list) or not raw:
+        return set(_VALID_MATCH_KINDS)
+    cleaned = {v for v in raw if v in _VALID_MATCH_KINDS}
+    return cleaned or set(_VALID_MATCH_KINDS)
+
+
 @router.get("/recall", response_model=RecallResponse)
 def recall(
     space_id: uuid.UUID,
@@ -699,6 +744,20 @@ def recall(
     include_retracted: bool = Query(
         default=False,
         description="B-48a: surface facts with retracted_at set (default hides them)",
+    ),
+    score_threshold: float | None = Query(
+        default=None, ge=0.0, le=1.0,
+        description="B-50: override RECALL_SCORE_FLOOR (default 0.72)",
+    ),
+    date_from: datetime | None = Query(
+        default=None, description="B-50: validated_at >= date_from",
+    ),
+    date_to: datetime | None = Query(
+        default=None, description="B-50: validated_at <= date_to",
+    ),
+    match_kinds: list[str] | None = Query(
+        default=None, alias="match_kinds",
+        description="B-50: subset of {'embedding','entity_link'}",
     ),
     user: User = Depends(get_current_user),
 ) -> RecallResponse:
@@ -710,10 +769,16 @@ def recall(
         the index (enforced inside the ES kNN filter clause AND
         re-checked in the serialiser).
       - 0 hits — whether the index is empty, the query is irrelevant,
-        or every hit is below RECALL_SCORE_FLOOR — produces the same
+        or every hit is below the threshold — produces the same
         empty envelope. We do NOT generate, paraphrase, or augment.
       - Korean queries work first-class because the embedding model
         (OpenAI text-embedding-3-small) is multilingual.
+
+    Refinements (all additive; default behaviour unchanged):
+      - score_threshold (B-50): override RECALL_SCORE_FLOOR per call.
+      - date_from / date_to (B-50): validated_at window, inclusive.
+      - match_kinds (B-50): subset of {'embedding','entity_link'}.
+      - include_retracted (B-48a): surface soft-deleted facts.
 
     Failure-mode handling: any infrastructure error (no embedding API,
     ES down) returns the empty envelope rather than a 500. Recall must
@@ -726,10 +791,6 @@ def recall(
     finally:
         session.close()
 
-    embedding = get_embedding(q)
-    if embedding is None:
-        return _empty("embedding_unavailable")
-
     # Defensive normalize: tests call this route directly without
     # FastAPI dependency resolution, so Query() sentinel objects can
     # leak in as defaults for list / bool params.
@@ -737,12 +798,30 @@ def recall(
         include_retracted, bool,
     ) else False
     entity_uids_in: list[str] = entity if isinstance(entity, list) else []
+    threshold = score_threshold if isinstance(
+        score_threshold, (int, float),
+    ) else RECALL_SCORE_FLOOR
+    df = date_from if isinstance(date_from, datetime) else None
+    dt = date_to if isinstance(date_to, datetime) else None
+    enabled_kinds = _resolve_match_kinds(match_kinds)
+
+    # B-50: when the user disables the embedding pass, short-circuit
+    # before the OpenAI round-trip. The entity-link pass alone has no
+    # seed entity uids, so the result is empty by construction.
+    if "embedding" not in enabled_kinds:
+        return _empty("embedding_disabled")
+
+    embedding = get_embedding(q)
+    if embedding is None:
+        return _empty("embedding_unavailable")
 
     try:
         hits = _knn_facts_validated_only(
             list(embedding), str(ks.id), limit,
             entity_filter_uids=list(entity_uids_in),
             include_retracted=include_retracted_bool,
+            date_from=df,
+            date_to=dt,
         )
     except Exception as exc:  # noqa: BLE001 - degrade quietly
         logger.warning("recall: ES kNN failed: %s", exc)
@@ -751,7 +830,7 @@ def recall(
     facts: list[RecallFact] = []
     for hit in hits:
         score = float(hit.get("_score") or 0.0)
-        if score < RECALL_SCORE_FLOOR:
+        if score < threshold:
             # Hits are sorted by score desc; first below-floor → stop.
             break
         fact = _hit_to_fact(hit)
@@ -767,19 +846,24 @@ def recall(
     # "SpaceX 검색 -> SpaceX 가 subject 든 object 든 등장하는 fact 전부".
     # Degrade quietly on any ES error — the embedding matches above
     # are already a complete answer.
-    entity_uids = _collect_entity_uids(facts)
-    already = {f.fact_uid for f in facts}
+    # B-50: skipped entirely when entity_link is disabled.
     expansion_count = 0
-    try:
-        link_hits = _entity_link_facts(
-            entity_uids, str(ks.id),
-            exclude_fact_uids=already,
-            max_hits=max(RECALL_MAX_K, limit * 5),
-            include_retracted=include_retracted_bool,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("recall: entity-link expansion failed: %s", exc)
-        link_hits = []
+    link_hits: list[dict[str, Any]] = []
+    if "entity_link" in enabled_kinds:
+        entity_uids = _collect_entity_uids(facts)
+        already = {f.fact_uid for f in facts}
+        try:
+            link_hits = _entity_link_facts(
+                entity_uids, str(ks.id),
+                exclude_fact_uids=already,
+                max_hits=max(RECALL_MAX_K, limit * 5),
+                include_retracted=include_retracted_bool,
+                date_from=df,
+                date_to=dt,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall: entity-link expansion failed: %s", exc)
+            link_hits = []
     for hit in link_hits:
         fact = _hit_to_fact(hit)
         if fact is None:

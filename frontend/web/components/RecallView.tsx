@@ -421,10 +421,195 @@ function sortFacts(facts: RecallFact[]): RecallFact[] {
   return [...facts].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
 
+// B-50: similarity-floor bounds for the slider — the backend accepts
+// [0,1] but the dev guidance is 0.5–0.9 (below 0.5 fires on orthogonal
+// embeddings; above 0.9 cuts most real matches).
+const SCORE_THRESHOLD_MIN = 0.5;
+const SCORE_THRESHOLD_MAX = 0.9;
+const SCORE_THRESHOLD_DEFAULT = 0.72;
+
+type MatchKind = 'embedding' | 'entity_link';
+
+interface SearchControlsState {
+  scoreThreshold: number;
+  dateFrom: string;  // 'YYYY-MM-DD' or ''
+  dateTo: string;
+  matchKinds: Record<MatchKind, boolean>;
+  keyword2: string;
+}
+
+const DEFAULT_CONTROLS: SearchControlsState = {
+  scoreThreshold: SCORE_THRESHOLD_DEFAULT,
+  dateFrom: '',
+  dateTo: '',
+  matchKinds: { embedding: true, entity_link: true },
+  keyword2: '',
+};
+
+function controlsToRecallOptions(
+  c: SearchControlsState, entity: string[],
+): { entity: string[]; scoreThreshold: number; dateFrom?: string; dateTo?: string; matchKinds: MatchKind[] } {
+  const kinds: MatchKind[] = [];
+  if (c.matchKinds.embedding) kinds.push('embedding');
+  if (c.matchKinds.entity_link) kinds.push('entity_link');
+  return {
+    entity,
+    scoreThreshold: c.scoreThreshold,
+    // Backend expects ISO 8601; the date input gives 'YYYY-MM-DD',
+    // which is a valid ISO 8601 calendar date. Pad to midnight UTC
+    // so the inclusive range covers the whole day on both sides.
+    dateFrom: c.dateFrom ? `${c.dateFrom}T00:00:00Z` : undefined,
+    dateTo: c.dateTo ? `${c.dateTo}T23:59:59Z` : undefined,
+    matchKinds: kinds,
+  };
+}
+
+interface SearchControlsPanelProps {
+  state: SearchControlsState;
+  onChange: (next: SearchControlsState) => void;
+}
+
+function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
+  return (
+    <aside
+      aria-label="search controls"
+      data-testid="search-controls"
+      className="hidden lg:block w-64 shrink-0 sticky top-4 self-start"
+    >
+      <h2 className="text-xxs uppercase tracking-wider text-text-muted mb-3 font-mono">
+        검색 컨트롤
+      </h2>
+
+      {/* Similarity threshold */}
+      <div className="mb-4">
+        <label className="flex justify-between items-baseline text-xs font-medium mb-1">
+          <span>유사도 임계값</span>
+          <span
+            data-testid="control-threshold-value"
+            className="font-mono text-xxs text-text-muted"
+          >
+            {state.scoreThreshold.toFixed(2)}
+          </span>
+        </label>
+        <input
+          type="range"
+          aria-label="similarity threshold"
+          data-testid="control-threshold-slider"
+          min={SCORE_THRESHOLD_MIN}
+          max={SCORE_THRESHOLD_MAX}
+          step={0.01}
+          value={state.scoreThreshold}
+          onChange={(e) =>
+            onChange({ ...state, scoreThreshold: parseFloat(e.target.value) })
+          }
+          className="w-full"
+        />
+        <p className="text-xxs text-text-muted font-mono mt-0.5">
+          {SCORE_THRESHOLD_MIN.toFixed(2)} – {SCORE_THRESHOLD_MAX.toFixed(2)}
+        </p>
+      </div>
+
+      {/* Date range */}
+      <div className="mb-4">
+        <h3 className="text-xs font-medium mb-1">검증 일자</h3>
+        <div className="flex flex-col gap-1">
+          <input
+            type="date"
+            aria-label="date from"
+            data-testid="control-date-from"
+            value={state.dateFrom}
+            onChange={(e) => onChange({ ...state, dateFrom: e.target.value })}
+            className="rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
+          />
+          <input
+            type="date"
+            aria-label="date to"
+            data-testid="control-date-to"
+            value={state.dateTo}
+            onChange={(e) => onChange({ ...state, dateTo: e.target.value })}
+            className="rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
+          />
+        </div>
+        {(state.dateFrom || state.dateTo) && (
+          <button
+            type="button"
+            data-testid="control-date-clear"
+            onClick={() => onChange({ ...state, dateFrom: '', dateTo: '' })}
+            className="text-xxs text-text-muted hover:text-text-primary font-mono underline mt-1"
+          >
+            일자 초기화
+          </button>
+        )}
+      </div>
+
+      {/* match_kind toggles */}
+      <div className="mb-4">
+        <h3 className="text-xs font-medium mb-1">매치 종류</h3>
+        <label
+          data-testid="control-match-embedding"
+          className="flex items-center gap-2 text-xs py-0.5"
+        >
+          <input
+            type="checkbox"
+            checked={state.matchKinds.embedding}
+            onChange={(e) =>
+              onChange({
+                ...state,
+                matchKinds: { ...state.matchKinds, embedding: e.target.checked },
+              })
+            }
+          />
+          <span>🔍 유사도</span>
+        </label>
+        <label
+          data-testid="control-match-entity-link"
+          className="flex items-center gap-2 text-xs py-0.5"
+        >
+          <input
+            type="checkbox"
+            checked={state.matchKinds.entity_link}
+            onChange={(e) =>
+              onChange({
+                ...state,
+                matchKinds: { ...state.matchKinds, entity_link: e.target.checked },
+              })
+            }
+          />
+          <span>🔗 엔티티 연결</span>
+        </label>
+      </div>
+
+      {/* 2nd-tier keyword — client-side filter on claim text */}
+      <div className="mb-4">
+        <label
+          className="text-xs font-medium block mb-1"
+          htmlFor="control-keyword2"
+        >
+          결과 내 키워드
+        </label>
+        <input
+          id="control-keyword2"
+          type="text"
+          aria-label="secondary keyword"
+          data-testid="control-keyword2"
+          value={state.keyword2}
+          onChange={(e) => onChange({ ...state, keyword2: e.target.value })}
+          placeholder="claim 부분일치"
+          className="w-full rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
+        />
+        <p className="text-xxs text-text-muted font-mono mt-0.5">
+          현재 결과만 필터 (서버 재검색 없음)
+        </p>
+      </div>
+    </aside>
+  );
+}
+
 export function RecallView({ spaceId }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [activeEntities, setActiveEntities] = useState<string[]>([]);
+  const [controls, setControls] = useState<SearchControlsState>(DEFAULT_CONTROLS);
   const [result, setResult] = useState<RecallResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -433,6 +618,16 @@ export function RecallView({ spaceId }: Props) {
     () => (result ? sortFacts(result.facts) : []),
     [result],
   );
+
+  // B-50 client-side keyword filter — agent picked client-side because
+  // the recall response caps at 50 facts (small) and the user's mental
+  // model is "narrow what I'm already looking at", which a round-trip
+  // wouldn't honour. Case-insensitive substring match on `claim`.
+  const visibleFacts = useMemo(() => {
+    const kw = controls.keyword2.trim().toLowerCase();
+    if (!kw) return sortedFacts;
+    return sortedFacts.filter((f) => f.claim.toLowerCase().includes(kw));
+  }, [sortedFacts, controls.keyword2]);
 
   // Build the "active filter chips" view: walk the current facets to
   // find the name + bucket for each active uid (the backend already
@@ -459,11 +654,16 @@ export function RecallView({ spaceId }: Props) {
     });
   }, [activeEntities, result]);
 
-  const runRecall = async (q: string, entities: string[]) => {
+  const runRecall = async (
+    q: string,
+    entities: string[],
+    overrideControls?: SearchControlsState,
+  ) => {
     setBusy(true);
     setError(null);
     try {
-      const r = await apiRecall(spaceId, q, { entity: entities });
+      const opts = controlsToRecallOptions(overrideControls ?? controls, entities);
+      const r = await apiRecall(spaceId, q, opts);
       setResult(r);
     } catch (err) {
       const detail =
@@ -511,15 +711,27 @@ export function RecallView({ spaceId }: Props) {
     void runRecall(submittedQuery, []);
   };
 
+  // B-50 controls dispatcher: every control change re-fires recall with
+  // the new payload (except keyword2, which is a pure client-side
+  // filter and never needs another round-trip). The recall fires
+  // BEFORE setControls returns so the test sees a single recall call
+  // tied to the change — no double-flush race.
+  const onControlsChange = (next: SearchControlsState) => {
+    const serverChanged =
+      next.scoreThreshold !== controls.scoreThreshold ||
+      next.dateFrom !== controls.dateFrom ||
+      next.dateTo !== controls.dateTo ||
+      next.matchKinds.embedding !== controls.matchKinds.embedding ||
+      next.matchKinds.entity_link !== controls.matchKinds.entity_link;
+    setControls(next);
+    if (serverChanged && submittedQuery) {
+      void runRecall(submittedQuery, activeEntities, next);
+    }
+  };
+
   return (
     <div className="flex gap-4 px-4 py-6 mx-auto max-w-7xl">
-      <aside
-        aria-label="search controls placeholder"
-        data-testid="left-rail-placeholder"
-        className="hidden lg:block w-48 shrink-0 sticky top-4 self-start text-xxs text-text-muted font-mono"
-      >
-        <p className="opacity-50">검색 컨트롤 (B-50)</p>
-      </aside>
+      <SearchControlsPanel state={controls} onChange={onControlsChange} />
 
       <main className="flex-1 min-w-0">
         <header className="mb-6">
@@ -575,14 +787,26 @@ export function RecallView({ spaceId }: Props) {
                   data-testid="recall-threshold-note"
                   className="text-xxs text-text-muted mb-4 font-mono"
                 >
-                  관련도 0.72 이상 매치만 표시 · 점수 내림차순 정렬
+                  관련도 {controls.scoreThreshold.toFixed(2)} 이상 매치만 표시 · 점수 내림차순 정렬
                   {result.expanded_count && result.expanded_count > 0
                     ? ` · 엔티티 연결로 추가된 ${result.expanded_count}건 포함`
                     : ''}
+                  {controls.keyword2.trim() && sortedFacts.length !== visibleFacts.length
+                    ? ` · 키워드 "${controls.keyword2.trim()}" 로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
+                    : ''}
                 </p>
-                {sortedFacts.map((f) => (
-                  <RecallFactCard key={f.fact_uid} fact={f} />
-                ))}
+                {visibleFacts.length === 0 ? (
+                  <p
+                    data-testid="recall-keyword-empty"
+                    className="text-sm text-text-muted py-4"
+                  >
+                    키워드 「{controls.keyword2.trim()}」 와 일치하는 결과가 없습니다.
+                  </p>
+                ) : (
+                  visibleFacts.map((f) => (
+                    <RecallFactCard key={f.fact_uid} fact={f} />
+                  ))
+                )}
               </>
             )}
           </section>
