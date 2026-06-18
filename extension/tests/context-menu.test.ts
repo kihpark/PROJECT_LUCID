@@ -319,7 +319,7 @@ describe('context-menu click — non-page items (regression)', () => {
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
   });
 
-  it('surfaces a toast error when the image fetch fails', async () => {
+  it('surfaces a toast error when the image fetch fails AND page-context fetch also fails', async () => {
     stubAuth();
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url === 'https://example.com/missing.png') {
@@ -328,6 +328,12 @@ describe('context-menu click — non-page items (regression)', () => {
       return { ok: true, json: async () => ({}) };
     });
     vi.stubGlobal('fetch', fetchMock);
+    // Page-context fallback also fails — the page can't reach the
+    // image either. Forces the honest-failure path.
+    chrome.scripting.executeScript.mockResolvedValue([{
+      result: { ok: false, error: 'page HTTP 403' },
+      frameId: 0, documentId: 'x',
+    }]);
 
     await handleContextMenuClick(
       {
@@ -338,7 +344,7 @@ describe('context-menu click — non-page items (regression)', () => {
       { id: 21, url: 'https://example.com/page' } as chrome.tabs.Tab,
     );
 
-    // Capture POST was never made.
+    // Capture POST was never made — only the SW image fetch happened.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
       21,
@@ -347,5 +353,125 @@ describe('context-menu click — non-page items (regression)', () => {
         status: 'capture_failed',
       }),
     );
+    // ★ The toast carries an honest reason — NOT "[object Object]".
+    const sendCall = chrome.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { status?: string }).status === 'capture_failed',
+    );
+    const msg = (sendCall![1] as { error: string }).error;
+    expect(msg).not.toMatch(/\[object Object\]/);
+    expect(msg).toMatch(/직접 저장할 수 없습니다|HTTP 404|page HTTP 403/);
+  });
+
+  // B-45-fix: blob: URLs (Threads video frames, IG carousels) cannot
+  // be fetched from the SW; the page-context fallback is the only path
+  // that works. Cover that explicitly.
+  it('★ blob: URL falls back to page-context fetch and succeeds', async () => {
+    stubAuth();
+    const realPng = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xab, 0xcd,
+    ]);
+    const b64 = btoa(String.fromCharCode(...realPng));
+    chrome.scripting.executeScript.mockResolvedValue([{
+      result: { ok: true, b64 },
+      frameId: 0, documentId: 'x',
+    }]);
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      // Capture POST only — the blob: URL never goes through SW fetch.
+      if (url === 'http://localhost:8000/api/capture') {
+        return {
+          ok: true,
+          json: async () => ({
+            job_id: 'job-blob-1',
+            status_url: '/api/jobs/job-blob-1',
+            status: 'pending_extract',
+          }),
+        };
+      }
+      throw new Error('SW should not fetch the blob: URL directly');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.image,
+        srcUrl: 'blob:https://threads.com/abc-def',
+        pageUrl: 'https://threads.com/post/123',
+      } as chrome.contextMenus.OnClickData,
+      { id: 42, url: 'https://threads.com/post/123' } as chrome.tabs.Tab,
+    );
+
+    // executeScript ran in page context for the blob: URL.
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 42 },
+        args: ['blob:https://threads.com/abc-def'],
+      }),
+    );
+    const captureCall = fetchMock.mock.calls.find(
+      (c: unknown[]) => c[0] === 'http://localhost:8000/api/capture',
+    );
+    expect(captureCall).toBeTruthy();
+    const captureBody = JSON.parse(
+      (captureCall![1] as { body: string }).body,
+    );
+    expect(captureBody.source_type).toBe('page_image');
+    // Non-durable blob: URL was swapped for the page URL.
+    expect(captureBody.source_url).toBe('https://threads.com/post/123');
+    expect(captureBody.client_metadata.image_src_url).toBe(
+      'blob:https://threads.com/abc-def',
+    );
+    const decoded = Uint8Array.from(
+      atob(captureBody.raw_payload_b64), (c) => c.charCodeAt(0),
+    );
+    expect(Array.from(decoded.slice(0, 8))).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ type: 'show_toast', job_id: 'job-blob-1' }),
+    );
+  });
+
+  // B-45-fix regression: when a non-Error is thrown (e.g. plain
+  // object rejection), the toast must NOT render "undefined" or
+  // "[object Object]".
+  it('★ non-Error rejection from postCapture renders a real string', async () => {
+    stubAuth();
+    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === 'https://example.com/x.png') {
+        return { ok: true, arrayBuffer: async () => imageBytes.buffer };
+      }
+      // Backend returns a Pydantic 422 array → postCapture throws
+      // an Error with a real message string (no [object Object]).
+      return {
+        ok: false,
+        status: 422,
+        json: async () => ({
+          detail: [{
+            type: 'value_error',
+            loc: ['body', 'raw_payload_b64'],
+            msg: 'Value error, raw_payload_b64_invalid',
+          }],
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.image,
+        srcUrl: 'https://example.com/x.png',
+        pageUrl: 'https://example.com/p',
+      } as chrome.contextMenus.OnClickData,
+      { id: 99, url: 'https://example.com/p' } as chrome.tabs.Tab,
+    );
+    const sendCall = chrome.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { status?: string }).status === 'capture_failed',
+    );
+    const msg = (sendCall![1] as { error: string }).error;
+    expect(msg).not.toMatch(/\[object Object\]/);
+    expect(msg).not.toMatch(/^undefined$/);
+    expect(msg).toContain('raw_payload_b64_invalid');
   });
 });

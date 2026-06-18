@@ -213,6 +213,20 @@ type ImagePayloadOutcome =
  * `SourceJob.raw_payload` (B-48 snapshot layer) and forwarded to
  * the vision extractor (B-45 image extractor) which transcribes
  * them into claim text for the existing Structure pipeline.
+ *
+ * B-45-fix: many sources can't be reached from the service worker:
+ *   - `blob:` URLs live in the originating page's process; fetch
+ *     from the SW throws TypeError.
+ *   - `data:` URLs work in the SW but we want to avoid the parser
+ *     edge cases.
+ *   - CDN images on auth-walled hosts (Instagram, Threads) return
+ *     403 to anonymous SW requests but succeed when fetched from
+ *     the page that already holds the session cookie.
+ * The fallback is a content-script-context fetch via
+ * `chrome.scripting.executeScript` — the page sees the same image
+ * the user does and can read it. If THAT also fails the user gets
+ * an honest reason ("이 미디어는 직접 저장할 수 없습니다 — 스크린샷
+ * 후 저장 권장.") instead of a "[object Object]" lie.
  */
 export async function buildImagePayload(
   info: chrome.contextMenus.OnClickData,
@@ -220,30 +234,48 @@ export async function buildImagePayload(
 ): Promise<ImagePayloadOutcome | null> {
   const srcUrl = info.srcUrl ?? '';
   if (!srcUrl) return null;
-  if (!isCapturableUrl(srcUrl)) {
-    return {
-      ok: false,
-      error: 'This image cannot be saved (non-http source).',
-    };
+
+  const tabId = tab?.id;
+  const lower = srcUrl.toLowerCase();
+  const isBlob = lower.startsWith('blob:');
+  const isData = lower.startsWith('data:');
+  // Path 1: SW-context fetch — works for plain http(s) on
+  // anonymous-allowed origins.
+  let bytes: Uint8Array | null = null;
+  let firstError = '';
+  if (!isBlob && isCapturableUrl(srcUrl)) {
+    try {
+      const resp = await fetch(srcUrl, { credentials: 'omit' });
+      if (resp.ok) {
+        bytes = new Uint8Array(await resp.arrayBuffer());
+      } else {
+        firstError = `HTTP ${resp.status}`;
+      }
+    } catch (err) {
+      firstError = err instanceof Error ? err.message : 'fetch failed';
+    }
   }
 
-  let bytes: Uint8Array;
-  try {
-    const resp = await fetch(srcUrl, { credentials: 'omit' });
-    if (!resp.ok) {
-      return {
-        ok: false,
-        error: `Could not fetch image (HTTP ${resp.status}).`,
-      };
+  // Path 2: page-context fetch — the only way to read `blob:` URLs
+  // and auth-walled CDN images.
+  if (bytes === null && tabId !== undefined && (isBlob || isData || firstError)) {
+    const fallback = await fetchImageInPageContext(tabId, srcUrl);
+    if (fallback.ok) {
+      bytes = fallback.bytes;
+    } else if (!firstError) {
+      firstError = fallback.error;
+    } else {
+      firstError = `${firstError}; page-context: ${fallback.error}`;
     }
-    const buf = await resp.arrayBuffer();
-    bytes = new Uint8Array(buf);
-  } catch (err) {
+  }
+
+  if (bytes === null) {
     return {
       ok: false,
       error:
-        'Could not fetch the image. '
-        + (err instanceof Error ? err.message : 'unknown error'),
+        '이 미디어는 직접 저장할 수 없습니다 — 화면에 보이는 영역을 '
+        + '스크린샷 한 뒤 "Save image to Lucid" 로 시도하세요. '
+        + `(reason: ${firstError || 'unfetchable'})`,
     };
   }
 
@@ -261,16 +293,84 @@ export async function buildImagePayload(
   return {
     ok: true,
     payload: {
-      source_url: srcUrl,
+      // blob:/data: URLs are not durable. Fall back to the page URL
+      // as the canonical source so dedup + the Detail panel link
+      // both still work.
+      source_url: isBlob || isData ? (info.pageUrl ?? tab?.url ?? srcUrl) : srcUrl,
       source_type: 'page_image',
       captured_from: 'chrome_ext',
       raw_payload_b64: bytesToBase64(bytes),
       client_metadata: {
         source_page_url: info.pageUrl ?? tab?.url ?? '',
+        image_src_url: srcUrl,
         image_byte_count: String(bytes.byteLength),
       },
     },
   };
+}
+
+/**
+ * Run a fetch in the page's content-script context so we can reach
+ * `blob:` URLs and auth-walled CDN images. The page returns a base64
+ * payload; we decode it in the SW because Uint8Array doesn't survive
+ * `chrome.scripting.executeScript`'s structured clone in every
+ * Chrome build.
+ */
+async function fetchImageInPageContext(
+  tabId: number, srcUrl: string,
+): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string }> {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (url: string) => {
+        try {
+          const r = await fetch(url, { credentials: 'include' });
+          if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+          const blob = await r.blob();
+          const reader = new FileReader();
+          const b64 = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => {
+              const result = reader.result as string;
+              // result = "data:<mime>;base64,<b64>"
+              const comma = result.indexOf(',');
+              resolve(comma >= 0 ? result.slice(comma + 1) : '');
+            };
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+          return { ok: true, b64 };
+        } catch (err) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : 'page fetch failed',
+          };
+        }
+      },
+      args: [srcUrl],
+    });
+    const first = results?.[0]?.result as
+      | { ok: true; b64: string }
+      | { ok: false; error: string }
+      | undefined;
+    if (!first) return { ok: false, error: 'no page response' };
+    if (!first.ok) return { ok: false, error: first.error };
+    try {
+      const binary = atob(first.b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return { ok: true, bytes };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'base64 decode failed',
+      };
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'scripting failed',
+    };
+  }
 }
 
 export function installContextMenus(): void {
@@ -362,9 +462,33 @@ export async function handleContextMenuClick(
     await notifyTab(tabId, {
       type: 'show_toast',
       status: 'capture_failed',
-      error: (err as Error).message,
+      error: errorToMessage(err),
     });
   }
+}
+
+/**
+ * B-45-fix: derive a readable error string from anything thrown.
+ * Pre-fix path was `(err as Error).message` which produced
+ * `undefined` for non-Error rejections (e.g. `throw 'oops'`,
+ * `throw {detail:[...]}`) and the toast then rendered
+ * "Save failed undefined" — only marginally better than
+ * "[object Object]".
+ */
+function errorToMessage(err: unknown): string {
+  if (err === null || err === undefined) return 'unknown error';
+  if (err instanceof Error) {
+    return err.message || err.name || 'error';
+  }
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return 'unknown error';
+    }
+  }
+  return String(err);
 }
 
 export function installContextMenuListener(): void {

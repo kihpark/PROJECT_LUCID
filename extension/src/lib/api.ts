@@ -23,6 +23,44 @@ export interface CaptureResponse {
   status: string;
 }
 
+/**
+ * B-45-fix: render a backend error body into a single readable line
+ * regardless of its shape.
+ *
+ * Cases observed in production:
+ *   - {detail: "not_authenticated"}              (string)
+ *   - {detail: [{loc:[...], msg:"...", type:..}]} (Pydantic 422 array)
+ *   - {detail: {something:"...", ...}}            (arbitrary object)
+ *
+ * The pre-fix code did `String(body.detail)` which on the 422 array
+ * shape rendered "[object Object]" — utterly useless to the user.
+ */
+export function describeApiError(body: unknown, fallback: string): string {
+  if (body === null || body === undefined) return fallback;
+  if (typeof body === 'string') return body;
+  if (typeof body !== 'object') return String(body);
+  const detail = (body as { detail?: unknown }).detail;
+  if (detail === undefined || detail === null) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    // Pydantic 422: each entry has `msg` + `loc`. Render the first
+    // (most-actionable) one with its location path.
+    const first = detail[0] as { msg?: string; loc?: unknown[] } | undefined;
+    if (first && typeof first === 'object') {
+      const msg = typeof first.msg === 'string' ? first.msg : JSON.stringify(first);
+      const loc = Array.isArray(first.loc) ? first.loc.join('.') : '';
+      return loc ? `${msg} (${loc})` : msg;
+    }
+  }
+  // Any other object — JSON.stringify is the honest fallback. Better
+  // a noisy line than the silent "[object Object]" misdirection.
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return fallback;
+  }
+}
+
 export async function postCapture(
   payload: CaptureRequest,
 ): Promise<CaptureResponse> {
@@ -41,12 +79,13 @@ export async function postCapture(
     body: JSON.stringify(payload),
   });
   if (!resp.ok) {
-    let detail = `HTTP ${resp.status}`;
+    const fallback = `HTTP ${resp.status}`;
+    let detail = fallback;
     try {
       const body = await resp.json();
-      if (body?.detail) detail = String(body.detail);
+      detail = describeApiError(body, fallback);
     } catch {
-      // ignore
+      // JSON body unavailable; keep the HTTP status as the message.
     }
     throw new Error(detail);
   }
