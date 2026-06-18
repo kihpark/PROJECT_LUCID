@@ -1,6 +1,7 @@
 """Unit tests for api.structure.processor (PR-3-2 D)."""
 from __future__ import annotations
 
+import re
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +15,13 @@ from api.structure.models import (
 )
 from api.structure.object_matcher import MatchResult
 from api.structure.processor import process_extracted_job
+
+# B-48a: shape check for canonical UUID4 fact_uids emitted by the
+# processor's fact_uid remap.
+_UUID4_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 KS = "ks-proc-test"
 
@@ -232,7 +240,12 @@ def test_processor_persists_facts_content():
 
     s = job.extracted_metadata["structure"]
     assert len(s["facts"]) == 3
-    for i, fact in enumerate(s["facts"], start=1):
+    # B-48a: fact_uid is now a canonical UUID4 (LLM placeholder fn-N
+    # is remapped at structure time so multi-job submits don't
+    # collide on ES doc id). Both `fact_uid` and `uid` carry the
+    # canonical value; they must be distinct UUID4s per fact.
+    seen_uids: set[str] = set()
+    for _i, fact in enumerate(s["facts"], start=1):
         # by_alias resolves type_ -> type
         assert fact["type"] == "proposition"
         assert fact["claim"].startswith("Claim ")
@@ -243,10 +256,11 @@ def test_processor_persists_facts_content():
         # with this one.
         assert fact["subject_uid"] == "obj-X"
         assert fact["predicate"] == "has_property"
-        assert fact["fact_uid"] == f"fn-{i}"
-        # The original Pydantic field also lands so the route's
-        # `facts.uid` fallback keeps working.
-        assert fact["uid"] == f"fn-{i}"
+        # B-48a: canonical UUID4 (not "fn-N"). uid == fact_uid.
+        assert _UUID4_RE.match(fact["fact_uid"])
+        assert fact["uid"] == fact["fact_uid"]
+        assert fact["fact_uid"] not in seen_uids
+        seen_uids.add(fact["fact_uid"])
 
 
 def test_processor_persists_objects_with_class_alias():
@@ -311,7 +325,12 @@ def test_processor_persists_links_detail():
     assert len(s["fact_object_links_detail"]) == 1
     link = s["fact_object_links_detail"][0]
     assert link["link_type"] == "involves"
-    assert link["fact_uid"] == "fn-1"
+    # B-48a: fact_uid on the link is the canonical UUID4 too (the
+    # same map that rewrote facts.fact_uid rewrote this), and must
+    # match the fact's fact_uid so the join still works downstream.
+    fact_uid = s["facts"][0]["fact_uid"]
+    assert _UUID4_RE.match(link["fact_uid"])
+    assert link["fact_uid"] == fact_uid
     # Object uid is remapped via uid_map to the matched_object_uid.
     assert link["object_uid"] == "obj-X"
     # fact_fact_links is empty in _make_decomp by default.

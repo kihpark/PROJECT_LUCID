@@ -5,6 +5,8 @@ import { getToken, clearToken } from './auth';
 import type {
   DecideRequest,
   DecideResponse,
+  FactDetailResponse,
+  FactMutationResponse,
   GraphNote,
   KnowledgeSpacePublic,
   LoginRequest,
@@ -168,10 +170,22 @@ export function deleteNote(
   );
 }
 
+export interface RecallOptions {
+  limit?: number;
+  entity?: string[];
+  // B-50 controls — all additive; omitting any preserves prior behaviour.
+  scoreThreshold?: number;
+  dateFrom?: string;  // ISO 8601
+  dateTo?: string;    // ISO 8601
+  // B-50-fix (PO A direction): matchKinds is a display-side filter
+  // only. The recall API does NOT receive it — embedding is always
+  // the seed; entity-link expansion always runs.
+}
+
 export function recall(
   spaceId: string,
   q: string,
-  options: { limit?: number; entity?: string[] } = {},
+  options: RecallOptions = {},
 ): Promise<RecallResponse> {
   const params = new URLSearchParams();
   params.set('q', q);
@@ -179,7 +193,55 @@ export function recall(
   for (const uid of options.entity ?? []) {
     params.append('entity', uid);
   }
+  if (options.scoreThreshold !== undefined) {
+    params.set('score_threshold', String(options.scoreThreshold));
+  }
+  if (options.dateFrom) {
+    params.set('date_from', options.dateFrom);
+  }
+  if (options.dateTo) {
+    params.set('date_to', options.dateTo);
+  }
   return request<RecallResponse>(
     `/api/spaces/${spaceId}/recall?${params.toString()}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B-48b — fact detail + retract / restore / detach-source
+// ---------------------------------------------------------------------------
+
+export function getFactDetail(
+  spaceId: string, factUid: string,
+): Promise<FactDetailResponse> {
+  return request<FactDetailResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}`,
+  );
+}
+
+export function retractFact(
+  spaceId: string, factUid: string,
+): Promise<FactMutationResponse> {
+  return request<FactMutationResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/retract`,
+    { method: 'POST' },
+  );
+}
+
+export function restoreFact(
+  spaceId: string, factUid: string,
+): Promise<FactMutationResponse> {
+  return request<FactMutationResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/restore`,
+    { method: 'POST' },
+  );
+}
+
+export function detachSource(
+  spaceId: string, factUid: string, sourceUid: string,
+): Promise<FactMutationResponse> {
+  return request<FactMutationResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/detach-source`,
+    { method: 'POST', body: JSON.stringify({ source_uid: sourceUid }) },
   );
 }

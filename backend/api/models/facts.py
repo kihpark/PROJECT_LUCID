@@ -23,9 +23,33 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from api.models.base import UID, LucidBaseModel, utc_now
+
+
+class Locator(LucidBaseModel):
+    """Where this fact was extracted from inside the source.
+
+    B-48a Phase 1 leaves the list empty; Phase 2 will fill `char_start`,
+    `char_end`, `quote` so the UI can highlight the supporting span,
+    and Phase 3 adds image/video locator variants under the same
+    discriminator.
+
+    `extra='ignore'` because future variants will introduce fields
+    that older readers should silently drop.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore", validate_assignment=True, populate_by_name=True,
+        str_strip_whitespace=True,
+    )
+
+    kind: Literal["text", "image", "video"] = "text"
+    source_uid: UID
+    char_start: int | None = None
+    char_end: int | None = None
+    quote: str | None = None
 
 
 class FactType(StrEnum):
@@ -112,3 +136,9 @@ class FactNode(LucidBaseModel):
     knowledge_space_id: UID
     negation_flag: bool = False
     negation_scope: Literal["full", "partial"] | None = None
+    # B-48a soft-delete scaffold (UI in B-48b). retracted_at set means
+    # recall hides this fact by default; retracted_by is the actor uid.
+    retracted_at: datetime | None = None
+    retracted_by: UID | None = None
+    # B-48a locator scaffold. Empty in Phase 1; Phase 2 fills.
+    locators: list[Locator] = Field(default_factory=list)

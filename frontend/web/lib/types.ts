@@ -237,3 +237,56 @@ export interface RecallResponse {
   // B-49: aggregations for the right-rail facet panel.
   facets?: RecallFacets;
 }
+
+// ---------------------------------------------------------------------------
+// B-48b — fact detail panel
+// ---------------------------------------------------------------------------
+
+export interface FactDetailHeader {
+  fact_uid: string;
+  claim: string;
+  claim_en?: string | null;
+  subject_uid: string;
+  subject_label?: string | null;
+  predicate: string;
+  object_value: string;
+  object_label?: string | null;
+  validated_at: string;
+  retracted_at?: string | null;
+  retracted_by?: string | null;
+  edit_history?: unknown[];
+}
+
+export interface FactDetailEntity {
+  uid: string;
+  name: string;
+  name_en?: string | null;
+  class?: string | null;
+  role: 'subject' | 'object';
+  aliases?: string[];
+}
+
+export interface FactDetailSource {
+  source_uid: string;
+  source_job_id?: string | null;
+  url: string;
+  domain?: string | null;
+  captured_at?: string | null;
+  source_type?: string | null;
+  author?: string | null;
+  title?: string | null;
+  snapshot_available?: boolean;
+}
+
+export interface FactDetailResponse {
+  fact: FactDetailHeader;
+  entities: FactDetailEntity[];
+  sources: FactDetailSource[];
+}
+
+export interface FactMutationResponse {
+  fact_uid: string;
+  retracted_at: string | null;
+  source_uids: string[];
+  auto_retracted: boolean;
+}

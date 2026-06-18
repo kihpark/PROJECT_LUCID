@@ -5,6 +5,11 @@ import type { RecallResponse } from '@/lib/types';
 
 vi.mock('@/lib/api', () => ({
   recall: vi.fn(),
+  // B-48b detail panel + retract/restore/detach
+  getFactDetail: vi.fn(),
+  retractFact: vi.fn(),
+  restoreFact: vi.fn(),
+  detachSource: vi.fn(),
   ApiError: class extends Error {
     status = 0;
     detail: string | undefined;
@@ -489,7 +494,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     const secondCall = (api.recall as ReturnType<typeof vi.fn>).mock.calls[1];
     expect(secondCall[0]).toBe('ks-1');
     expect(secondCall[1]).toBe('SpaceX');
-    expect(secondCall[2]).toEqual({ entity: ['uid-spacex'] });
+    expect(secondCall[2]).toEqual(expect.objectContaining({ entity: ['uid-spacex'] }));
   });
 
   it('renders an active filter chip after drill-down + removes on ✕', async () => {
@@ -511,7 +516,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     fireEvent.click(screen.getByTestId('filter-chip-uid-goldman-remove'));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual({ entity: [] });
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual(expect.objectContaining({ entity: [] }));
   });
 
   it('"모두 지우기" wipes the entity filter array', async () => {
@@ -532,7 +537,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     fireEvent.click(screen.getByTestId('filter-clear-all'));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(4));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[3][2]).toEqual({ entity: [] });
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[3][2]).toEqual(expect.objectContaining({ entity: [] }));
     expect(screen.queryByTestId('active-filter-chips')).toBeNull();
   });
 
@@ -546,11 +551,504 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2]).toEqual({ entity: ['uid-spacex'] });
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2]).toEqual(expect.objectContaining({ entity: ['uid-spacex'] }));
 
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual({ entity: [] });
+    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2]).toEqual(expect.objectContaining({ entity: [] }));
+  });
+});
+
+describe('RecallView — left search controls (B-50)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // ★ helper: render + run an initial recall so the controls have a
+  // submittedQuery to attach to. Subsequent control changes will
+  // re-fire recall against that query.
+  async function bootstrap() {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+    // B-50-fix: initial call carries default controls. `matchKinds`
+    // is intentionally absent — embedding is the search mode and
+    // entity-link expansion always runs server-side.
+    const firstOpts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[0][2];
+    expect(firstOpts).toEqual(
+      expect.objectContaining({
+        entity: [],
+        scoreThreshold: 0.72,
+      }),
+    );
+    expect(firstOpts).not.toHaveProperty('matchKinds');
+  }
+
+  it('renders the four control groups in the left rail', async () => {
+    await bootstrap();
+    expect(screen.getByTestId('search-controls')).toBeInTheDocument();
+    expect(screen.getByTestId('control-threshold-slider')).toBeInTheDocument();
+    expect(screen.getByTestId('control-date-from')).toBeInTheDocument();
+    expect(screen.getByTestId('control-date-to')).toBeInTheDocument();
+    expect(screen.getByTestId('control-match-embedding')).toBeInTheDocument();
+    expect(screen.getByTestId('control-match-entity-link')).toBeInTheDocument();
+    expect(screen.getByTestId('control-keyword2')).toBeInTheDocument();
+    // ★ default threshold value rendered next to the slider
+    expect(screen.getByTestId('control-threshold-value')).toHaveTextContent('0.72');
+  });
+
+  it('★ similarity slider change re-fires recall with score_threshold', async () => {
+    await bootstrap();
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    fireEvent.change(screen.getByTestId('control-threshold-slider'), {
+      target: { value: '0.85' },
+    });
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+    const opts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2];
+    expect(opts.scoreThreshold).toBeCloseTo(0.85, 2);
+    // and the rendered value updates in step
+    expect(screen.getByTestId('control-threshold-value')).toHaveTextContent('0.85');
+  });
+
+  it('★ date range change re-fires recall with date_from/date_to ISO', async () => {
+    await bootstrap();
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    fireEvent.change(screen.getByTestId('control-date-from'), {
+      target: { value: '2026-01-01' },
+    });
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    fireEvent.change(screen.getByTestId('control-date-to'), {
+      target: { value: '2026-12-31' },
+    });
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
+    const opts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2];
+    // start-of-day on date_from, end-of-day on date_to — inclusive window
+    expect(opts.dateFrom).toBe('2026-01-01T00:00:00Z');
+    expect(opts.dateTo).toBe('2026-12-31T23:59:59Z');
+  });
+
+  it('★ 유사도 체크박스는 검색 모드라 항상 켜져 있고 비활성화', async () => {
+    await bootstrap();
+    const embeddingCheckbox = screen.getByTestId(
+      'control-match-embedding-checkbox',
+    ) as HTMLInputElement;
+    expect(embeddingCheckbox).toBeDisabled();
+    expect(embeddingCheckbox.checked).toBe(true);
+  });
+
+  it('★ 🔗 엔티티 연결 토글은 클라이언트 표시 필터 (재검색 안 함)', async () => {
+    // Hand-craft a hit with one embedding + one entity_link fact so we
+    // can prove the latter disappears from the rendered list when the
+    // toggle is off — without any second recall round-trip.
+    const MIXED: RecallResponse = {
+      signature: 'As far as I know — 그래프에 2개 검증 사실이 있습니다',
+      total: 2,
+      facts: [
+        {
+          fact_uid: 'fn-emb',
+          claim: '한국은행 기준금리는 3.0%였다.',
+          claim_en: null,
+          subject_uid: 'uid-bok',
+          predicate: 'base_rate',
+          object_value: '3.0%',
+          source_uids: [],
+          validated_at: new Date('2026-06-01T10:00:00Z').toISOString(),
+          validator_id: 'u',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.92,
+          match_kind: 'embedding',
+        },
+        {
+          fact_uid: 'fn-link',
+          claim: 'BOK governor announced the decision.',
+          claim_en: null,
+          subject_uid: 'uid-gov',
+          predicate: 'announced',
+          object_value: 'rate decision',
+          source_uids: [],
+          validated_at: new Date('2026-06-02T10:00:00Z').toISOString(),
+          validator_id: 'u',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.0,
+          match_kind: 'entity_link',
+        },
+      ],
+    };
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'BoK' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    // Both rendered initially.
+    expect(screen.getByTestId('recall-fact-fn-emb')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-fn-link')).toBeInTheDocument();
+
+    // Toggle off — the entity-link row disappears WITHOUT any
+    // additional API call.
+    fireEvent.click(screen.getByTestId('control-match-entity-link-checkbox'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('recall-fact-fn-link')).toBeNull(),
+    );
+    expect(screen.getByTestId('recall-fact-fn-emb')).toBeInTheDocument();
+    expect(api.recall).toHaveBeenCalledTimes(1);
+
+    // Toggle back on — the row returns, still no extra call.
+    fireEvent.click(screen.getByTestId('control-match-entity-link-checkbox'));
+    expect(screen.getByTestId('recall-fact-fn-link')).toBeInTheDocument();
+    expect(api.recall).toHaveBeenCalledTimes(1);
+  });
+
+  it('★ secondary keyword filters in-result without a second recall call', async () => {
+    await bootstrap();
+    // After the initial recall, BOTH RECALL_HIT facts are rendered.
+    expect(screen.getByTestId('recall-fact-fn-1')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-fn-2')).toBeInTheDocument();
+
+    // Typing a keyword that matches only fn-1 hides fn-2 — no API call.
+    fireEvent.change(screen.getByTestId('control-keyword2'), {
+      target: { value: '기준금리' },
+    });
+    await waitFor(() =>
+      expect(screen.queryByTestId('recall-fact-fn-2')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('recall-fact-fn-1')).toBeInTheDocument();
+    // Still exactly one call (the initial recall).
+    expect(api.recall).toHaveBeenCalledTimes(1);
+  });
+
+  it('★ secondary keyword that matches nothing shows the empty hint', async () => {
+    await bootstrap();
+    fireEvent.change(screen.getByTestId('control-keyword2'), {
+      target: { value: 'zzz-no-such-claim' },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('recall-keyword-empty')).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('recall-fact-fn-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('recall-fact-fn-2')).not.toBeInTheDocument();
+  });
+
+  it('★ control changes preserve the active entity filter (AND combine)', async () => {
+    // Use a self-contained faceted response so a drill-down chip can
+    // be applied; the goal is to prove the entity filter survives a
+    // later control change (AND-combine, not OR/reset).
+    const FACETED: RecallResponse = {
+      signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
+      total: 1,
+      facts: [{
+        fact_uid: 'fn-a', claim: 'SpaceX raised 85.7B USD.', claim_en: null,
+        subject_uid: 'uid-spacex', subject_label: 'SpaceX',
+        predicate: 'total_funds_raised',
+        object_value: '85.7 billion USD', object_label: null,
+        source_uids: [], validated_at: new Date('2026-06-15T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.91, match_kind: 'embedding',
+      }],
+      facets: {
+        entities: {
+          organization: [{ uid: 'uid-spacex', name: 'SpaceX', count: 1 }],
+          person: [], place: [], other: [],
+        },
+        predicates: [{ name: 'total_funds_raised', count: 1 }],
+      },
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    // Drill into uid-spacex
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.click(await screen.findByTestId('facet-entity-uid-spacex'));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
+
+    // Now change the threshold — entity filter MUST survive
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
+    fireEvent.change(screen.getByTestId('control-threshold-slider'), {
+      target: { value: '0.80' },
+    });
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
+    const opts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[2][2];
+    expect(opts).toEqual(
+      expect.objectContaining({
+        entity: ['uid-spacex'],
+        scoreThreshold: 0.8,
+      }),
+    );
+  });
+});
+
+
+describe('RecallView — fact detail panel (B-48b)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const detailWithTwoSources = {
+    fact: {
+      fact_uid: 'fn-1',
+      claim: '한국은행 기준금리는 2024년 12월 기준 3.0%였다.',
+      claim_en: null,
+      subject_uid: 'uid-bok',
+      subject_label: '한국은행',
+      predicate: 'base_rate',
+      object_value: '3.0%',
+      object_label: null,
+      validated_at: '2026-06-01T10:00:00Z',
+      retracted_at: null,
+      retracted_by: null,
+      edit_history: [],
+    },
+    entities: [
+      { uid: 'uid-bok', name: '한국은행', class: 'organization', role: 'subject', aliases: [] },
+    ],
+    sources: [
+      {
+        source_uid: 'src-A',
+        source_job_id: 'job-A',
+        url: 'https://hankyung.com/a/1',
+        domain: 'hankyung.com',
+        captured_at: '2026-05-28T10:00:00Z',
+        source_type: 'web_article',
+        snapshot_available: true,
+      },
+      {
+        source_uid: 'src-B',
+        source_job_id: 'job-B',
+        url: 'https://yna.co.kr/b/2',
+        domain: 'yna.co.kr',
+        captured_at: '2026-05-30T10:00:00Z',
+        source_type: 'web_article',
+        snapshot_available: false,
+      },
+    ],
+  };
+
+  async function bootstrap() {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'BoK' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+  }
+
+  it('★ clicking a fact card opens the detail modal with sources + trust badge', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    // B-48c: facet panel stays visible always; modal opens on top.
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('fact-detail-modal')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await waitFor(() => expect(api.getFactDetail).toHaveBeenCalledWith('ks-1', 'fn-1'));
+
+    // Modal renders ABOVE the facet panel — the facet stays mounted
+    // so the user's drill-down state is never thrown away.
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+    const modal = await screen.findByTestId('fact-detail-modal');
+    expect(modal).toBeInTheDocument();
+    expect(modal).toHaveAttribute('role', 'dialog');
+    expect(modal).toHaveAttribute('aria-modal', 'true');
+    expect(screen.getByTestId('fact-detail-claim')).toHaveTextContent('한국은행 기준금리');
+    // ★ both sources listed with their domains
+    expect(screen.getByTestId('fact-detail-source-src-A')).toHaveTextContent('hankyung.com');
+    expect(screen.getByTestId('fact-detail-source-src-B')).toHaveTextContent('yna.co.kr');
+    // ★ trust badge surfaces for ≥2 sources
+    expect(screen.getByTestId('fact-detail-trust-badge')).toBeInTheDocument();
+  });
+
+  it('★ X 닫기 버튼은 모달만 닫고 facet 패널은 그대로', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+
+    fireEvent.click(screen.getByTestId('fact-detail-close'));
+    expect(screen.queryByTestId('fact-detail-modal')).toBeNull();
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+  });
+
+  it('★ ESC 키로 모달 닫기', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByTestId('fact-detail-modal')).toBeNull(),
+    );
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+  });
+
+  it('★ 바깥 클릭(backdrop)으로 모달 닫기', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    const modal = await screen.findByTestId('fact-detail-modal');
+
+    // Click the backdrop itself (the overlay div, not its content).
+    fireEvent.click(modal);
+    expect(screen.queryByTestId('fact-detail-modal')).toBeNull();
+  });
+
+  it('모달 내용을 클릭해도 닫히지 않는다', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+
+    // Click the inner content — it bubbles to the backdrop but the
+    // close handler only fires when target === currentTarget.
+    fireEvent.click(screen.getByTestId('fact-detail-modal-content'));
+    expect(screen.queryByTestId('fact-detail-modal')).toBeInTheDocument();
+  });
+
+  it('★ "이 출처만 떼기" calls detachSource and refreshes', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+
+    // After detach, the refresh fetches a body with one fewer source.
+    const afterDetach = {
+      ...detailWithTwoSources,
+      sources: [detailWithTwoSources.sources[1]],
+    };
+    (api.detachSource as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact_uid: 'fn-1', retracted_at: null,
+      source_uids: ['src-B'], auto_retracted: false,
+    });
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(afterDetach);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+
+    fireEvent.click(screen.getByTestId('fact-detail-detach-src-A'));
+    await waitFor(() =>
+      expect(api.detachSource).toHaveBeenCalledWith('ks-1', 'fn-1', 'src-A'),
+    );
+    // The trust badge should disappear when count drops to 1.
+    await waitFor(() =>
+      expect(screen.queryByTestId('fact-detail-trust-badge')).toBeNull(),
+    );
+    expect(screen.queryByTestId('fact-detail-source-src-A')).toBeNull();
+    expect(screen.getByTestId('fact-detail-source-src-B')).toBeInTheDocument();
+  });
+
+  it('★ "사실 철회" triggers retract + retracted banner appears on refresh', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+
+    const retracted = {
+      ...detailWithTwoSources,
+      fact: {
+        ...detailWithTwoSources.fact,
+        retracted_at: '2026-06-18T05:00:00Z',
+        retracted_by: 'u-1',
+      },
+    };
+    (api.retractFact as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact_uid: 'fn-1', retracted_at: '2026-06-18T05:00:00Z',
+      source_uids: ['src-A','src-B'], auto_retracted: false,
+    });
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(retracted);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+
+    fireEvent.click(screen.getByTestId('fact-detail-retract'));
+    await waitFor(() => expect(api.retractFact).toHaveBeenCalledWith('ks-1', 'fn-1'));
+    expect(await screen.findByTestId('fact-detail-retracted-banner')).toBeInTheDocument();
+    // The button swaps to "복구" on the retracted state.
+    expect(screen.getByTestId('fact-detail-restore')).toBeInTheDocument();
+    expect(screen.queryByTestId('fact-detail-retract')).toBeNull();
+  });
+
+  it('★ "복구" reverses retract', async () => {
+    await bootstrap();
+    const retracted = {
+      ...detailWithTwoSources,
+      fact: {
+        ...detailWithTwoSources.fact,
+        retracted_at: '2026-06-18T05:00:00Z',
+        retracted_by: 'u-1',
+      },
+    };
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(retracted);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+    expect(screen.getByTestId('fact-detail-restore')).toBeInTheDocument();
+
+    (api.restoreFact as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact_uid: 'fn-1', retracted_at: null,
+      source_uids: ['src-A','src-B'], auto_retracted: false,
+    });
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+
+    fireEvent.click(screen.getByTestId('fact-detail-restore'));
+    await waitFor(() => expect(api.restoreFact).toHaveBeenCalledWith('ks-1', 'fn-1'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('fact-detail-retracted-banner')).toBeNull(),
+    );
+    expect(screen.getByTestId('fact-detail-retract')).toBeInTheDocument();
+  });
+
+  it('detaching the last source flips the panel into retracted state', async () => {
+    await bootstrap();
+    const oneSource = {
+      ...detailWithTwoSources,
+      sources: [detailWithTwoSources.sources[0]],
+    };
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(oneSource);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+
+    // Detach returns auto_retracted=true; refresh shows retracted + no sources.
+    const afterAuto = {
+      ...detailWithTwoSources,
+      fact: {
+        ...detailWithTwoSources.fact,
+        retracted_at: '2026-06-18T05:00:00Z',
+        retracted_by: 'u-1',
+      },
+      sources: [],
+    };
+    (api.detachSource as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact_uid: 'fn-1', retracted_at: '2026-06-18T05:00:00Z',
+      source_uids: [], auto_retracted: true,
+    });
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(afterAuto);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+
+    fireEvent.click(screen.getByTestId('fact-detail-detach-src-A'));
+    await waitFor(() => expect(api.detachSource).toHaveBeenCalled());
+    expect(await screen.findByTestId('fact-detail-retracted-banner')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-detail-restore')).toBeInTheDocument();
+  });
+
+  it('shows no trust badge for a single-source fact', async () => {
+    await bootstrap();
+    const oneSource = {
+      ...detailWithTwoSources,
+      sources: [detailWithTwoSources.sources[0]],
+    };
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(oneSource);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-modal');
+    expect(screen.queryByTestId('fact-detail-trust-badge')).toBeNull();
+    expect(screen.getByTestId('fact-detail-source-src-A')).toBeInTheDocument();
   });
 });

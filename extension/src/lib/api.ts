@@ -8,7 +8,10 @@ export const API_BASE = 'http://localhost:8000';
 
 export interface CaptureRequest {
   source_url: string;
-  source_type: 'web_article' | 'highlighted_text' | 'youtube' | 'pdf' | 'image';
+  // B-45: image captures use 'page_image' (matches backend SourceType
+  // enum). The legacy 'image' string is gone — it never matched the
+  // backend enum and silently 422'd.
+  source_type: 'web_article' | 'highlighted_text' | 'youtube' | 'pdf' | 'page_image';
   captured_from: 'chrome_ext';
   raw_payload_b64?: string;
   client_metadata?: Record<string, unknown>;

@@ -21,7 +21,7 @@ from typing import Any
 
 from api.models.base import utc_now
 from api.models.objects import Object
-from api.storage.elasticsearch.client import LUCID_OBJECTS, get_client
+from api.storage.elasticsearch.client import LUCID_FACTS, LUCID_OBJECTS, get_client
 from api.storage.elasticsearch.embeddings import get_embedding
 
 logger = logging.getLogger("lucid.es.objects")
@@ -100,6 +100,100 @@ def delete_object(uid: str) -> bool:
 
     client.delete(index=LUCID_OBJECTS, id=uid, refresh="wait_for")
     return True
+
+
+def find_object_by_name_class(
+    knowledge_space_id: str, name: str, class_: str,
+) -> dict[str, Any] | None:
+    """B-48a-2: dedup lookup. Find an existing Object by the canonical
+    (KS, name keyword, class) triple. Used by the replay and validate
+    paths to decide whether a same-name entity from a fresh capture
+    should reuse an existing canonical uid or mint a new one.
+
+    `name.keyword` is a sub-field of the text-analyzed `name` field —
+    keyword-matching avoids analyzer surprises ("SpaceX" vs
+    "spacex" vs subword splits).
+    """
+    try:
+        resp = get_client().search(
+            index=LUCID_OBJECTS,
+            query={"bool": {"filter": [
+                {"term": {"knowledge_space_id": knowledge_space_id}},
+                {"term": {"class": class_}},
+                {"term": {"name.keyword": name}},
+            ]}},
+            size=10,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("find_object_by_name_class failed: %s", exc)
+        return None
+    hits = resp.get("hits", {}).get("hits") or []
+    if not hits:
+        return None
+    # Prefer canonical UUID4 over LLM placeholders so the replay path
+    # converges on the canonical uid even when both shapes exist.
+    import re
+    _UUID4_RE = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
+    hits.sort(key=lambda h: 0 if _UUID4_RE.match(h["_source"]["object_uid"]) else 1)
+    return hits[0]["_source"]
+
+
+def remap_fact_subject_object(
+    knowledge_space_id: str, uid_remap: dict[str, str],
+) -> dict[str, int]:
+    """B-48a-2: walk lucid_facts in this KS and rewrite any
+    `subject_uid` / `object_value` whose value appears as a KEY in
+    `uid_remap` to its remapped value.
+
+    Returns `{subjects_remapped, objects_remapped, facts_touched}`.
+    Idempotent — a second call with the same map is a no-op since the
+    source uids no longer exist as values.
+    """
+    client = get_client()
+    if not uid_remap:
+        return {"subjects_remapped": 0, "objects_remapped": 0, "facts_touched": 0}
+    src_uids = list(uid_remap.keys())
+    body = {
+        "query": {"bool": {"filter": [
+            {"term": {"knowledge_space_id": knowledge_space_id}},
+            {"bool": {"should": [
+                {"terms": {"subject_uid": src_uids}},
+                {"terms": {"object_value": src_uids}},
+            ], "minimum_should_match": 1}},
+        ]}},
+        "size": 1000,
+    }
+    resp = client.search(index=LUCID_FACTS, body=body)
+    hits = resp["hits"]["hits"]
+    subj_count = 0
+    obj_count = 0
+    facts_touched = 0
+    for h in hits:
+        s = h["_source"]
+        doc_update: dict[str, Any] = {}
+        if s["subject_uid"] in uid_remap:
+            doc_update["subject_uid"] = uid_remap[s["subject_uid"]]
+            subj_count += 1
+        if s.get("object_value") in uid_remap:
+            doc_update["object_value"] = uid_remap[s["object_value"]]
+            obj_count += 1
+        if doc_update:
+            doc_update["updated_at"] = utc_now().isoformat()
+            client.update(
+                index=LUCID_FACTS,
+                id=h["_id"],
+                doc=doc_update,
+                refresh="wait_for",
+            )
+            facts_touched += 1
+    return {
+        "subjects_remapped": subj_count,
+        "objects_remapped": obj_count,
+        "facts_touched": facts_touched,
+    }
 
 
 def link_objects(from_uid: str, to_uid: str, link_type: str) -> bool:

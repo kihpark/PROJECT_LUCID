@@ -151,3 +151,75 @@ class RecallFacets(LucidBaseModel):
 
     entities: EntityFacets = Field(default_factory=lambda: EntityFacets())
     predicates: list[PredicateFacetItem] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# B-48b — fact detail
+# ---------------------------------------------------------------------------
+
+class FactDetailHeader(LucidBaseModel):
+    """The fact's own row, rendered with labels already resolved."""
+
+    fact_uid: str
+    claim: str
+    claim_en: str | None = None
+    subject_uid: str
+    subject_label: str | None = None
+    predicate: str
+    object_value: str
+    object_label: str | None = None
+    validated_at: datetime
+    retracted_at: datetime | None = None
+    retracted_by: str | None = None
+    edit_history: list[dict] = Field(default_factory=list)
+
+
+class FactDetailEntity(LucidBaseModel):
+    """One Object referenced by the fact (subject or object)."""
+
+    uid: str
+    name: str
+    name_en: str | None = None
+    class_: str | None = Field(default=None, alias="class")
+    role: Literal["subject", "object"]
+    aliases: list[str] = Field(default_factory=list)
+
+
+class FactDetailSource(LucidBaseModel):
+    """One source row on the detail panel — the data the user reads
+    when deciding whether to keep the fact or detach the source."""
+
+    source_uid: str
+    source_job_id: str | None = None
+    url: str
+    domain: str | None = None
+    captured_at: datetime | None = None
+    source_type: str | None = None
+    author: str | None = None
+    title: str | None = None
+    snapshot_available: bool = False
+
+
+class FactDetailResponse(LucidBaseModel):
+    """GET /api/spaces/{space_id}/facts/{fact_uid} envelope."""
+
+    fact: FactDetailHeader
+    entities: list[FactDetailEntity] = Field(default_factory=list)
+    sources: list[FactDetailSource] = Field(default_factory=list)
+
+
+class DetachSourceRequest(LucidBaseModel):
+    """POST .../detach-source body."""
+
+    source_uid: str
+
+
+class FactMutationResponse(LucidBaseModel):
+    """Response shared by retract / restore / detach-source — the
+    client uses the returned fact_uid to redraw / close the panel
+    and the `retracted_at` to flip the visual state."""
+
+    fact_uid: str
+    retracted_at: datetime | None = None
+    source_uids: list[str] = Field(default_factory=list)
+    auto_retracted: bool = False

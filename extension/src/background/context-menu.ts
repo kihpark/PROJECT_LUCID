@@ -38,6 +38,13 @@ export const MENU_IDS = {
 // avoids a guaranteed 413 round-trip.
 const MAX_PAGE_HTML_BYTES = 5 * 1024 * 1024;
 
+// B-45: cap the raw image bytes shipped over the wire. The backend
+// vision extractor resizes anyway, but if the SOURCE image is huge
+// (e.g. a 20 MB PNG) the base64 payload would blow past the
+// pre-compression cap before reaching the extractor. 5 MB matches
+// the HTML limit so the 413 boundary is consistent.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 // Schemes chrome.scripting can never inject into. Captured here so
 // the toast can tell the user WHY instead of firing an opaque error.
 const UNCAPTURABLE_SCHEMES = [
@@ -158,35 +165,112 @@ function buildSyncPayload(
   info: chrome.contextMenus.OnClickData,
   tab: chrome.tabs.Tab | undefined,
 ): CaptureRequest | null {
-  switch (info.menuItemId) {
-    case MENU_IDS.selection: {
-      const url = info.pageUrl ?? tab?.url ?? '';
-      const selected = info.selectionText?.trim();
-      if (!selected) return null;
-      return {
-        source_url: url,
-        source_type: 'highlighted_text',
-        captured_from: 'chrome_ext',
-        raw_payload_b64: utf8ToBase64(selected),
-        client_metadata: {
-          selection_range_start: '0',
-          selection_range_end: String(selected.length),
-        },
-      };
-    }
-    case MENU_IDS.image: {
-      const url = info.srcUrl ?? '';
-      if (!url) return null;
-      return {
-        source_url: url,
-        source_type: 'image',
-        captured_from: 'chrome_ext',
-        client_metadata: { source_page_url: info.pageUrl ?? '' },
-      };
-    }
-    default:
-      return null;
+  if (info.menuItemId === MENU_IDS.selection) {
+    const url = info.pageUrl ?? tab?.url ?? '';
+    const selected = info.selectionText?.trim();
+    if (!selected) return null;
+    return {
+      source_url: url,
+      source_type: 'highlighted_text',
+      captured_from: 'chrome_ext',
+      raw_payload_b64: utf8ToBase64(selected),
+      client_metadata: {
+        selection_range_start: '0',
+        selection_range_end: String(selected.length),
+      },
+    };
   }
+  return null;
+}
+
+/**
+ * Base64-encode a Uint8Array without going through
+ * `String.fromCharCode(...arr)` which blows the stack on large
+ * payloads. Same chunked TextDecoder trick as `utf8ToBase64`.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(
+      ...bytes.subarray(i, Math.min(i + CHUNK, bytes.length)),
+    );
+  }
+  return btoa(binary);
+}
+
+type ImagePayloadOutcome =
+  | { ok: true; payload: CaptureRequest }
+  | { ok: false; error: string };
+
+/**
+ * B-45 — image capture path.
+ *
+ * Chrome gives us the image's `srcUrl`; we fetch the bytes inline
+ * (the service worker has the host permission for active tabs) and
+ * pack them into `raw_payload_b64` so the backend has the actual
+ * snapshot, not just a URL that may rot. The bytes get stored on
+ * `SourceJob.raw_payload` (B-48 snapshot layer) and forwarded to
+ * the vision extractor (B-45 image extractor) which transcribes
+ * them into claim text for the existing Structure pipeline.
+ */
+export async function buildImagePayload(
+  info: chrome.contextMenus.OnClickData,
+  tab: chrome.tabs.Tab | undefined,
+): Promise<ImagePayloadOutcome | null> {
+  const srcUrl = info.srcUrl ?? '';
+  if (!srcUrl) return null;
+  if (!isCapturableUrl(srcUrl)) {
+    return {
+      ok: false,
+      error: 'This image cannot be saved (non-http source).',
+    };
+  }
+
+  let bytes: Uint8Array;
+  try {
+    const resp = await fetch(srcUrl, { credentials: 'omit' });
+    if (!resp.ok) {
+      return {
+        ok: false,
+        error: `Could not fetch image (HTTP ${resp.status}).`,
+      };
+    }
+    const buf = await resp.arrayBuffer();
+    bytes = new Uint8Array(buf);
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        'Could not fetch the image. '
+        + (err instanceof Error ? err.message : 'unknown error'),
+    };
+  }
+
+  if (bytes.byteLength > MAX_IMAGE_BYTES) {
+    const mb = (bytes.byteLength / 1024 / 1024).toFixed(1);
+    const limit = MAX_IMAGE_BYTES / 1024 / 1024;
+    return {
+      ok: false,
+      error:
+        `Image too large to save (${mb} MB; limit ${limit} MB). `
+        + 'Save a smaller version of the image and try again.',
+    };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      source_url: srcUrl,
+      source_type: 'page_image',
+      captured_from: 'chrome_ext',
+      raw_payload_b64: bytesToBase64(bytes),
+      client_metadata: {
+        source_page_url: info.pageUrl ?? tab?.url ?? '',
+        image_byte_count: String(bytes.byteLength),
+      },
+    },
+  };
 }
 
 export function installContextMenus(): void {
@@ -237,6 +321,20 @@ export async function handleContextMenuClick(
 
   if (info.menuItemId === MENU_IDS.page) {
     const outcome = await buildPagePayload(info, tab);
+    if (outcome === null) return;
+    if (!outcome.ok) {
+      await notifyTab(tabId, {
+        type: 'show_toast',
+        status: 'capture_failed',
+        error: outcome.error,
+      });
+      return;
+    }
+    payload = outcome.payload;
+  } else if (info.menuItemId === MENU_IDS.image) {
+    // B-45: image fetch is async (we have to pull the bytes off the
+    // remote host) so it can't share buildSyncPayload's pure path.
+    const outcome = await buildImagePayload(info, tab);
     if (outcome === null) return;
     if (!outcome.ok) {
       await notifyTab(tabId, {

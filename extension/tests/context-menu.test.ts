@@ -257,9 +257,35 @@ describe('context-menu click — non-page items (regression)', () => {
     );
   });
 
-  it('dispatches an image capture for the image item', async () => {
+  // B-45: the image capture now fetches the image bytes first and
+  // ships them as `raw_payload_b64` so the backend has the snapshot
+  // (not just a URL that may rot) AND so the vision extractor can
+  // transcribe it. source_type also corrects from 'image' to the
+  // backend enum 'page_image'.
+  it('★ fetches image bytes, sends raw_payload_b64 + source_type=page_image', async () => {
     stubAuth();
-    const fetchMock = stubCaptureOk('job-img-3');
+    const imageBytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG magic
+      0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+    ]);
+    // Two fetches: (1) image bytes from srcUrl, (2) POST /api/capture.
+    const captureResponse = {
+      ok: true,
+      json: async () => ({
+        job_id: 'job-img-3',
+        status_url: '/api/jobs/job-img-3',
+        status: 'pending_extract',
+      }),
+    };
+    const imageResponse = {
+      ok: true,
+      arrayBuffer: async () => imageBytes.buffer,
+    };
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === 'https://example.com/cat.png') return imageResponse;
+      return captureResponse;
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     await handleContextMenuClick(
       {
@@ -270,9 +296,56 @@ describe('context-menu click — non-page items (regression)', () => {
       { id: 14, url: 'https://example.com/album' } as chrome.tabs.Tab,
     );
 
-    const body = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
-    expect(body.source_type).toBe('image');
-    expect(body.source_url).toBe('https://example.com/cat.png');
+    // Two outbound fetches: image, then capture.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://example.com/cat.png');
+    const captureBody = JSON.parse(
+      (fetchMock.mock.calls[1]![1] as { body: string }).body,
+    );
+    expect(captureBody.source_type).toBe('page_image');
+    expect(captureBody.source_url).toBe('https://example.com/cat.png');
+    expect(captureBody.raw_payload_b64).toBeTruthy();
+    // The base64 payload decodes to the original PNG magic bytes.
+    const decoded = Uint8Array.from(
+      atob(captureBody.raw_payload_b64), (c) => c.charCodeAt(0),
+    );
+    expect(Array.from(decoded.slice(0, 8))).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    // Originating page URL preserved for the vision extractor metadata.
+    expect(captureBody.client_metadata.source_page_url).toBe(
+      'https://example.com/album',
+    );
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a toast error when the image fetch fails', async () => {
+    stubAuth();
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === 'https://example.com/missing.png') {
+        return { ok: false, status: 404 };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.image,
+        srcUrl: 'https://example.com/missing.png',
+        pageUrl: 'https://example.com/page',
+      } as chrome.contextMenus.OnClickData,
+      { id: 21, url: 'https://example.com/page' } as chrome.tabs.Tab,
+    );
+
+    // Capture POST was never made.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+      21,
+      expect.objectContaining({
+        type: 'show_toast',
+        status: 'capture_failed',
+      }),
+    );
   });
 });

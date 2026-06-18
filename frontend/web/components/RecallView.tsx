@@ -21,13 +21,21 @@
  *     the result list so the user understands the filtering policy.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActionButton } from './ActionButton';
-import { recall as apiRecall, ApiError } from '@/lib/api';
+import {
+  recall as apiRecall,
+  ApiError,
+  detachSource as apiDetachSource,
+  getFactDetail as apiGetFactDetail,
+  restoreFact as apiRestoreFact,
+  retractFact as apiRetractFact,
+} from '@/lib/api';
 import type {
   EntityBrief,
   EntityBriefGroup,
   EntityFacetItem,
+  FactDetailResponse,
   PredicateFacetItem,
   RecallFact,
   RecallFacets,
@@ -74,7 +82,9 @@ function MatchKindBadge({ kind }: { kind: 'embedding' | 'entity_link' | undefine
   );
 }
 
-function RecallFactCard({ fact }: { fact: RecallFact }) {
+function RecallFactCard({
+  fact, onOpenDetail,
+}: { fact: RecallFact; onOpenDetail?: (factUid: string) => void }) {
   const sourceUrls = fact.source_uids.filter((s) => s.startsWith('http'));
   const subjectDisplay = resolveLabel(fact.subject_uid, fact.subject_label);
   const objectDisplay = resolveLabel(fact.object_value, fact.object_label);
@@ -94,9 +104,19 @@ function RecallFactCard({ fact }: { fact: RecallFact }) {
           score {fact.score.toFixed(2)}
         </span>
       </header>
-      <p className="text-base mb-3" lang="ko">
-        {fact.claim}
-      </p>
+      {onOpenDetail ? (
+        <button
+          type="button"
+          data-testid={`recall-fact-${fact.fact_uid}-open-detail`}
+          onClick={() => onOpenDetail(fact.fact_uid)}
+          className="text-left text-base mb-3 hover:underline"
+          lang="ko"
+        >
+          {fact.claim}
+        </button>
+      ) : (
+        <p className="text-base mb-3" lang="ko">{fact.claim}</p>
+      )}
       <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-2 mb-3">
         <div>
           <dt className="opacity-60">subject</dt>
@@ -282,6 +302,290 @@ function FacetBar({ item, active, maxCount, onClick, testId, uid }: FacetBarProp
   );
 }
 
+// ---------------------------------------------------------------------------
+// B-48c — fact detail MODAL (replaces the B-48b right-rail swap so the
+// right rail stays on facet / brief and the wider modal canvas can lay
+// the sources + meta out with proper section spacing for readability)
+// ---------------------------------------------------------------------------
+
+interface FactDetailModalProps {
+  detail: FactDetailResponse;
+  onClose: () => void;
+  onDetachSource: (sourceUid: string) => Promise<void>;
+  onRetract: () => Promise<void>;
+  onRestore: () => Promise<void>;
+  busy: boolean;
+}
+
+function FactDetailModal({
+  detail, onClose, onDetachSource, onRetract, onRestore, busy,
+}: FactDetailModalProps) {
+  const { fact, entities, sources } = detail;
+  const retracted = !!fact.retracted_at;
+  const trusted = sources.length >= 2;
+  const subject = entities.find((e) => e.role === 'subject');
+  const object = entities.find((e) => e.role === 'object');
+
+  // ESC closes — global listener while the modal is mounted.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="fact detail"
+      data-testid="fact-detail-modal"
+      data-retracted={retracted ? 'true' : 'false'}
+      className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8 bg-black/40 backdrop-blur-sm"
+      // Click on the backdrop (not the content) closes.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        data-testid="fact-detail-modal-content"
+        className="relative max-w-3xl w-full max-h-[90vh] overflow-y-auto rounded-xl border border-border-subtle bg-bg-elevated shadow-xl"
+      >
+        {/* Close button — pinned top right */}
+        <button
+          type="button"
+          data-testid="fact-detail-close"
+          onClick={onClose}
+          aria-label="close fact detail"
+          className="absolute top-3 right-3 text-text-muted hover:text-text-primary font-mono text-sm rounded p-1"
+        >
+          ✕
+        </button>
+
+        {/* Header: claim hero + retracted banner */}
+        <header className="px-8 pt-8 pb-4 border-b border-border-subtle">
+          {retracted && (
+            <p
+              data-testid="fact-detail-retracted-banner"
+              className="text-xs text-accent-error mb-3 font-mono"
+            >
+              철회된 사실 · {new Date(fact.retracted_at!).toLocaleString()}
+            </p>
+          )}
+          <p className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-2">
+            Fact 상세
+          </p>
+          <p
+            data-testid="fact-detail-claim"
+            className="text-xl leading-relaxed font-medium"
+            lang="ko"
+          >
+            {fact.claim}
+          </p>
+          {fact.claim_en && (
+            <p className="text-sm text-text-muted mt-2 leading-relaxed">
+              {fact.claim_en}
+            </p>
+          )}
+        </header>
+
+        {/* S → P → O relationship */}
+        <section className="px-8 py-5 border-b border-border-subtle">
+          <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-3">
+            관계
+          </h3>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span
+              data-testid="fact-detail-subject"
+              className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
+            >
+              <span className="font-medium">
+                {subject?.name ?? fact.subject_label ?? fact.subject_uid}
+              </span>
+              {subject?.class && (
+                <span className="ml-2 text-xxs text-text-muted font-mono">
+                  {subject.class}
+                </span>
+              )}
+            </span>
+            <span className="text-text-muted font-mono text-xs">→</span>
+            <span className="rounded-md bg-accent-cool/10 border border-accent-cool/30 text-accent-cool px-3 py-1.5 font-mono text-xs">
+              {fact.predicate}
+            </span>
+            <span className="text-text-muted font-mono text-xs">→</span>
+            <span
+              data-testid="fact-detail-object"
+              className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
+            >
+              <span className="font-medium">
+                {object?.name ?? fact.object_label ?? fact.object_value}
+              </span>
+              {object?.class && (
+                <span className="ml-2 text-xxs text-text-muted font-mono">
+                  {object.class}
+                </span>
+              )}
+            </span>
+          </div>
+        </section>
+
+        {/* Sources — the meat of the modal */}
+        <section className="px-8 py-5 border-b border-border-subtle">
+          <header className="flex items-center justify-between mb-3">
+            <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono">
+              출처 ({sources.length})
+            </h3>
+            {trusted && (
+              <span
+                data-testid="fact-detail-trust-badge"
+                className="rounded-full bg-accent-cool/15 text-accent-cool border border-accent-cool/40 px-3 py-1 text-xxs font-mono"
+                title="검증된 출처가 둘 이상"
+              >
+                ✓ 검증된 출처 {sources.length}건
+              </span>
+            )}
+          </header>
+          {sources.length === 0 ? (
+            <p className="text-xs text-text-muted py-2">(출처 없음)</p>
+          ) : (
+            <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {sources.map((s) => (
+                <li
+                  key={s.source_uid}
+                  data-testid={`fact-detail-source-${s.source_uid}`}
+                  className="rounded-lg border border-border-subtle bg-bg-card p-3"
+                >
+                  <div className="flex justify-between items-start gap-3 mb-2">
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-accent-cool underline break-all min-w-0"
+                      title={s.url}
+                    >
+                      {s.domain || s.url.replace(/^https?:\/\//, '').slice(0, 60)}
+                    </a>
+                    <button
+                      type="button"
+                      data-testid={`fact-detail-detach-${s.source_uid}`}
+                      onClick={() => onDetachSource(s.source_uid)}
+                      disabled={busy}
+                      className="text-xxs text-text-muted hover:text-accent-error font-mono shrink-0 underline"
+                    >
+                      이 출처만 떼기
+                    </button>
+                  </div>
+                  {s.title && (
+                    <p className="text-xs text-text-secondary mb-1 leading-snug">
+                      {s.title}
+                    </p>
+                  )}
+                  <dl className="text-xxs text-text-muted font-mono space-y-0.5">
+                    {s.captured_at && (
+                      <div>
+                        <dt className="inline opacity-60">captured: </dt>
+                        <dd className="inline">
+                          <time dateTime={s.captured_at}>
+                            {new Date(s.captured_at).toLocaleString()}
+                          </time>
+                        </dd>
+                      </div>
+                    )}
+                    {s.author && (
+                      <div>
+                        <dt className="inline opacity-60">author: </dt>
+                        <dd className="inline">{s.author}</dd>
+                      </div>
+                    )}
+                    {s.snapshot_available && (
+                      <div>
+                        <dt className="inline opacity-60">snapshot: </dt>
+                        <dd className="inline">보존됨</dd>
+                      </div>
+                    )}
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Meta — validated_at / entity class / alias / edit history */}
+        <section className="px-8 py-5">
+          <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-3">
+            메타
+          </h3>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-6 text-xs">
+            <div>
+              <dt className="text-text-muted font-mono opacity-60">등록 일시</dt>
+              <dd>
+                <time dateTime={fact.validated_at}>
+                  {new Date(fact.validated_at).toLocaleString()}
+                </time>
+              </dd>
+            </div>
+            {subject?.aliases && subject.aliases.length > 0 && (
+              <div>
+                <dt className="text-text-muted font-mono opacity-60">
+                  subject alias
+                </dt>
+                <dd className="font-mono text-xxs">
+                  {subject.aliases.join(', ')}
+                </dd>
+              </div>
+            )}
+            {object?.aliases && object.aliases.length > 0 && (
+              <div>
+                <dt className="text-text-muted font-mono opacity-60">
+                  object alias
+                </dt>
+                <dd className="font-mono text-xxs">
+                  {object.aliases.join(', ')}
+                </dd>
+              </div>
+            )}
+            {fact.edit_history && fact.edit_history.length > 0 && (
+              <div>
+                <dt className="text-text-muted font-mono opacity-60">
+                  편집 이력
+                </dt>
+                <dd>{fact.edit_history.length}건</dd>
+              </div>
+            )}
+          </dl>
+        </section>
+
+        {/* Action bar */}
+        <footer className="px-8 py-4 border-t border-border-subtle bg-bg-card/40 flex justify-end gap-2">
+          {retracted ? (
+            <button
+              type="button"
+              data-testid="fact-detail-restore"
+              onClick={onRestore}
+              disabled={busy}
+              className="rounded-md border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-4 py-2 text-sm font-medium"
+            >
+              복구
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="fact-detail-retract"
+              onClick={onRetract}
+              disabled={busy}
+              className="rounded-md border border-accent-error/40 bg-accent-error/5 text-accent-error px-4 py-2 text-sm font-medium"
+            >
+              사실 철회
+            </button>
+          )}
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+
 interface FacetPanelProps {
   facets: RecallFacets | undefined;
   activeEntityUids: string[];
@@ -421,18 +725,228 @@ function sortFacts(facts: RecallFact[]): RecallFact[] {
   return [...facts].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
 
+// B-50: similarity-floor bounds for the slider — the backend accepts
+// [0,1] but the dev guidance is 0.5–0.9 (below 0.5 fires on orthogonal
+// embeddings; above 0.9 cuts most real matches).
+const SCORE_THRESHOLD_MIN = 0.5;
+const SCORE_THRESHOLD_MAX = 0.9;
+const SCORE_THRESHOLD_DEFAULT = 0.72;
+
+type MatchKind = 'embedding' | 'entity_link';
+
+interface SearchControlsState {
+  scoreThreshold: number;
+  dateFrom: string;  // 'YYYY-MM-DD' or ''
+  dateTo: string;
+  matchKinds: Record<MatchKind, boolean>;
+  keyword2: string;
+}
+
+const DEFAULT_CONTROLS: SearchControlsState = {
+  scoreThreshold: SCORE_THRESHOLD_DEFAULT,
+  dateFrom: '',
+  dateTo: '',
+  matchKinds: { embedding: true, entity_link: true },
+  keyword2: '',
+};
+
+// B-50-fix (PO A direction): `matchKinds` is no longer a server param.
+// Embedding (kNN) is the search mode — always on. The toggle in the
+// panel filters the rendered result list client-side; the server
+// receives the FULL envelope every time.
+function controlsToRecallOptions(
+  c: SearchControlsState, entity: string[],
+): { entity: string[]; scoreThreshold: number; dateFrom?: string; dateTo?: string } {
+  return {
+    entity,
+    scoreThreshold: c.scoreThreshold,
+    // Backend expects ISO 8601; the date input gives 'YYYY-MM-DD',
+    // which is a valid ISO 8601 calendar date. Pad to midnight UTC
+    // so the inclusive range covers the whole day on both sides.
+    dateFrom: c.dateFrom ? `${c.dateFrom}T00:00:00Z` : undefined,
+    dateTo: c.dateTo ? `${c.dateTo}T23:59:59Z` : undefined,
+  };
+}
+
+interface SearchControlsPanelProps {
+  state: SearchControlsState;
+  onChange: (next: SearchControlsState) => void;
+}
+
+function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
+  return (
+    <aside
+      aria-label="search controls"
+      data-testid="search-controls"
+      className="hidden lg:block w-64 shrink-0 sticky top-4 self-start"
+    >
+      <h2 className="text-xxs uppercase tracking-wider text-text-muted mb-3 font-mono">
+        검색 컨트롤
+      </h2>
+
+      {/* Similarity threshold */}
+      <div className="mb-4">
+        <label className="flex justify-between items-baseline text-xs font-medium mb-1">
+          <span>유사도 임계값</span>
+          <span
+            data-testid="control-threshold-value"
+            className="font-mono text-xxs text-text-muted"
+          >
+            {state.scoreThreshold.toFixed(2)}
+          </span>
+        </label>
+        <input
+          type="range"
+          aria-label="similarity threshold"
+          data-testid="control-threshold-slider"
+          min={SCORE_THRESHOLD_MIN}
+          max={SCORE_THRESHOLD_MAX}
+          step={0.01}
+          value={state.scoreThreshold}
+          onChange={(e) =>
+            onChange({ ...state, scoreThreshold: parseFloat(e.target.value) })
+          }
+          className="w-full"
+        />
+        <p className="text-xxs text-text-muted font-mono mt-0.5">
+          {SCORE_THRESHOLD_MIN.toFixed(2)} – {SCORE_THRESHOLD_MAX.toFixed(2)}
+        </p>
+      </div>
+
+      {/* Date range */}
+      <div className="mb-4">
+        <h3 className="text-xs font-medium mb-1">검증 일자</h3>
+        <div className="flex flex-col gap-1">
+          <input
+            type="date"
+            aria-label="date from"
+            data-testid="control-date-from"
+            value={state.dateFrom}
+            onChange={(e) => onChange({ ...state, dateFrom: e.target.value })}
+            className="rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
+          />
+          <input
+            type="date"
+            aria-label="date to"
+            data-testid="control-date-to"
+            value={state.dateTo}
+            onChange={(e) => onChange({ ...state, dateTo: e.target.value })}
+            className="rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
+          />
+        </div>
+        {(state.dateFrom || state.dateTo) && (
+          <button
+            type="button"
+            data-testid="control-date-clear"
+            onClick={() => onChange({ ...state, dateFrom: '', dateTo: '' })}
+            className="text-xxs text-text-muted hover:text-text-primary font-mono underline mt-1"
+          >
+            일자 초기화
+          </button>
+        )}
+      </div>
+
+      {/* B-50-fix: match_kind is now a display filter only. Embedding
+          (kNN) is the search mode — toggle locked on; entity-link can
+          be hidden from the rendered list but the seed is never
+          starved (the underlying recall response is the same). */}
+      <div className="mb-4">
+        <h3 className="text-xs font-medium mb-1">매치 종류</h3>
+        <p className="text-xxs text-text-muted font-mono mb-1">
+          결과 표시 필터 (서버 재검색 없음)
+        </p>
+        <label
+          data-testid="control-match-embedding"
+          className="flex items-center gap-2 text-xs py-0.5 opacity-90"
+          title="검색은 유사도 기반"
+        >
+          <input
+            type="checkbox"
+            checked={state.matchKinds.embedding}
+            disabled
+            aria-disabled="true"
+            data-testid="control-match-embedding-checkbox"
+            readOnly
+          />
+          <span>🔍 유사도 (검색 모드)</span>
+        </label>
+        <label
+          data-testid="control-match-entity-link"
+          className="flex items-center gap-2 text-xs py-0.5"
+        >
+          <input
+            type="checkbox"
+            checked={state.matchKinds.entity_link}
+            data-testid="control-match-entity-link-checkbox"
+            onChange={(e) =>
+              onChange({
+                ...state,
+                matchKinds: { ...state.matchKinds, entity_link: e.target.checked },
+              })
+            }
+          />
+          <span>🔗 엔티티 연결</span>
+        </label>
+      </div>
+
+      {/* 2nd-tier keyword — client-side filter on claim text */}
+      <div className="mb-4">
+        <label
+          className="text-xs font-medium block mb-1"
+          htmlFor="control-keyword2"
+        >
+          결과 내 키워드
+        </label>
+        <input
+          id="control-keyword2"
+          type="text"
+          aria-label="secondary keyword"
+          data-testid="control-keyword2"
+          value={state.keyword2}
+          onChange={(e) => onChange({ ...state, keyword2: e.target.value })}
+          placeholder="claim 부분일치"
+          className="w-full rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
+        />
+        <p className="text-xxs text-text-muted font-mono mt-0.5">
+          현재 결과만 필터 (서버 재검색 없음)
+        </p>
+      </div>
+    </aside>
+  );
+}
+
 export function RecallView({ spaceId }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [activeEntities, setActiveEntities] = useState<string[]>([]);
+  const [controls, setControls] = useState<SearchControlsState>(DEFAULT_CONTROLS);
   const [result, setResult] = useState<RecallResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // B-48b: open detail panel swaps in over the entity-brief facet panel.
+  const [detail, setDetail] = useState<FactDetailResponse | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
 
   const sortedFacts = useMemo(
     () => (result ? sortFacts(result.facts) : []),
     [result],
   );
+
+  // B-50 / B-50-fix client-side filters.
+  // - keyword2: case-insensitive substring match on `claim`.
+  // - matchKinds: 🔍 유사도 is the search mode (always on); the user
+  //   can hide 🔗 엔티티 연결 rows from the rendered list, but the
+  //   underlying recall response is unchanged so toggling never zeros
+  //   the result — the old UX trap is gone.
+  const visibleFacts = useMemo(() => {
+    let out = sortedFacts;
+    const kw = controls.keyword2.trim().toLowerCase();
+    if (kw) out = out.filter((f) => f.claim.toLowerCase().includes(kw));
+    if (!controls.matchKinds.entity_link) {
+      out = out.filter((f) => (f.match_kind ?? 'embedding') !== 'entity_link');
+    }
+    return out;
+  }, [sortedFacts, controls.keyword2, controls.matchKinds.entity_link]);
 
   // Build the "active filter chips" view: walk the current facets to
   // find the name + bucket for each active uid (the backend already
@@ -459,11 +973,16 @@ export function RecallView({ spaceId }: Props) {
     });
   }, [activeEntities, result]);
 
-  const runRecall = async (q: string, entities: string[]) => {
+  const runRecall = async (
+    q: string,
+    entities: string[],
+    overrideControls?: SearchControlsState,
+  ) => {
     setBusy(true);
     setError(null);
     try {
-      const r = await apiRecall(spaceId, q, { entity: entities });
+      const opts = controlsToRecallOptions(overrideControls ?? controls, entities);
+      const r = await apiRecall(spaceId, q, opts);
       setResult(r);
     } catch (err) {
       const detail =
@@ -511,15 +1030,97 @@ export function RecallView({ spaceId }: Props) {
     void runRecall(submittedQuery, []);
   };
 
+  // B-48b: open the detail panel for a fact (right rail swaps from
+  // facet/brief to detail). Subsequent recall calls leave the panel
+  // open — the user closes it explicitly.
+  const onOpenDetail = async (factUid: string) => {
+    setDetailBusy(true);
+    setError(null);
+    try {
+      const d = await apiGetFactDetail(spaceId, factUid);
+      setDetail(d);
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;
+      setError(msg);
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
+  const onCloseDetail = () => setDetail(null);
+
+  const refreshDetail = async (factUid: string) => {
+    try {
+      const d = await apiGetFactDetail(spaceId, factUid);
+      setDetail(d);
+    } catch {
+      // best-effort — keep the current detail rendered if refresh fails
+    }
+  };
+
+  const refreshRecall = () => {
+    if (submittedQuery) void runRecall(submittedQuery, activeEntities);
+  };
+
+  const onDetailRetract = async () => {
+    if (!detail) return;
+    setDetailBusy(true);
+    try {
+      await apiRetractFact(spaceId, detail.fact.fact_uid);
+      await refreshDetail(detail.fact.fact_uid);
+      refreshRecall();
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
+  const onDetailRestore = async () => {
+    if (!detail) return;
+    setDetailBusy(true);
+    try {
+      await apiRestoreFact(spaceId, detail.fact.fact_uid);
+      await refreshDetail(detail.fact.fact_uid);
+      refreshRecall();
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
+  const onDetailDetachSource = async (sourceUid: string) => {
+    if (!detail) return;
+    setDetailBusy(true);
+    try {
+      const r = await apiDetachSource(spaceId, detail.fact.fact_uid, sourceUid);
+      await refreshDetail(detail.fact.fact_uid);
+      refreshRecall();
+      // If detach triggered an auto-retract, the panel updates via the
+      // refresh above; we don't need to surface a toast — the banner
+      // on the detail card already announces the new state.
+      void r;
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
+  // Controls dispatcher: server-affecting controls re-fire recall.
+  // B-50-fix: matchKinds is no longer in that set — it's a pure
+  // display filter, so changing the toggle never round-trips. keyword2
+  // is also display-only.
+  const onControlsChange = (next: SearchControlsState) => {
+    const serverChanged =
+      next.scoreThreshold !== controls.scoreThreshold ||
+      next.dateFrom !== controls.dateFrom ||
+      next.dateTo !== controls.dateTo;
+    setControls(next);
+    if (serverChanged && submittedQuery) {
+      void runRecall(submittedQuery, activeEntities, next);
+    }
+  };
+
   return (
     <div className="flex gap-4 px-4 py-6 mx-auto max-w-7xl">
-      <aside
-        aria-label="search controls placeholder"
-        data-testid="left-rail-placeholder"
-        className="hidden lg:block w-48 shrink-0 sticky top-4 self-start text-xxs text-text-muted font-mono"
-      >
-        <p className="opacity-50">검색 컨트롤 (B-50)</p>
-      </aside>
+      <SearchControlsPanel state={controls} onChange={onControlsChange} />
 
       <main className="flex-1 min-w-0">
         <header className="mb-6">
@@ -575,25 +1176,51 @@ export function RecallView({ spaceId }: Props) {
                   data-testid="recall-threshold-note"
                   className="text-xxs text-text-muted mb-4 font-mono"
                 >
-                  관련도 0.72 이상 매치만 표시 · 점수 내림차순 정렬
+                  관련도 {controls.scoreThreshold.toFixed(2)} 이상 매치만 표시 · 점수 내림차순 정렬
                   {result.expanded_count && result.expanded_count > 0
                     ? ` · 엔티티 연결로 추가된 ${result.expanded_count}건 포함`
                     : ''}
+                  {controls.keyword2.trim() && sortedFacts.length !== visibleFacts.length
+                    ? ` · 키워드 "${controls.keyword2.trim()}" 로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
+                    : ''}
                 </p>
-                {sortedFacts.map((f) => (
-                  <RecallFactCard key={f.fact_uid} fact={f} />
-                ))}
+                {visibleFacts.length === 0 ? (
+                  <p
+                    data-testid="recall-keyword-empty"
+                    className="text-sm text-text-muted py-4"
+                  >
+                    키워드 「{controls.keyword2.trim()}」 와 일치하는 결과가 없습니다.
+                  </p>
+                ) : (
+                  visibleFacts.map((f) => (
+                    <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
+                  ))
+                )}
               </>
             )}
           </section>
         )}
       </main>
 
+      {/* B-48c: right rail stays on facet/brief unconditionally;
+          fact detail is rendered as a modal overlay outside the
+          flex row so it can use the full viewport width. */}
       <FacetPanel
         facets={result?.facets}
         activeEntityUids={activeEntities}
         onToggleEntity={onToggleEntity}
       />
+
+      {detail && (
+        <FactDetailModal
+          detail={detail}
+          onClose={onCloseDetail}
+          onDetachSource={onDetailDetachSource}
+          onRetract={onDetailRetract}
+          onRestore={onDetailRestore}
+          busy={detailBusy}
+        />
+      )}
     </div>
   );
 }

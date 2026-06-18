@@ -153,6 +153,8 @@ ValidationActionLiteral = Literal[
     "accept", "edit", "discard",
     "merge_with", "create_new", "skip",
     "accept_all", "discard_job",
+    # B-48b retract/detach audit trail.
+    "retract", "restore", "detach_source",
 ]
 
 

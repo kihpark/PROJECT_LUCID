@@ -27,16 +27,23 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.models.recall import (
+    DetachSourceRequest,
     EntityBrief,
     EntityBriefGroup,
     EntityFacetItem,
     EntityFacets,
     EntityFactRef,
+    FactDetailEntity,
+    FactDetailHeader,
+    FactDetailResponse,
+    FactDetailSource,
+    FactMutationResponse,
     PredicateFacetItem,
     RecallFacets,
     RecallFact,
@@ -45,6 +52,7 @@ from api.models.recall import (
 from api.security import get_current_user
 from api.storage.elasticsearch.client import LUCID_FACTS, get_client
 from api.storage.elasticsearch.embeddings import get_embedding
+from api.storage.elasticsearch.facts import get_fact_by_uid
 from api.storage.postgres.orm import KnowledgeSpace, User
 from api.storage.postgres.session import make_sessionmaker
 
@@ -127,34 +135,71 @@ def _collect_entity_uids(facts: list[RecallFact]) -> list[str]:
     return list(seen.keys())
 
 
+def _retracted_clause(include_retracted: bool) -> dict[str, Any] | None:
+    """B-48a soft-delete filter. Default: hide facts with retracted_at
+    set. `include_retracted=True` removes the filter so the (future)
+    "철회된 사실 보기" toggle can surface them again."""
+    if include_retracted:
+        return None
+    return {"bool": {"must_not": [{"exists": {"field": "retracted_at"}}]}}
+
+
+def _date_range_filter(
+    date_from: datetime | None, date_to: datetime | None,
+) -> dict[str, Any] | None:
+    """B-50: build an ES range clause for validated_at, or None when
+    both bounds are absent. Inclusive on both sides; either side may
+    be omitted."""
+    if date_from is None and date_to is None:
+        return None
+    bounds: dict[str, Any] = {}
+    if date_from is not None:
+        bounds["gte"] = date_from.isoformat()
+    if date_to is not None:
+        bounds["lte"] = date_to.isoformat()
+    return {"range": {"validated_at": bounds}}
+
+
 def _entity_link_facts(
     entity_uids: list[str],
     knowledge_space_id: str,
     *,
     exclude_fact_uids: set[str],
     max_hits: int = 50,
+    include_retracted: bool = False,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Return hit dicts for every validated fact whose subject_uid OR
     object_value matches any of `entity_uids`. Excludes facts already
-    in the embedding pass."""
+    in the embedding pass.
+
+    B-48a: retracted facts (retracted_at != null) are filtered out by
+    default; pass `include_retracted=True` to surface them.
+
+    B-50: optional `date_from` / `date_to` clip the result set to a
+    validated_at window. Both bounds inclusive."""
     if not entity_uids:
         return []
+    filters: list[dict[str, Any]] = [
+        {"term": {"knowledge_space_id": knowledge_space_id}},
+        {"term": {"validation_method": "manual"}},
+        {"bool": {
+            "should": [
+                {"terms": {"subject_uid": entity_uids}},
+                {"terms": {"object_value": entity_uids}},
+            ],
+            "minimum_should_match": 1,
+        }},
+    ]
+    retract = _retracted_clause(include_retracted)
+    if retract is not None:
+        filters.append(retract)
+    date_clause = _date_range_filter(date_from, date_to)
+    if date_clause is not None:
+        filters.append(date_clause)
     body: dict[str, Any] = {
-        "query": {
-            "bool": {
-                "filter": [
-                    {"term": {"knowledge_space_id": knowledge_space_id}},
-                    {"term": {"validation_method": "manual"}},
-                    {"bool": {
-                        "should": [
-                            {"terms": {"subject_uid": entity_uids}},
-                            {"terms": {"object_value": entity_uids}},
-                        ],
-                        "minimum_should_match": 1,
-                    }},
-                ],
-            },
-        },
+        "query": {"bool": {"filter": filters}},
         "size": max_hits,
     }
     client = get_client()
@@ -175,12 +220,18 @@ def _knn_facts_validated_only(
     k: int,
     *,
     entity_filter_uids: list[str] | None = None,
+    include_retracted: bool = False,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """ES kNN with hard filters: space + validation_method=manual.
 
     B-49: when `entity_filter_uids` is supplied, every hit MUST
     reference EVERY entity uid on subject_uid OR object_value (AND
     intersection). Pure ES query — no app-side loop.
+
+    B-48a: retracted facts are filtered out by default.
+    B-50: optional date_from / date_to clip validated_at inclusively.
     """
     filters: list[dict[str, Any]] = [
         {"term": {"knowledge_space_id": knowledge_space_id}},
@@ -191,6 +242,12 @@ def _knn_facts_validated_only(
             {"term": {"subject_uid": uid}},
             {"term": {"object_value": uid}},
         ], "minimum_should_match": 1}})
+    retract = _retracted_clause(include_retracted)
+    if retract is not None:
+        filters.append(retract)
+    date_clause = _date_range_filter(date_from, date_to)
+    if date_clause is not None:
+        filters.append(date_clause)
     body: dict[str, Any] = {
         "knn": {
             "field": "embedding",
@@ -677,6 +734,20 @@ def recall(
     q: str = Query(..., min_length=1, max_length=2000, description="Query"),
     limit: int = Query(default=RECALL_DEFAULT_K, ge=1, le=RECALL_MAX_K),
     entity: list[str] = Query(default_factory=list, alias="entity"),
+    include_retracted: bool = Query(
+        default=False,
+        description="B-48a: surface facts with retracted_at set (default hides them)",
+    ),
+    score_threshold: float | None = Query(
+        default=None, ge=0.0, le=1.0,
+        description="B-50: override RECALL_SCORE_FLOOR (default 0.72)",
+    ),
+    date_from: datetime | None = Query(
+        default=None, description="B-50: validated_at >= date_from",
+    ),
+    date_to: datetime | None = Query(
+        default=None, description="B-50: validated_at <= date_to",
+    ),
     user: User = Depends(get_current_user),
 ) -> RecallResponse:
     """Return validated facts whose embedding is close to `q`.
@@ -687,10 +758,21 @@ def recall(
         the index (enforced inside the ES kNN filter clause AND
         re-checked in the serialiser).
       - 0 hits — whether the index is empty, the query is irrelevant,
-        or every hit is below RECALL_SCORE_FLOOR — produces the same
+        or every hit is below the threshold — produces the same
         empty envelope. We do NOT generate, paraphrase, or augment.
       - Korean queries work first-class because the embedding model
         (OpenAI text-embedding-3-small) is multilingual.
+
+    Refinements (all additive; default behaviour unchanged):
+      - score_threshold (B-50): override RECALL_SCORE_FLOOR per call.
+      - date_from / date_to (B-50): validated_at window, inclusive.
+      - include_retracted (B-48a): surface soft-deleted facts.
+
+    B-50-fix (PO directive 2026-06-18, A direction): the server NO
+    LONGER honours a `match_kinds` query param. Embedding (kNN) is
+    the search mode; entity-link expansion always runs after.
+    `match_kind` lives as a display-side filter only — the client
+    receives the full envelope and hides 🔍 / 🔗 rows in the UI.
 
     Failure-mode handling: any infrastructure error (no embedding API,
     ES down) returns the empty envelope rather than a 500. Recall must
@@ -703,6 +785,19 @@ def recall(
     finally:
         session.close()
 
+    # Defensive normalize: tests call this route directly without
+    # FastAPI dependency resolution, so Query() sentinel objects can
+    # leak in as defaults for list / bool params.
+    include_retracted_bool = bool(include_retracted) if isinstance(
+        include_retracted, bool,
+    ) else False
+    entity_uids_in: list[str] = entity if isinstance(entity, list) else []
+    threshold = score_threshold if isinstance(
+        score_threshold, (int, float),
+    ) else RECALL_SCORE_FLOOR
+    df = date_from if isinstance(date_from, datetime) else None
+    dt = date_to if isinstance(date_to, datetime) else None
+
     embedding = get_embedding(q)
     if embedding is None:
         return _empty("embedding_unavailable")
@@ -710,7 +805,10 @@ def recall(
     try:
         hits = _knn_facts_validated_only(
             list(embedding), str(ks.id), limit,
-            entity_filter_uids=list(entity),
+            entity_filter_uids=list(entity_uids_in),
+            include_retracted=include_retracted_bool,
+            date_from=df,
+            date_to=dt,
         )
     except Exception as exc:  # noqa: BLE001 - degrade quietly
         logger.warning("recall: ES kNN failed: %s", exc)
@@ -719,7 +817,7 @@ def recall(
     facts: list[RecallFact] = []
     for hit in hits:
         score = float(hit.get("_score") or 0.0)
-        if score < RECALL_SCORE_FLOOR:
+        if score < threshold:
             # Hits are sorted by score desc; first below-floor → stop.
             break
         fact = _hit_to_fact(hit)
@@ -733,16 +831,20 @@ def recall(
     # in this knowledge_space that references any of the same
     # canonical Object uids. This is the graph join PO asked for —
     # "SpaceX 검색 -> SpaceX 가 subject 든 object 든 등장하는 fact 전부".
-    # Degrade quietly on any ES error — the embedding matches above
-    # are already a complete answer.
+    # B-50-fix: always runs — the client filters 🔗 rows on display
+    # if the user wants to hide them.
+    expansion_count = 0
+    link_hits: list[dict[str, Any]] = []
     entity_uids = _collect_entity_uids(facts)
     already = {f.fact_uid for f in facts}
-    expansion_count = 0
     try:
         link_hits = _entity_link_facts(
             entity_uids, str(ks.id),
             exclude_fact_uids=already,
             max_hits=max(RECALL_MAX_K, limit * 5),
+            include_retracted=include_retracted_bool,
+            date_from=df,
+            date_to=dt,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("recall: entity-link expansion failed: %s", exc)
@@ -753,11 +855,11 @@ def recall(
             continue
         # B-49: entity filter is AND. Drop expanded facts that don't
         # reference every active filter uid.
-        if entity:
+        if entity_uids_in:
             src = hit.get("_source") or {}
             ok = all(
                 src.get("subject_uid") == uid or src.get("object_value") == uid
-                for uid in entity
+                for uid in entity_uids_in
             )
             if not ok:
                 continue
@@ -784,4 +886,354 @@ def recall(
         expanded_count=expansion_count,
         entity_brief=brief,
         facets=facets,
+    )
+
+
+# ---------------------------------------------------------------------------
+# B-48b — fact detail + retract / restore / detach-source
+# ---------------------------------------------------------------------------
+
+def _resolve_object_for_detail(
+    uid: str, knowledge_space_id: str, role: str,
+) -> FactDetailEntity | None:
+    """Fetch one Object doc and project it into a FactDetailEntity.
+    Returns None when the uid doesn't resolve — the panel falls back
+    to showing the raw value in that case."""
+    from api.storage.elasticsearch.client import LUCID_OBJECTS
+    client = get_client()
+    try:
+        if not client.exists(index=LUCID_OBJECTS, id=uid):
+            return None
+        doc = client.get(index=LUCID_OBJECTS, id=uid)["_source"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fact-detail: object lookup failed for %s: %s", uid, exc)
+        return None
+    if doc.get("knowledge_space_id") != knowledge_space_id:
+        return None
+    aliases_raw = doc.get("aliases") or []
+    return FactDetailEntity(
+        uid=uid,
+        name=doc.get("name") or uid,
+        name_en=doc.get("name_en"),
+        **{"class": doc.get("class")},
+        role=role,  # type: ignore[arg-type]
+        aliases=list(aliases_raw) if isinstance(aliases_raw, list) else [],
+    )
+
+
+def _resolve_sources_for_detail(
+    source_uids: list[str], knowledge_space_id: str,
+) -> list[FactDetailSource]:
+    """Walk the lucid_sources index for each source_uid and the
+    Postgres source_jobs table for snapshot availability. Order
+    follows the fact's source_uids list so the UI's "이 출처만 떼기"
+    rows stay stable across re-renders."""
+    if not source_uids:
+        return []
+    from api.storage.elasticsearch.client import LUCID_SOURCES
+    client = get_client()
+    out: list[FactDetailSource] = []
+    snapshot_check_jobs: list[tuple[int, str]] = []
+    for idx, suid in enumerate(source_uids):
+        try:
+            if not client.exists(index=LUCID_SOURCES, id=suid):
+                continue
+            doc = client.get(index=LUCID_SOURCES, id=suid)["_source"]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "fact-detail: source lookup failed for %s: %s", suid, exc,
+            )
+            continue
+        if doc.get("knowledge_space_id") != knowledge_space_id:
+            continue
+        job_id = doc.get("source_job_id")
+        out.append(FactDetailSource(
+            source_uid=suid,
+            source_job_id=job_id,
+            url=doc.get("url") or "",
+            domain=doc.get("domain"),
+            captured_at=doc.get("captured_at"),
+            source_type=doc.get("source_type"),
+            author=doc.get("author"),
+            title=doc.get("title"),
+            snapshot_available=False,
+        ))
+        if job_id:
+            snapshot_check_jobs.append((idx, job_id))
+    # One DB round-trip to check which source_jobs still carry the
+    # raw_payload bytes (snapshot view in B-48b/Phase-2).
+    if snapshot_check_jobs:
+        from api.storage.postgres.orm import SourceJobORM
+        session = _new_session()
+        try:
+            for _idx, job_id in snapshot_check_jobs:
+                try:
+                    job_uuid = uuid.UUID(job_id)
+                except (TypeError, ValueError):
+                    continue
+                job = session.get(SourceJobORM, job_uuid)
+                if job is not None and job.raw_payload:
+                    # `out` is indexed in the same order as input so
+                    # this lookup stays cheap.
+                    out_idx = next(
+                        (i for i, s in enumerate(out)
+                         if s.source_job_id == job_id), None,
+                    )
+                    if out_idx is not None:
+                        out[out_idx] = out[out_idx].model_copy(
+                            update={"snapshot_available": True},
+                        )
+        finally:
+            session.close()
+    return out
+
+
+def _build_fact_detail(
+    fact_uid: str, knowledge_space_id: str,
+) -> FactDetailResponse | None:
+    """Read one fact + its referenced entities + its sources."""
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None:
+        return None
+    if fact_doc.get("knowledge_space_id") != knowledge_space_id:
+        return None
+
+    # Subject is always an entity ref; object_value is sometimes a
+    # literal — only resolve the object when it shapes like a uid.
+    subject_entity = _resolve_object_for_detail(
+        fact_doc["subject_uid"], knowledge_space_id, role="subject",
+    )
+    object_value = fact_doc.get("object_value") or ""
+    object_entity = None
+    if _is_entity_ref(object_value):
+        object_entity = _resolve_object_for_detail(
+            object_value, knowledge_space_id, role="object",
+        )
+    entities: list[FactDetailEntity] = [
+        e for e in (subject_entity, object_entity) if e is not None
+    ]
+
+    sources = _resolve_sources_for_detail(
+        list(fact_doc.get("source_uids") or []), knowledge_space_id,
+    )
+
+    header = FactDetailHeader(
+        fact_uid=fact_doc["fact_uid"],
+        claim=fact_doc["claim"],
+        claim_en=fact_doc.get("claim_en"),
+        subject_uid=fact_doc["subject_uid"],
+        subject_label=subject_entity.name if subject_entity else None,
+        predicate=fact_doc["predicate"],
+        object_value=object_value,
+        object_label=object_entity.name if object_entity else None,
+        validated_at=fact_doc["validated_at"],
+        retracted_at=fact_doc.get("retracted_at"),
+        retracted_by=fact_doc.get("retracted_by"),
+        edit_history=list(fact_doc.get("edit_history") or []),
+    )
+
+    return FactDetailResponse(fact=header, entities=entities, sources=sources)
+
+
+@router.get(
+    "/facts/{fact_uid}",
+    response_model=FactDetailResponse,
+)
+def fact_detail(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    user: User = Depends(get_current_user),
+) -> FactDetailResponse:
+    """B-48b: full fact detail for the right-panel swap."""
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+    detail = _build_fact_detail(fact_uid, str(space_id))
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    return detail
+
+
+def _record_retract_audit(
+    user_id: uuid.UUID,
+    fact_uid: str,
+    action: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Log retract / restore / detach_source into validation_logs.
+    Quiet failure — the mutation has already succeeded in ES, so a
+    DB hiccup here shouldn't 500 the user."""
+    from api.metrics.precision import record_validation_decision
+    session = _new_session()
+    try:
+        record_validation_decision(
+            session,
+            user_id=user_id, validator_id=user_id,
+            source_job_id=None,
+            fact_uid=fact_uid,
+            object_uid=None,
+            action=action,  # type: ignore[arg-type]
+            decision_metadata=metadata,
+        )
+        session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("audit: %s for %s failed: %s", action, fact_uid, exc)
+    finally:
+        session.close()
+
+
+def _set_retracted(
+    fact_uid: str, retracted_at_iso: str | None, retracted_by: str | None,
+) -> None:
+    """Partial-update a FactNode's retract fields in lucid_facts."""
+    client = get_client()
+    if not client.exists(index=LUCID_FACTS, id=fact_uid):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    doc: dict[str, Any] = {
+        "retracted_at": retracted_at_iso,
+        "retracted_by": retracted_by,
+    }
+    client.update(
+        index=LUCID_FACTS, id=fact_uid, doc=doc, refresh="wait_for",
+    )
+
+
+@router.post(
+    "/facts/{fact_uid}/retract",
+    response_model=FactMutationResponse,
+)
+def retract_fact(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    user: User = Depends(get_current_user),
+) -> FactMutationResponse:
+    """B-48b ★ soft-delete a fact. Recall hides it by default; a
+    later restore call reverts. The retracted_at stamp goes onto
+    `lucid_facts` and an audit row lands in validation_logs."""
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None or fact_doc.get("knowledge_space_id") != str(space_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    from datetime import UTC
+    from datetime import datetime as _dt
+    now_dt = _dt.now(UTC)
+    _set_retracted(fact_uid, now_dt.isoformat(), str(user.id))
+    _record_retract_audit(user.id, fact_uid, "retract")
+    return FactMutationResponse(
+        fact_uid=fact_uid,
+        retracted_at=now_dt,
+        source_uids=list(fact_doc.get("source_uids") or []),
+        auto_retracted=False,
+    )
+
+
+@router.post(
+    "/facts/{fact_uid}/restore",
+    response_model=FactMutationResponse,
+)
+def restore_fact(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    user: User = Depends(get_current_user),
+) -> FactMutationResponse:
+    """B-48b ★ undo a retract by clearing retracted_at / retracted_by."""
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None or fact_doc.get("knowledge_space_id") != str(space_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    _set_retracted(fact_uid, None, None)
+    _record_retract_audit(user.id, fact_uid, "restore")
+    return FactMutationResponse(
+        fact_uid=fact_uid,
+        retracted_at=None,
+        source_uids=list(fact_doc.get("source_uids") or []),
+        auto_retracted=False,
+    )
+
+
+@router.post(
+    "/facts/{fact_uid}/detach-source",
+    response_model=FactMutationResponse,
+)
+def detach_source(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    req: DetachSourceRequest,
+    user: User = Depends(get_current_user),
+) -> FactMutationResponse:
+    """B-48b ★ remove one source from a fact's source_uids.
+
+    PO directive 2026-06-18 [B-48 decision 2]: when the LAST source
+    is detached, the fact has nothing left to back it up — auto
+    retract so the recall surface stays honest. Restore brings it
+    back; the source can be re-attached on the next capture."""
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None or fact_doc.get("knowledge_space_id") != str(space_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    current = list(fact_doc.get("source_uids") or [])
+    if req.source_uid not in current:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="source_not_attached_to_fact",
+        )
+    next_sources = [s for s in current if s != req.source_uid]
+    client = get_client()
+    update_doc: dict[str, Any] = {"source_uids": next_sources}
+    auto_retracted = False
+    # Pass-through the existing retracted_at (string from ES) — the
+    # Pydantic model will coerce it to datetime on response.
+    retracted_at_out: Any = fact_doc.get("retracted_at")
+    if not next_sources and not fact_doc.get("retracted_at"):
+        from datetime import UTC
+        from datetime import datetime as _dt
+        now_dt = _dt.now(UTC)
+        retracted_at_out = now_dt
+        update_doc["retracted_at"] = now_dt.isoformat()
+        update_doc["retracted_by"] = str(user.id)
+        auto_retracted = True
+    client.update(
+        index=LUCID_FACTS, id=fact_uid, doc=update_doc, refresh="wait_for",
+    )
+
+    _record_retract_audit(
+        user.id, fact_uid, "detach_source",
+        metadata={
+            "source_uid": req.source_uid,
+            "auto_retracted": auto_retracted,
+        },
+    )
+
+    return FactMutationResponse(
+        fact_uid=fact_uid,
+        retracted_at=retracted_at_out,
+        source_uids=next_sources,
+        auto_retracted=auto_retracted,
     )

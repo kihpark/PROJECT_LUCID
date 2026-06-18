@@ -83,24 +83,40 @@ def test_1hop_traversal_filtered_by_link_type(es_indexes, fake_embedding):
     assert {n["name"] for n in only_part_of} == {"B"}
 
 
-def test_source_create_or_update_increments(es_indexes):
+def test_source_create_or_update_increments_on_same_url(es_indexes):
+    """B-48a: dedup key is (KS, url). Capturing the SAME URL twice
+    bumps capture_count on the existing doc. Two DIFFERENT URLs on
+    the same domain land as two separate Source docs so the
+    "검증된 출처 N건" count reflects independent articles, not
+    domain-level repetition."""
     from api.storage.elasticsearch import sources
     space = new_uid()
-    sources.create_or_update_source(
+    first = sources.create_or_update_source(
         domain="wsj.com",
         source_type="web_article",
         url="https://wsj.com/a/1",
         knowledge_space_id=space,
         title="article 1",
     )
-    s = sources.create_or_update_source(
+    same_url = sources.create_or_update_source(
+        domain="wsj.com",
+        source_type="web_article",
+        url="https://wsj.com/a/1",
+        knowledge_space_id=space,
+        title="article 1 (recaptured)",
+    )
+    different_url = sources.create_or_update_source(
         domain="wsj.com",
         source_type="web_article",
         url="https://wsj.com/a/2",
         knowledge_space_id=space,
         title="article 2",
     )
-    assert s["capture_count"] == 2
+    # Same URL → bump; different URL → fresh doc with capture_count=1.
+    assert same_url["source_uid"] == first["source_uid"]
+    assert same_url["capture_count"] == 2
+    assert different_url["source_uid"] != first["source_uid"]
+    assert different_url["capture_count"] == 1
 
 
 def test_index_idempotent_recreation(es_indexes):
