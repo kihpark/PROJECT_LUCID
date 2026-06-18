@@ -5,6 +5,8 @@ import { getToken, clearToken } from './auth';
 import type {
   DecideRequest,
   DecideResponse,
+  FactDetailResponse,
+  FactMutationResponse,
   GraphNote,
   KnowledgeSpacePublic,
   LoginRequest,
@@ -203,5 +205,44 @@ export function recall(
   }
   return request<RecallResponse>(
     `/api/spaces/${spaceId}/recall?${params.toString()}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B-48b — fact detail + retract / restore / detach-source
+// ---------------------------------------------------------------------------
+
+export function getFactDetail(
+  spaceId: string, factUid: string,
+): Promise<FactDetailResponse> {
+  return request<FactDetailResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}`,
+  );
+}
+
+export function retractFact(
+  spaceId: string, factUid: string,
+): Promise<FactMutationResponse> {
+  return request<FactMutationResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/retract`,
+    { method: 'POST' },
+  );
+}
+
+export function restoreFact(
+  spaceId: string, factUid: string,
+): Promise<FactMutationResponse> {
+  return request<FactMutationResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/restore`,
+    { method: 'POST' },
+  );
+}
+
+export function detachSource(
+  spaceId: string, factUid: string, sourceUid: string,
+): Promise<FactMutationResponse> {
+  return request<FactMutationResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/detach-source`,
+    { method: 'POST', body: JSON.stringify({ source_uid: sourceUid }) },
   );
 }

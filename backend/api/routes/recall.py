@@ -33,11 +33,17 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.models.recall import (
+    DetachSourceRequest,
     EntityBrief,
     EntityBriefGroup,
     EntityFacetItem,
     EntityFacets,
     EntityFactRef,
+    FactDetailEntity,
+    FactDetailHeader,
+    FactDetailResponse,
+    FactDetailSource,
+    FactMutationResponse,
     PredicateFacetItem,
     RecallFacets,
     RecallFact,
@@ -46,6 +52,7 @@ from api.models.recall import (
 from api.security import get_current_user
 from api.storage.elasticsearch.client import LUCID_FACTS, get_client
 from api.storage.elasticsearch.embeddings import get_embedding
+from api.storage.elasticsearch.facts import get_fact_by_uid
 from api.storage.postgres.orm import KnowledgeSpace, User
 from api.storage.postgres.session import make_sessionmaker
 
@@ -901,4 +908,354 @@ def recall(
         expanded_count=expansion_count,
         entity_brief=brief,
         facets=facets,
+    )
+
+
+# ---------------------------------------------------------------------------
+# B-48b — fact detail + retract / restore / detach-source
+# ---------------------------------------------------------------------------
+
+def _resolve_object_for_detail(
+    uid: str, knowledge_space_id: str, role: str,
+) -> FactDetailEntity | None:
+    """Fetch one Object doc and project it into a FactDetailEntity.
+    Returns None when the uid doesn't resolve — the panel falls back
+    to showing the raw value in that case."""
+    from api.storage.elasticsearch.client import LUCID_OBJECTS
+    client = get_client()
+    try:
+        if not client.exists(index=LUCID_OBJECTS, id=uid):
+            return None
+        doc = client.get(index=LUCID_OBJECTS, id=uid)["_source"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fact-detail: object lookup failed for %s: %s", uid, exc)
+        return None
+    if doc.get("knowledge_space_id") != knowledge_space_id:
+        return None
+    aliases_raw = doc.get("aliases") or []
+    return FactDetailEntity(
+        uid=uid,
+        name=doc.get("name") or uid,
+        name_en=doc.get("name_en"),
+        **{"class": doc.get("class")},
+        role=role,  # type: ignore[arg-type]
+        aliases=list(aliases_raw) if isinstance(aliases_raw, list) else [],
+    )
+
+
+def _resolve_sources_for_detail(
+    source_uids: list[str], knowledge_space_id: str,
+) -> list[FactDetailSource]:
+    """Walk the lucid_sources index for each source_uid and the
+    Postgres source_jobs table for snapshot availability. Order
+    follows the fact's source_uids list so the UI's "이 출처만 떼기"
+    rows stay stable across re-renders."""
+    if not source_uids:
+        return []
+    from api.storage.elasticsearch.client import LUCID_SOURCES
+    client = get_client()
+    out: list[FactDetailSource] = []
+    snapshot_check_jobs: list[tuple[int, str]] = []
+    for idx, suid in enumerate(source_uids):
+        try:
+            if not client.exists(index=LUCID_SOURCES, id=suid):
+                continue
+            doc = client.get(index=LUCID_SOURCES, id=suid)["_source"]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "fact-detail: source lookup failed for %s: %s", suid, exc,
+            )
+            continue
+        if doc.get("knowledge_space_id") != knowledge_space_id:
+            continue
+        job_id = doc.get("source_job_id")
+        out.append(FactDetailSource(
+            source_uid=suid,
+            source_job_id=job_id,
+            url=doc.get("url") or "",
+            domain=doc.get("domain"),
+            captured_at=doc.get("captured_at"),
+            source_type=doc.get("source_type"),
+            author=doc.get("author"),
+            title=doc.get("title"),
+            snapshot_available=False,
+        ))
+        if job_id:
+            snapshot_check_jobs.append((idx, job_id))
+    # One DB round-trip to check which source_jobs still carry the
+    # raw_payload bytes (snapshot view in B-48b/Phase-2).
+    if snapshot_check_jobs:
+        from api.storage.postgres.orm import SourceJobORM
+        session = _new_session()
+        try:
+            for _idx, job_id in snapshot_check_jobs:
+                try:
+                    job_uuid = uuid.UUID(job_id)
+                except (TypeError, ValueError):
+                    continue
+                job = session.get(SourceJobORM, job_uuid)
+                if job is not None and job.raw_payload:
+                    # `out` is indexed in the same order as input so
+                    # this lookup stays cheap.
+                    out_idx = next(
+                        (i for i, s in enumerate(out)
+                         if s.source_job_id == job_id), None,
+                    )
+                    if out_idx is not None:
+                        out[out_idx] = out[out_idx].model_copy(
+                            update={"snapshot_available": True},
+                        )
+        finally:
+            session.close()
+    return out
+
+
+def _build_fact_detail(
+    fact_uid: str, knowledge_space_id: str,
+) -> FactDetailResponse | None:
+    """Read one fact + its referenced entities + its sources."""
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None:
+        return None
+    if fact_doc.get("knowledge_space_id") != knowledge_space_id:
+        return None
+
+    # Subject is always an entity ref; object_value is sometimes a
+    # literal — only resolve the object when it shapes like a uid.
+    subject_entity = _resolve_object_for_detail(
+        fact_doc["subject_uid"], knowledge_space_id, role="subject",
+    )
+    object_value = fact_doc.get("object_value") or ""
+    object_entity = None
+    if _is_entity_ref(object_value):
+        object_entity = _resolve_object_for_detail(
+            object_value, knowledge_space_id, role="object",
+        )
+    entities: list[FactDetailEntity] = [
+        e for e in (subject_entity, object_entity) if e is not None
+    ]
+
+    sources = _resolve_sources_for_detail(
+        list(fact_doc.get("source_uids") or []), knowledge_space_id,
+    )
+
+    header = FactDetailHeader(
+        fact_uid=fact_doc["fact_uid"],
+        claim=fact_doc["claim"],
+        claim_en=fact_doc.get("claim_en"),
+        subject_uid=fact_doc["subject_uid"],
+        subject_label=subject_entity.name if subject_entity else None,
+        predicate=fact_doc["predicate"],
+        object_value=object_value,
+        object_label=object_entity.name if object_entity else None,
+        validated_at=fact_doc["validated_at"],
+        retracted_at=fact_doc.get("retracted_at"),
+        retracted_by=fact_doc.get("retracted_by"),
+        edit_history=list(fact_doc.get("edit_history") or []),
+    )
+
+    return FactDetailResponse(fact=header, entities=entities, sources=sources)
+
+
+@router.get(
+    "/facts/{fact_uid}",
+    response_model=FactDetailResponse,
+)
+def fact_detail(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    user: User = Depends(get_current_user),
+) -> FactDetailResponse:
+    """B-48b: full fact detail for the right-panel swap."""
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+    detail = _build_fact_detail(fact_uid, str(space_id))
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    return detail
+
+
+def _record_retract_audit(
+    user_id: uuid.UUID,
+    fact_uid: str,
+    action: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Log retract / restore / detach_source into validation_logs.
+    Quiet failure — the mutation has already succeeded in ES, so a
+    DB hiccup here shouldn't 500 the user."""
+    from api.metrics.precision import record_validation_decision
+    session = _new_session()
+    try:
+        record_validation_decision(
+            session,
+            user_id=user_id, validator_id=user_id,
+            source_job_id=None,
+            fact_uid=fact_uid,
+            object_uid=None,
+            action=action,  # type: ignore[arg-type]
+            decision_metadata=metadata,
+        )
+        session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("audit: %s for %s failed: %s", action, fact_uid, exc)
+    finally:
+        session.close()
+
+
+def _set_retracted(
+    fact_uid: str, retracted_at_iso: str | None, retracted_by: str | None,
+) -> None:
+    """Partial-update a FactNode's retract fields in lucid_facts."""
+    client = get_client()
+    if not client.exists(index=LUCID_FACTS, id=fact_uid):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    doc: dict[str, Any] = {
+        "retracted_at": retracted_at_iso,
+        "retracted_by": retracted_by,
+    }
+    client.update(
+        index=LUCID_FACTS, id=fact_uid, doc=doc, refresh="wait_for",
+    )
+
+
+@router.post(
+    "/facts/{fact_uid}/retract",
+    response_model=FactMutationResponse,
+)
+def retract_fact(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    user: User = Depends(get_current_user),
+) -> FactMutationResponse:
+    """B-48b ★ soft-delete a fact. Recall hides it by default; a
+    later restore call reverts. The retracted_at stamp goes onto
+    `lucid_facts` and an audit row lands in validation_logs."""
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None or fact_doc.get("knowledge_space_id") != str(space_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    from datetime import UTC
+    from datetime import datetime as _dt
+    now_dt = _dt.now(UTC)
+    _set_retracted(fact_uid, now_dt.isoformat(), str(user.id))
+    _record_retract_audit(user.id, fact_uid, "retract")
+    return FactMutationResponse(
+        fact_uid=fact_uid,
+        retracted_at=now_dt,
+        source_uids=list(fact_doc.get("source_uids") or []),
+        auto_retracted=False,
+    )
+
+
+@router.post(
+    "/facts/{fact_uid}/restore",
+    response_model=FactMutationResponse,
+)
+def restore_fact(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    user: User = Depends(get_current_user),
+) -> FactMutationResponse:
+    """B-48b ★ undo a retract by clearing retracted_at / retracted_by."""
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None or fact_doc.get("knowledge_space_id") != str(space_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    _set_retracted(fact_uid, None, None)
+    _record_retract_audit(user.id, fact_uid, "restore")
+    return FactMutationResponse(
+        fact_uid=fact_uid,
+        retracted_at=None,
+        source_uids=list(fact_doc.get("source_uids") or []),
+        auto_retracted=False,
+    )
+
+
+@router.post(
+    "/facts/{fact_uid}/detach-source",
+    response_model=FactMutationResponse,
+)
+def detach_source(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    req: DetachSourceRequest,
+    user: User = Depends(get_current_user),
+) -> FactMutationResponse:
+    """B-48b ★ remove one source from a fact's source_uids.
+
+    PO directive 2026-06-18 [B-48 decision 2]: when the LAST source
+    is detached, the fact has nothing left to back it up — auto
+    retract so the recall surface stays honest. Restore brings it
+    back; the source can be re-attached on the next capture."""
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None or fact_doc.get("knowledge_space_id") != str(space_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    current = list(fact_doc.get("source_uids") or [])
+    if req.source_uid not in current:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="source_not_attached_to_fact",
+        )
+    next_sources = [s for s in current if s != req.source_uid]
+    client = get_client()
+    update_doc: dict[str, Any] = {"source_uids": next_sources}
+    auto_retracted = False
+    # Pass-through the existing retracted_at (string from ES) — the
+    # Pydantic model will coerce it to datetime on response.
+    retracted_at_out: Any = fact_doc.get("retracted_at")
+    if not next_sources and not fact_doc.get("retracted_at"):
+        from datetime import UTC
+        from datetime import datetime as _dt
+        now_dt = _dt.now(UTC)
+        retracted_at_out = now_dt
+        update_doc["retracted_at"] = now_dt.isoformat()
+        update_doc["retracted_by"] = str(user.id)
+        auto_retracted = True
+    client.update(
+        index=LUCID_FACTS, id=fact_uid, doc=update_doc, refresh="wait_for",
+    )
+
+    _record_retract_audit(
+        user.id, fact_uid, "detach_source",
+        metadata={
+            "source_uid": req.source_uid,
+            "auto_retracted": auto_retracted,
+        },
+    )
+
+    return FactMutationResponse(
+        fact_uid=fact_uid,
+        retracted_at=retracted_at_out,
+        source_uids=next_sources,
+        auto_retracted=auto_retracted,
     )

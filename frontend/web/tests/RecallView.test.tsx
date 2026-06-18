@@ -5,6 +5,11 @@ import type { RecallResponse } from '@/lib/types';
 
 vi.mock('@/lib/api', () => ({
   recall: vi.fn(),
+  // B-48b detail panel + retract/restore/detach
+  getFactDetail: vi.fn(),
+  retractFact: vi.fn(),
+  restoreFact: vi.fn(),
+  detachSource: vi.fn(),
   ApiError: class extends Error {
     status = 0;
     detail: string | undefined;
@@ -725,5 +730,227 @@ describe('RecallView — left search controls (B-50)', () => {
         scoreThreshold: 0.8,
       }),
     );
+  });
+});
+
+
+describe('RecallView — fact detail panel (B-48b)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const detailWithTwoSources = {
+    fact: {
+      fact_uid: 'fn-1',
+      claim: '한국은행 기준금리는 2024년 12월 기준 3.0%였다.',
+      claim_en: null,
+      subject_uid: 'uid-bok',
+      subject_label: '한국은행',
+      predicate: 'base_rate',
+      object_value: '3.0%',
+      object_label: null,
+      validated_at: '2026-06-01T10:00:00Z',
+      retracted_at: null,
+      retracted_by: null,
+      edit_history: [],
+    },
+    entities: [
+      { uid: 'uid-bok', name: '한국은행', class: 'organization', role: 'subject', aliases: [] },
+    ],
+    sources: [
+      {
+        source_uid: 'src-A',
+        source_job_id: 'job-A',
+        url: 'https://hankyung.com/a/1',
+        domain: 'hankyung.com',
+        captured_at: '2026-05-28T10:00:00Z',
+        source_type: 'web_article',
+        snapshot_available: true,
+      },
+      {
+        source_uid: 'src-B',
+        source_job_id: 'job-B',
+        url: 'https://yna.co.kr/b/2',
+        domain: 'yna.co.kr',
+        captured_at: '2026-05-30T10:00:00Z',
+        source_type: 'web_article',
+        snapshot_available: false,
+      },
+    ],
+  };
+
+  async function bootstrap() {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'BoK' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+  }
+
+  it('★ clicking a fact card opens the detail panel with sources + trust badge', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    // FacetPanel is rendered before the click.
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('fact-detail-panel')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await waitFor(() => expect(api.getFactDetail).toHaveBeenCalledWith('ks-1', 'fn-1'));
+
+    // Panel swap happened — facet gone, detail showing.
+    expect(screen.queryByTestId('facet-panel')).toBeNull();
+    expect(await screen.findByTestId('fact-detail-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-detail-claim')).toHaveTextContent('한국은행 기준금리');
+    // ★ both sources listed with their domains
+    expect(screen.getByTestId('fact-detail-source-src-A')).toHaveTextContent('hankyung.com');
+    expect(screen.getByTestId('fact-detail-source-src-B')).toHaveTextContent('yna.co.kr');
+    // ★ trust badge surfaces for ≥2 sources
+    expect(screen.getByTestId('fact-detail-trust-badge')).toBeInTheDocument();
+  });
+
+  it('★ close button swaps back to the facet panel', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-panel');
+
+    fireEvent.click(screen.getByTestId('fact-detail-close'));
+    expect(screen.queryByTestId('fact-detail-panel')).toBeNull();
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+  });
+
+  it('★ "이 출처만 떼기" calls detachSource and refreshes', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-panel');
+
+    // After detach, the refresh fetches a body with one fewer source.
+    const afterDetach = {
+      ...detailWithTwoSources,
+      sources: [detailWithTwoSources.sources[1]],
+    };
+    (api.detachSource as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact_uid: 'fn-1', retracted_at: null,
+      source_uids: ['src-B'], auto_retracted: false,
+    });
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(afterDetach);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+
+    fireEvent.click(screen.getByTestId('fact-detail-detach-src-A'));
+    await waitFor(() =>
+      expect(api.detachSource).toHaveBeenCalledWith('ks-1', 'fn-1', 'src-A'),
+    );
+    // The trust badge should disappear when count drops to 1.
+    await waitFor(() =>
+      expect(screen.queryByTestId('fact-detail-trust-badge')).toBeNull(),
+    );
+    expect(screen.queryByTestId('fact-detail-source-src-A')).toBeNull();
+    expect(screen.getByTestId('fact-detail-source-src-B')).toBeInTheDocument();
+  });
+
+  it('★ "사실 철회" triggers retract + retracted banner appears on refresh', async () => {
+    await bootstrap();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-panel');
+
+    const retracted = {
+      ...detailWithTwoSources,
+      fact: {
+        ...detailWithTwoSources.fact,
+        retracted_at: '2026-06-18T05:00:00Z',
+        retracted_by: 'u-1',
+      },
+    };
+    (api.retractFact as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact_uid: 'fn-1', retracted_at: '2026-06-18T05:00:00Z',
+      source_uids: ['src-A','src-B'], auto_retracted: false,
+    });
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(retracted);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+
+    fireEvent.click(screen.getByTestId('fact-detail-retract'));
+    await waitFor(() => expect(api.retractFact).toHaveBeenCalledWith('ks-1', 'fn-1'));
+    expect(await screen.findByTestId('fact-detail-retracted-banner')).toBeInTheDocument();
+    // The button swaps to "복구" on the retracted state.
+    expect(screen.getByTestId('fact-detail-restore')).toBeInTheDocument();
+    expect(screen.queryByTestId('fact-detail-retract')).toBeNull();
+  });
+
+  it('★ "복구" reverses retract', async () => {
+    await bootstrap();
+    const retracted = {
+      ...detailWithTwoSources,
+      fact: {
+        ...detailWithTwoSources.fact,
+        retracted_at: '2026-06-18T05:00:00Z',
+        retracted_by: 'u-1',
+      },
+    };
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(retracted);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-panel');
+    expect(screen.getByTestId('fact-detail-restore')).toBeInTheDocument();
+
+    (api.restoreFact as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact_uid: 'fn-1', retracted_at: null,
+      source_uids: ['src-A','src-B'], auto_retracted: false,
+    });
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailWithTwoSources);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+
+    fireEvent.click(screen.getByTestId('fact-detail-restore'));
+    await waitFor(() => expect(api.restoreFact).toHaveBeenCalledWith('ks-1', 'fn-1'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('fact-detail-retracted-banner')).toBeNull(),
+    );
+    expect(screen.getByTestId('fact-detail-retract')).toBeInTheDocument();
+  });
+
+  it('detaching the last source flips the panel into retracted state', async () => {
+    await bootstrap();
+    const oneSource = {
+      ...detailWithTwoSources,
+      sources: [detailWithTwoSources.sources[0]],
+    };
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(oneSource);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-panel');
+
+    // Detach returns auto_retracted=true; refresh shows retracted + no sources.
+    const afterAuto = {
+      ...detailWithTwoSources,
+      fact: {
+        ...detailWithTwoSources.fact,
+        retracted_at: '2026-06-18T05:00:00Z',
+        retracted_by: 'u-1',
+      },
+      sources: [],
+    };
+    (api.detachSource as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact_uid: 'fn-1', retracted_at: '2026-06-18T05:00:00Z',
+      source_uids: [], auto_retracted: true,
+    });
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(afterAuto);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
+
+    fireEvent.click(screen.getByTestId('fact-detail-detach-src-A'));
+    await waitFor(() => expect(api.detachSource).toHaveBeenCalled());
+    expect(await screen.findByTestId('fact-detail-retracted-banner')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-detail-restore')).toBeInTheDocument();
+  });
+
+  it('shows no trust badge for a single-source fact', async () => {
+    await bootstrap();
+    const oneSource = {
+      ...detailWithTwoSources,
+      sources: [detailWithTwoSources.sources[0]],
+    };
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(oneSource);
+    fireEvent.click(screen.getByTestId('recall-fact-fn-1-open-detail'));
+    await screen.findByTestId('fact-detail-panel');
+    expect(screen.queryByTestId('fact-detail-trust-badge')).toBeNull();
+    expect(screen.getByTestId('fact-detail-source-src-A')).toBeInTheDocument();
   });
 });

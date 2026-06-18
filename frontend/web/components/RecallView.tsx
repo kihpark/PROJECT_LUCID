@@ -23,11 +23,19 @@
 
 import { useMemo, useState } from 'react';
 import { ActionButton } from './ActionButton';
-import { recall as apiRecall, ApiError } from '@/lib/api';
+import {
+  recall as apiRecall,
+  ApiError,
+  detachSource as apiDetachSource,
+  getFactDetail as apiGetFactDetail,
+  restoreFact as apiRestoreFact,
+  retractFact as apiRetractFact,
+} from '@/lib/api';
 import type {
   EntityBrief,
   EntityBriefGroup,
   EntityFacetItem,
+  FactDetailResponse,
   PredicateFacetItem,
   RecallFact,
   RecallFacets,
@@ -74,7 +82,9 @@ function MatchKindBadge({ kind }: { kind: 'embedding' | 'entity_link' | undefine
   );
 }
 
-function RecallFactCard({ fact }: { fact: RecallFact }) {
+function RecallFactCard({
+  fact, onOpenDetail,
+}: { fact: RecallFact; onOpenDetail?: (factUid: string) => void }) {
   const sourceUrls = fact.source_uids.filter((s) => s.startsWith('http'));
   const subjectDisplay = resolveLabel(fact.subject_uid, fact.subject_label);
   const objectDisplay = resolveLabel(fact.object_value, fact.object_label);
@@ -94,9 +104,19 @@ function RecallFactCard({ fact }: { fact: RecallFact }) {
           score {fact.score.toFixed(2)}
         </span>
       </header>
-      <p className="text-base mb-3" lang="ko">
-        {fact.claim}
-      </p>
+      {onOpenDetail ? (
+        <button
+          type="button"
+          data-testid={`recall-fact-${fact.fact_uid}-open-detail`}
+          onClick={() => onOpenDetail(fact.fact_uid)}
+          className="text-left text-base mb-3 hover:underline"
+          lang="ko"
+        >
+          {fact.claim}
+        </button>
+      ) : (
+        <p className="text-base mb-3" lang="ko">{fact.claim}</p>
+      )}
       <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-2 mb-3">
         <div>
           <dt className="opacity-60">subject</dt>
@@ -281,6 +301,197 @@ function FacetBar({ item, active, maxCount, onClick, testId, uid }: FacetBarProp
     </button>
   );
 }
+
+// ---------------------------------------------------------------------------
+// B-48b — fact detail panel (right-rail swap)
+// ---------------------------------------------------------------------------
+
+interface FactDetailPanelProps {
+  detail: FactDetailResponse;
+  onClose: () => void;
+  onDetachSource: (sourceUid: string) => Promise<void>;
+  onRetract: () => Promise<void>;
+  onRestore: () => Promise<void>;
+  busy: boolean;
+}
+
+function FactDetailPanel({
+  detail, onClose, onDetachSource, onRetract, onRestore, busy,
+}: FactDetailPanelProps) {
+  const { fact, entities, sources } = detail;
+  const retracted = !!fact.retracted_at;
+  const trusted = sources.length >= 2;
+  const subject = entities.find((e) => e.role === 'subject');
+  const object = entities.find((e) => e.role === 'object');
+  return (
+    <aside
+      aria-label="fact detail"
+      data-testid="fact-detail-panel"
+      data-retracted={retracted ? 'true' : 'false'}
+      className="hidden lg:block sticky top-4 self-start w-72 shrink-0"
+    >
+      <header className="flex items-center justify-between mb-2">
+        <h2 className="text-xxs uppercase tracking-wider text-text-muted font-mono">
+          Fact 상세
+        </h2>
+        <button
+          type="button"
+          data-testid="fact-detail-close"
+          onClick={onClose}
+          aria-label="close fact detail"
+          className="text-xxs text-text-muted hover:text-text-primary font-mono"
+        >
+          ✕ 닫기
+        </button>
+      </header>
+
+      <section
+        className={[
+          'rounded-lg border p-3 mb-3',
+          retracted
+            ? 'border-accent-error/40 bg-accent-error/5'
+            : 'border-border-subtle bg-bg-card',
+        ].join(' ')}
+      >
+        {retracted && (
+          <p
+            data-testid="fact-detail-retracted-banner"
+            className="text-xxs text-accent-error mb-2 font-mono"
+          >
+            철회된 사실 · {new Date(fact.retracted_at!).toLocaleString()}
+          </p>
+        )}
+        <p
+          data-testid="fact-detail-claim"
+          className="text-sm mb-2 leading-snug"
+          lang="ko"
+        >
+          {fact.claim}
+        </p>
+        <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-1 mb-2">
+          <div>
+            <dt className="opacity-60">subject</dt>
+            <dd data-testid="fact-detail-subject">
+              {subject?.name ?? fact.subject_label ?? fact.subject_uid}
+              {subject?.class && (
+                <span className="ml-1 text-xxs opacity-60">({subject.class})</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="opacity-60">predicate</dt>
+            <dd>{fact.predicate}</dd>
+          </div>
+          <div>
+            <dt className="opacity-60">object</dt>
+            <dd data-testid="fact-detail-object">
+              {object?.name ?? fact.object_label ?? fact.object_value}
+              {object?.class && (
+                <span className="ml-1 text-xxs opacity-60">({object.class})</span>
+              )}
+            </dd>
+          </div>
+        </dl>
+        {(subject?.aliases?.length ?? 0) > 0 && (
+          <p className="text-xxs text-text-muted font-mono">
+            alias: {subject!.aliases!.join(', ')}
+          </p>
+        )}
+        <p className="text-xxs text-text-muted font-mono">
+          validated{' '}
+          <time dateTime={fact.validated_at}>
+            {new Date(fact.validated_at).toLocaleString()}
+          </time>
+        </p>
+      </section>
+
+      <section className="mb-3">
+        <header className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-medium">출처 ({sources.length})</h3>
+          {trusted && (
+            <span
+              data-testid="fact-detail-trust-badge"
+              className="rounded-full bg-accent-cool/15 text-accent-cool border border-accent-cool/40 px-2 py-0.5 text-xxs font-mono"
+              title="검증된 출처가 둘 이상"
+            >
+              ✓ 검증된 출처 {sources.length}건
+            </span>
+          )}
+        </header>
+        {sources.length === 0 ? (
+          <p className="text-xxs text-text-muted py-1">(출처 없음)</p>
+        ) : (
+          <ul className="space-y-2">
+            {sources.map((s) => (
+              <li
+                key={s.source_uid}
+                data-testid={`fact-detail-source-${s.source_uid}`}
+                className="rounded border border-border-subtle bg-bg-card p-2 text-xxs"
+              >
+                <div className="flex justify-between gap-2 mb-1">
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent-cool underline truncate"
+                    title={s.url}
+                  >
+                    {s.domain || s.url.replace(/^https?:\/\//, '').slice(0, 40)}
+                  </a>
+                  <button
+                    type="button"
+                    data-testid={`fact-detail-detach-${s.source_uid}`}
+                    onClick={() => onDetachSource(s.source_uid)}
+                    disabled={busy}
+                    className="text-text-muted hover:text-accent-error font-mono shrink-0"
+                  >
+                    이 출처만 떼기
+                  </button>
+                </div>
+                {s.captured_at && (
+                  <p className="text-text-muted">
+                    captured{' '}
+                    <time dateTime={s.captured_at}>
+                      {new Date(s.captured_at).toLocaleString()}
+                    </time>
+                  </p>
+                )}
+                {s.snapshot_available && (
+                  <p className="text-text-muted opacity-70">스냅샷 보존</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <footer className="flex justify-end">
+        {retracted ? (
+          <button
+            type="button"
+            data-testid="fact-detail-restore"
+            onClick={onRestore}
+            disabled={busy}
+            className="rounded border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-3 py-1 text-xs font-mono"
+          >
+            복구
+          </button>
+        ) : (
+          <button
+            type="button"
+            data-testid="fact-detail-retract"
+            onClick={onRetract}
+            disabled={busy}
+            className="rounded border border-accent-error/40 bg-accent-error/5 text-accent-error px-3 py-1 text-xs font-mono"
+          >
+            사실 철회
+          </button>
+        )}
+      </footer>
+    </aside>
+  );
+}
+
 
 interface FacetPanelProps {
   facets: RecallFacets | undefined;
@@ -613,6 +824,9 @@ export function RecallView({ spaceId }: Props) {
   const [result, setResult] = useState<RecallResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // B-48b: open detail panel swaps in over the entity-brief facet panel.
+  const [detail, setDetail] = useState<FactDetailResponse | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
 
   const sortedFacts = useMemo(
     () => (result ? sortFacts(result.facts) : []),
@@ -711,6 +925,79 @@ export function RecallView({ spaceId }: Props) {
     void runRecall(submittedQuery, []);
   };
 
+  // B-48b: open the detail panel for a fact (right rail swaps from
+  // facet/brief to detail). Subsequent recall calls leave the panel
+  // open — the user closes it explicitly.
+  const onOpenDetail = async (factUid: string) => {
+    setDetailBusy(true);
+    setError(null);
+    try {
+      const d = await apiGetFactDetail(spaceId, factUid);
+      setDetail(d);
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;
+      setError(msg);
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
+  const onCloseDetail = () => setDetail(null);
+
+  const refreshDetail = async (factUid: string) => {
+    try {
+      const d = await apiGetFactDetail(spaceId, factUid);
+      setDetail(d);
+    } catch {
+      // best-effort — keep the current detail rendered if refresh fails
+    }
+  };
+
+  const refreshRecall = () => {
+    if (submittedQuery) void runRecall(submittedQuery, activeEntities);
+  };
+
+  const onDetailRetract = async () => {
+    if (!detail) return;
+    setDetailBusy(true);
+    try {
+      await apiRetractFact(spaceId, detail.fact.fact_uid);
+      await refreshDetail(detail.fact.fact_uid);
+      refreshRecall();
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
+  const onDetailRestore = async () => {
+    if (!detail) return;
+    setDetailBusy(true);
+    try {
+      await apiRestoreFact(spaceId, detail.fact.fact_uid);
+      await refreshDetail(detail.fact.fact_uid);
+      refreshRecall();
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
+  const onDetailDetachSource = async (sourceUid: string) => {
+    if (!detail) return;
+    setDetailBusy(true);
+    try {
+      const r = await apiDetachSource(spaceId, detail.fact.fact_uid, sourceUid);
+      await refreshDetail(detail.fact.fact_uid);
+      refreshRecall();
+      // If detach triggered an auto-retract, the panel updates via the
+      // refresh above; we don't need to surface a toast — the banner
+      // on the detail card already announces the new state.
+      void r;
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
   // B-50 controls dispatcher: every control change re-fires recall with
   // the new payload (except keyword2, which is a pure client-side
   // filter and never needs another round-trip). The recall fires
@@ -804,7 +1091,7 @@ export function RecallView({ spaceId }: Props) {
                   </p>
                 ) : (
                   visibleFacts.map((f) => (
-                    <RecallFactCard key={f.fact_uid} fact={f} />
+                    <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
                   ))
                 )}
               </>
@@ -813,11 +1100,22 @@ export function RecallView({ spaceId }: Props) {
         )}
       </main>
 
-      <FacetPanel
-        facets={result?.facets}
-        activeEntityUids={activeEntities}
-        onToggleEntity={onToggleEntity}
-      />
+      {detail ? (
+        <FactDetailPanel
+          detail={detail}
+          onClose={onCloseDetail}
+          onDetachSource={onDetailDetachSource}
+          onRetract={onDetailRetract}
+          onRestore={onDetailRestore}
+          busy={detailBusy}
+        />
+      ) : (
+        <FacetPanel
+          facets={result?.facets}
+          activeEntityUids={activeEntities}
+          onToggleEntity={onToggleEntity}
+        />
+      )}
     </div>
   );
 }
