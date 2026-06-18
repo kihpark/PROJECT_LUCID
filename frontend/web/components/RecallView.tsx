@@ -657,12 +657,13 @@ const DEFAULT_CONTROLS: SearchControlsState = {
   keyword2: '',
 };
 
+// B-50-fix (PO A direction): `matchKinds` is no longer a server param.
+// Embedding (kNN) is the search mode — always on. The toggle in the
+// panel filters the rendered result list client-side; the server
+// receives the FULL envelope every time.
 function controlsToRecallOptions(
   c: SearchControlsState, entity: string[],
-): { entity: string[]; scoreThreshold: number; dateFrom?: string; dateTo?: string; matchKinds: MatchKind[] } {
-  const kinds: MatchKind[] = [];
-  if (c.matchKinds.embedding) kinds.push('embedding');
-  if (c.matchKinds.entity_link) kinds.push('entity_link');
+): { entity: string[]; scoreThreshold: number; dateFrom?: string; dateTo?: string } {
   return {
     entity,
     scoreThreshold: c.scoreThreshold,
@@ -671,7 +672,6 @@ function controlsToRecallOptions(
     // so the inclusive range covers the whole day on both sides.
     dateFrom: c.dateFrom ? `${c.dateFrom}T00:00:00Z` : undefined,
     dateTo: c.dateTo ? `${c.dateTo}T23:59:59Z` : undefined,
-    matchKinds: kinds,
   };
 }
 
@@ -753,24 +753,29 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
         )}
       </div>
 
-      {/* match_kind toggles */}
+      {/* B-50-fix: match_kind is now a display filter only. Embedding
+          (kNN) is the search mode — toggle locked on; entity-link can
+          be hidden from the rendered list but the seed is never
+          starved (the underlying recall response is the same). */}
       <div className="mb-4">
         <h3 className="text-xs font-medium mb-1">매치 종류</h3>
+        <p className="text-xxs text-text-muted font-mono mb-1">
+          결과 표시 필터 (서버 재검색 없음)
+        </p>
         <label
           data-testid="control-match-embedding"
-          className="flex items-center gap-2 text-xs py-0.5"
+          className="flex items-center gap-2 text-xs py-0.5 opacity-90"
+          title="검색은 유사도 기반"
         >
           <input
             type="checkbox"
             checked={state.matchKinds.embedding}
-            onChange={(e) =>
-              onChange({
-                ...state,
-                matchKinds: { ...state.matchKinds, embedding: e.target.checked },
-              })
-            }
+            disabled
+            aria-disabled="true"
+            data-testid="control-match-embedding-checkbox"
+            readOnly
           />
-          <span>🔍 유사도</span>
+          <span>🔍 유사도 (검색 모드)</span>
         </label>
         <label
           data-testid="control-match-entity-link"
@@ -779,6 +784,7 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
           <input
             type="checkbox"
             checked={state.matchKinds.entity_link}
+            data-testid="control-match-entity-link-checkbox"
             onChange={(e) =>
               onChange({
                 ...state,
@@ -833,15 +839,21 @@ export function RecallView({ spaceId }: Props) {
     [result],
   );
 
-  // B-50 client-side keyword filter — agent picked client-side because
-  // the recall response caps at 50 facts (small) and the user's mental
-  // model is "narrow what I'm already looking at", which a round-trip
-  // wouldn't honour. Case-insensitive substring match on `claim`.
+  // B-50 / B-50-fix client-side filters.
+  // - keyword2: case-insensitive substring match on `claim`.
+  // - matchKinds: 🔍 유사도 is the search mode (always on); the user
+  //   can hide 🔗 엔티티 연결 rows from the rendered list, but the
+  //   underlying recall response is unchanged so toggling never zeros
+  //   the result — the old UX trap is gone.
   const visibleFacts = useMemo(() => {
+    let out = sortedFacts;
     const kw = controls.keyword2.trim().toLowerCase();
-    if (!kw) return sortedFacts;
-    return sortedFacts.filter((f) => f.claim.toLowerCase().includes(kw));
-  }, [sortedFacts, controls.keyword2]);
+    if (kw) out = out.filter((f) => f.claim.toLowerCase().includes(kw));
+    if (!controls.matchKinds.entity_link) {
+      out = out.filter((f) => (f.match_kind ?? 'embedding') !== 'entity_link');
+    }
+    return out;
+  }, [sortedFacts, controls.keyword2, controls.matchKinds.entity_link]);
 
   // Build the "active filter chips" view: walk the current facets to
   // find the name + bucket for each active uid (the backend already
@@ -998,18 +1010,15 @@ export function RecallView({ spaceId }: Props) {
     }
   };
 
-  // B-50 controls dispatcher: every control change re-fires recall with
-  // the new payload (except keyword2, which is a pure client-side
-  // filter and never needs another round-trip). The recall fires
-  // BEFORE setControls returns so the test sees a single recall call
-  // tied to the change — no double-flush race.
+  // Controls dispatcher: server-affecting controls re-fire recall.
+  // B-50-fix: matchKinds is no longer in that set — it's a pure
+  // display filter, so changing the toggle never round-trips. keyword2
+  // is also display-only.
   const onControlsChange = (next: SearchControlsState) => {
     const serverChanged =
       next.scoreThreshold !== controls.scoreThreshold ||
       next.dateFrom !== controls.dateFrom ||
-      next.dateTo !== controls.dateTo ||
-      next.matchKinds.embedding !== controls.matchKinds.embedding ||
-      next.matchKinds.entity_link !== controls.matchKinds.entity_link;
+      next.dateTo !== controls.dateTo;
     setControls(next);
     if (serverChanged && submittedQuery) {
       void runRecall(submittedQuery, activeEntities, next);

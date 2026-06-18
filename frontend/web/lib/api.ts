@@ -177,7 +177,9 @@ export interface RecallOptions {
   scoreThreshold?: number;
   dateFrom?: string;  // ISO 8601
   dateTo?: string;    // ISO 8601
-  matchKinds?: ('embedding' | 'entity_link')[];
+  // B-50-fix (PO A direction): matchKinds is a display-side filter
+  // only. The recall API does NOT receive it — embedding is always
+  // the seed; entity-link expansion always runs.
 }
 
 export function recall(
@@ -199,9 +201,6 @@ export function recall(
   }
   if (options.dateTo) {
     params.set('date_to', options.dateTo);
-  }
-  for (const kind of options.matchKinds ?? []) {
-    params.append('match_kinds', kind);
   }
   return request<RecallResponse>(
     `/api/spaces/${spaceId}/recall?${params.toString()}`,

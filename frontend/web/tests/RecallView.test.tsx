@@ -574,15 +574,17 @@ describe('RecallView — left search controls (B-50)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
-    // initial call carries default controls (0.72 threshold, both kinds)
+    // B-50-fix: initial call carries default controls. `matchKinds`
+    // is intentionally absent — embedding is the search mode and
+    // entity-link expansion always runs server-side.
     const firstOpts = (api.recall as ReturnType<typeof vi.fn>).mock.calls[0][2];
     expect(firstOpts).toEqual(
       expect.objectContaining({
         entity: [],
         scoreThreshold: 0.72,
-        matchKinds: ['embedding', 'entity_link'],
       }),
     );
+    expect(firstOpts).not.toHaveProperty('matchKinds');
   }
 
   it('renders the four control groups in the left rail', async () => {
@@ -629,27 +631,83 @@ describe('RecallView — left search controls (B-50)', () => {
     expect(opts.dateTo).toBe('2026-12-31T23:59:59Z');
   });
 
-  it('★ match_kind toggle disables the embedding pass (or entity-link)', async () => {
+  it('★ 유사도 체크박스는 검색 모드라 항상 켜져 있고 비활성화', async () => {
     await bootstrap();
-    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
-    // turn off embedding
-    fireEvent.click(screen.getByTestId('control-match-embedding')
-      .querySelector('input[type=checkbox]')!);
-    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(2));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[1][2].matchKinds)
-      .toEqual(['entity_link']);
+    const embeddingCheckbox = screen.getByTestId(
+      'control-match-embedding-checkbox',
+    ) as HTMLInputElement;
+    expect(embeddingCheckbox).toBeDisabled();
+    expect(embeddingCheckbox.checked).toBe(true);
+  });
 
-    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
-    // turn embedding back on and turn entity_link off
-    fireEvent.click(screen.getByTestId('control-match-embedding')
-      .querySelector('input[type=checkbox]')!);
-    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(3));
-    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
-    fireEvent.click(screen.getByTestId('control-match-entity-link')
-      .querySelector('input[type=checkbox]')!);
-    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(4));
-    expect((api.recall as ReturnType<typeof vi.fn>).mock.calls[3][2].matchKinds)
-      .toEqual(['embedding']);
+  it('★ 🔗 엔티티 연결 토글은 클라이언트 표시 필터 (재검색 안 함)', async () => {
+    // Hand-craft a hit with one embedding + one entity_link fact so we
+    // can prove the latter disappears from the rendered list when the
+    // toggle is off — without any second recall round-trip.
+    const MIXED: RecallResponse = {
+      signature: 'As far as I know — 그래프에 2개 검증 사실이 있습니다',
+      total: 2,
+      facts: [
+        {
+          fact_uid: 'fn-emb',
+          claim: '한국은행 기준금리는 3.0%였다.',
+          claim_en: null,
+          subject_uid: 'uid-bok',
+          predicate: 'base_rate',
+          object_value: '3.0%',
+          source_uids: [],
+          validated_at: new Date('2026-06-01T10:00:00Z').toISOString(),
+          validator_id: 'u',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.92,
+          match_kind: 'embedding',
+        },
+        {
+          fact_uid: 'fn-link',
+          claim: 'BOK governor announced the decision.',
+          claim_en: null,
+          subject_uid: 'uid-gov',
+          predicate: 'announced',
+          object_value: 'rate decision',
+          source_uids: [],
+          validated_at: new Date('2026-06-02T10:00:00Z').toISOString(),
+          validator_id: 'u',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.0,
+          match_kind: 'entity_link',
+        },
+      ],
+    };
+
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'BoK' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    // Both rendered initially.
+    expect(screen.getByTestId('recall-fact-fn-emb')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-fn-link')).toBeInTheDocument();
+
+    // Toggle off — the entity-link row disappears WITHOUT any
+    // additional API call.
+    fireEvent.click(screen.getByTestId('control-match-entity-link-checkbox'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('recall-fact-fn-link')).toBeNull(),
+    );
+    expect(screen.getByTestId('recall-fact-fn-emb')).toBeInTheDocument();
+    expect(api.recall).toHaveBeenCalledTimes(1);
+
+    // Toggle back on — the row returns, still no extra call.
+    fireEvent.click(screen.getByTestId('control-match-entity-link-checkbox'));
+    expect(screen.getByTestId('recall-fact-fn-link')).toBeInTheDocument();
+    expect(api.recall).toHaveBeenCalledTimes(1);
   });
 
   it('★ secondary keyword filters in-result without a second recall call', async () => {

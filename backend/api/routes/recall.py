@@ -728,20 +728,6 @@ def _facets_for(
     )
 
 
-_VALID_MATCH_KINDS: set[str] = {"embedding", "entity_link"}
-
-
-def _resolve_match_kinds(raw: Any) -> set[str]:
-    """B-50: subset of {'embedding','entity_link'} the client wants
-    surfaced. None / empty / non-list / all-unknown → both passes
-    (preserves pre-B-50 behaviour and degrades quietly so a typo
-    can't zero recall)."""
-    if not isinstance(raw, list) or not raw:
-        return set(_VALID_MATCH_KINDS)
-    cleaned = {v for v in raw if v in _VALID_MATCH_KINDS}
-    return cleaned or set(_VALID_MATCH_KINDS)
-
-
 @router.get("/recall", response_model=RecallResponse)
 def recall(
     space_id: uuid.UUID,
@@ -762,10 +748,6 @@ def recall(
     date_to: datetime | None = Query(
         default=None, description="B-50: validated_at <= date_to",
     ),
-    match_kinds: list[str] | None = Query(
-        default=None, alias="match_kinds",
-        description="B-50: subset of {'embedding','entity_link'}",
-    ),
     user: User = Depends(get_current_user),
 ) -> RecallResponse:
     """Return validated facts whose embedding is close to `q`.
@@ -784,8 +766,13 @@ def recall(
     Refinements (all additive; default behaviour unchanged):
       - score_threshold (B-50): override RECALL_SCORE_FLOOR per call.
       - date_from / date_to (B-50): validated_at window, inclusive.
-      - match_kinds (B-50): subset of {'embedding','entity_link'}.
       - include_retracted (B-48a): surface soft-deleted facts.
+
+    B-50-fix (PO directive 2026-06-18, A direction): the server NO
+    LONGER honours a `match_kinds` query param. Embedding (kNN) is
+    the search mode; entity-link expansion always runs after.
+    `match_kind` lives as a display-side filter only — the client
+    receives the full envelope and hides 🔍 / 🔗 rows in the UI.
 
     Failure-mode handling: any infrastructure error (no embedding API,
     ES down) returns the empty envelope rather than a 500. Recall must
@@ -810,13 +797,6 @@ def recall(
     ) else RECALL_SCORE_FLOOR
     df = date_from if isinstance(date_from, datetime) else None
     dt = date_to if isinstance(date_to, datetime) else None
-    enabled_kinds = _resolve_match_kinds(match_kinds)
-
-    # B-50: when the user disables the embedding pass, short-circuit
-    # before the OpenAI round-trip. The entity-link pass alone has no
-    # seed entity uids, so the result is empty by construction.
-    if "embedding" not in enabled_kinds:
-        return _empty("embedding_disabled")
 
     embedding = get_embedding(q)
     if embedding is None:
@@ -851,26 +831,24 @@ def recall(
     # in this knowledge_space that references any of the same
     # canonical Object uids. This is the graph join PO asked for —
     # "SpaceX 검색 -> SpaceX 가 subject 든 object 든 등장하는 fact 전부".
-    # Degrade quietly on any ES error — the embedding matches above
-    # are already a complete answer.
-    # B-50: skipped entirely when entity_link is disabled.
+    # B-50-fix: always runs — the client filters 🔗 rows on display
+    # if the user wants to hide them.
     expansion_count = 0
     link_hits: list[dict[str, Any]] = []
-    if "entity_link" in enabled_kinds:
-        entity_uids = _collect_entity_uids(facts)
-        already = {f.fact_uid for f in facts}
-        try:
-            link_hits = _entity_link_facts(
-                entity_uids, str(ks.id),
-                exclude_fact_uids=already,
-                max_hits=max(RECALL_MAX_K, limit * 5),
-                include_retracted=include_retracted_bool,
-                date_from=df,
-                date_to=dt,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("recall: entity-link expansion failed: %s", exc)
-            link_hits = []
+    entity_uids = _collect_entity_uids(facts)
+    already = {f.fact_uid for f in facts}
+    try:
+        link_hits = _entity_link_facts(
+            entity_uids, str(ks.id),
+            exclude_fact_uids=already,
+            max_hits=max(RECALL_MAX_K, limit * 5),
+            include_retracted=include_retracted_bool,
+            date_from=df,
+            date_to=dt,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: entity-link expansion failed: %s", exc)
+        link_hits = []
     for hit in link_hits:
         fact = _hit_to_fact(hit)
         if fact is None:

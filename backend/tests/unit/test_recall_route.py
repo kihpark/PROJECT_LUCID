@@ -26,7 +26,6 @@ from api.routes.recall import (
     _entity_link_facts,
     _hit_to_fact,
     _knn_facts_validated_only,
-    _resolve_match_kinds,
     recall,
 )
 
@@ -243,25 +242,6 @@ def test_recall_returns_empty_when_no_hits_above_floor():
 # B-50 — score_threshold / date range / match_kinds
 # ---------------------------------------------------------------------------
 
-def test_resolve_match_kinds_empty_means_both():
-    """B-50 contract: empty / None preserves pre-B-50 behaviour
-    (both passes). A typo-only list also falls back to both rather
-    than silently zeroing the result — recall must degrade quietly."""
-    assert _resolve_match_kinds(None) == {"embedding", "entity_link"}
-    assert _resolve_match_kinds([]) == {"embedding", "entity_link"}
-    assert _resolve_match_kinds(["nope", "garbage"]) == {"embedding", "entity_link"}
-
-
-def test_resolve_match_kinds_subset_honoured():
-    assert _resolve_match_kinds(["embedding"]) == {"embedding"}
-    assert _resolve_match_kinds(["entity_link"]) == {"entity_link"}
-    assert _resolve_match_kinds(["embedding", "entity_link"]) == {
-        "embedding", "entity_link",
-    }
-    # unknown values silently dropped, valid ones preserved
-    assert _resolve_match_kinds(["embedding", "junk"]) == {"embedding"}
-
-
 def test_date_range_filter_none_when_both_bounds_absent():
     assert _date_range_filter(None, None) is None
 
@@ -413,10 +393,16 @@ def test_recall_score_threshold_higher_drops_marginal_hits():
     assert r.total == 1 and r.facts[0].fact_uid == "fn-high"
 
 
-def test_recall_match_kinds_embedding_only_skips_entity_link_pass():
-    """B-50 ★ match_kind toggle: with entity_link disabled, the
-    expansion pass must NOT run — verified by asserting the
-    _entity_link_facts mock was not invoked."""
+def test_recall_entity_link_always_runs_post_b50_fix():
+    """B-50-fix (PO A direction): the server ignores match_kinds and
+    ALWAYS runs the entity-link expansion. The previous behaviour
+    (turning off 'embedding' returned empty; turning off 'entity_link'
+    skipped the expansion) was a UX trap, since the embedding pass is
+    what seeds the graph join.
+
+    Lock the contract: regardless of any client-side intent the
+    server-side flow is fixed — kNN seeds, expansion runs.
+    """
     ks_id, user, fake_session = _ks_user_setup()
     hits = [_hit("fn-1", 0.95, ks_id)]
     link_mock = MagicMock(return_value=[])
@@ -435,39 +421,23 @@ def test_recall_match_kinds_embedding_only_skips_entity_link_pass():
     ), patch(
         "api.routes.recall._build_entity_brief", return_value=None,
     ):
-        r = recall(
-            space_id=ks_id, q="x", limit=10,
-            match_kinds=["embedding"], user=user,
-        )
+        r = recall(space_id=ks_id, q="x", limit=10, user=user)
 
     assert r.total == 1
-    assert r.expanded_count == 0
-    assert link_mock.call_count == 0
+    # entity-link helper was consulted exactly once.
+    assert link_mock.call_count == 1
 
 
-def test_recall_match_kinds_entity_link_only_returns_empty():
-    """B-50 ★ embedding pass disabled: the route short-circuits to the
-    empty envelope without calling ES, since entity_link expansion
-    needs the embedding-pass results as seeds."""
-    ks_id, user, fake_session = _ks_user_setup()
-    embed_mock = MagicMock()
-    knn_mock = MagicMock()
-    with patch(
-        "api.routes.recall._new_session", return_value=fake_session,
-    ), patch(
-        "api.routes.recall.get_embedding", embed_mock,
-    ), patch(
-        "api.routes.recall._knn_facts_validated_only", knn_mock,
-    ):
-        r = recall(
-            space_id=ks_id, q="x", limit=10,
-            match_kinds=["entity_link"], user=user,
-        )
-    assert r.total == 0 and r.facts == []
-    # embedding helper not even consulted — short-circuit happens
-    # before the embedding pass.
-    assert embed_mock.call_count == 0
-    assert knn_mock.call_count == 0
+def test_recall_ignores_unknown_match_kinds_query_param():
+    """B-50-fix: clients on a pre-fix build may still send
+    `match_kinds=...`. FastAPI tolerates unknown query keys, but a
+    test asserts our function signature no longer accepts it as a
+    kwarg — call sites that drop the param keep working."""
+    import inspect
+
+    from api.routes.recall import recall as recall_route
+    params = set(inspect.signature(recall_route).parameters.keys())
+    assert "match_kinds" not in params
 
 
 def test_recall_date_range_plumbed_to_both_helpers():
