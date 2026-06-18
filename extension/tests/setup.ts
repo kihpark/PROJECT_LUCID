@@ -30,6 +30,8 @@ interface FakeChrome {
     query: AnyFn;
     create: AnyFn;
     sendMessage: AnyFn;
+    // B-45.5: visible-tab pixel capture.
+    captureVisibleTab: AnyFn;
   };
   scripting: {
     executeScript: AnyFn;
@@ -75,6 +77,7 @@ const fakeChrome: FakeChrome = {
     query: vi.fn(),
     create: vi.fn(),
     sendMessage: vi.fn(),
+    captureVisibleTab: vi.fn(),
   },
   scripting: {
     executeScript: vi.fn(),

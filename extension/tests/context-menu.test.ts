@@ -9,13 +9,17 @@ import {
 declare const chrome: {
   contextMenus: { create: ReturnType<typeof vi.fn>; removeAll: ReturnType<typeof vi.fn> };
   cookies: { get: ReturnType<typeof vi.fn> };
-  tabs: { sendMessage: ReturnType<typeof vi.fn> };
+  tabs: {
+    sendMessage: ReturnType<typeof vi.fn>;
+    captureVisibleTab: ReturnType<typeof vi.fn>;
+  };
   scripting: { executeScript: ReturnType<typeof vi.fn> };
   notifications: { create: ReturnType<typeof vi.fn> };
   action: {
     setBadgeText: ReturnType<typeof vi.fn>;
     setBadgeBackgroundColor: ReturnType<typeof vi.fn>;
   };
+  runtime?: { lastError?: { message?: string } | undefined };
 };
 
 interface CookieDetails { url: string; name: string }
@@ -26,6 +30,7 @@ beforeEach(() => {
   chrome.contextMenus.removeAll.mockImplementation((cb?: () => void) => cb && cb());
   chrome.cookies.get.mockReset();
   chrome.tabs.sendMessage = vi.fn();
+  chrome.tabs.captureVisibleTab = vi.fn();
   chrome.scripting.executeScript = vi.fn();
   chrome.notifications.create = vi.fn((_opts: unknown, cb?: () => void) => cb && cb());
   chrome.action.setBadgeText = vi.fn((_d: unknown, cb?: () => void) => cb && cb());
@@ -53,7 +58,7 @@ function stubCaptureOk(jobId: string) {
 }
 
 describe('context-menu install', () => {
-  it('creates three menu items', () => {
+  it('creates four menu items including the B-45.5 screenshot item', () => {
     installContextMenus();
     expect(chrome.contextMenus.create).toHaveBeenCalledWith(
       expect.objectContaining({ id: MENU_IDS.page, contexts: ['page'] }),
@@ -63,6 +68,15 @@ describe('context-menu install', () => {
     );
     expect(chrome.contextMenus.create).toHaveBeenCalledWith(
       expect.objectContaining({ id: MENU_IDS.image, contexts: ['image'] }),
+    );
+    // B-45.5: screenshot menu surfaces on page / frame / selection /
+    // image / video / link contexts so the user can reach it
+    // wherever they're looking.
+    expect(chrome.contextMenus.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: MENU_IDS.screenshot,
+        contexts: expect.arrayContaining(['page', 'video']),
+      }),
     );
   });
 });
@@ -582,6 +596,8 @@ describe('toast dispatch fallback (B-45-fix2)', () => {
     expect(flashedFail).toBe(true);
   });
 
+  // B-45.5 screenshot test moved below the toast-fallback block so
+  // it shares the chrome shim resets in beforeEach.
   it('capture proceeds even when both notifyTab paths throw', async () => {
     // Worst case: tab message rejects AND notifications.create rejects.
     chrome.tabs.sendMessage.mockRejectedValue(new Error('tab gone'));
@@ -596,5 +612,113 @@ describe('toast dispatch fallback (B-45-fix2)', () => {
       (c: unknown[]) => c[0] === 'http://localhost:8000/api/capture',
     );
     expect(captureCall).toBeTruthy();
+  });
+});
+
+
+describe('screenshot capture (B-45.5)', () => {
+  // A real 1×1 PNG so the base64 round-trip is exercisable.
+  const PNG_DATA_URL =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA'
+    + 'DUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+
+  function stubCaptureVisibleTabOk(dataUrl = PNG_DATA_URL) {
+    chrome.tabs.captureVisibleTab.mockImplementation(
+      (_windowId: number, _opts: unknown, cb: (dataUrl?: string) => void) => {
+        cb(dataUrl);
+      },
+    );
+  }
+
+  it('★ snaps the visible tab and POSTs it as page_image', async () => {
+    stubAuth();
+    stubCaptureVisibleTabOk();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        job_id: 'job-ss-1',
+        status_url: '/api/jobs/job-ss-1',
+        status: 'pending_extract',
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.screenshot,
+        pageUrl: 'https://threads.com/post/abc',
+      } as chrome.contextMenus.OnClickData,
+      {
+        id: 55,
+        windowId: 9,
+        url: 'https://threads.com/post/abc',
+      } as chrome.tabs.Tab,
+    );
+
+    // captureVisibleTab was called against the active window with PNG.
+    expect(chrome.tabs.captureVisibleTab).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ format: 'png' }),
+      expect.any(Function),
+    );
+
+    // Capture POST landed with the screenshot bytes.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as { body: string }).body,
+    );
+    expect(body.source_type).toBe('page_image');
+    expect(body.source_url).toBe('https://threads.com/post/abc');
+    expect(body.client_metadata.capture_kind).toBe('screenshot');
+    // The base64 portion of the data URL is what we shipped.
+    expect(body.raw_payload_b64).toBe(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA'
+      + 'DUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+    );
+    // Decodes back to PNG magic bytes.
+    const decoded = Uint8Array.from(
+      atob(body.raw_payload_b64), (c) => c.charCodeAt(0),
+    );
+    expect(Array.from(decoded.slice(0, 8))).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+  });
+
+  it('★ honest failure when captureVisibleTab is denied', async () => {
+    stubAuth();
+    chrome.tabs.captureVisibleTab.mockImplementation(
+      (_w: number, _o: unknown, cb: (dataUrl?: string) => void) => {
+        // Simulate Chrome's "no permission" path — undefined result
+        // and lastError set.
+        (chrome as { runtime?: { lastError?: { message?: string } | undefined } })
+          .runtime = { lastError: { message: 'Cannot access chrome://' } };
+        cb(undefined);
+        (chrome as { runtime?: { lastError?: { message?: string } | undefined } })
+          .runtime = { lastError: undefined };
+      },
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.screenshot,
+        pageUrl: 'chrome://extensions/',
+      } as chrome.contextMenus.OnClickData,
+      {
+        id: 1, windowId: 1, url: 'chrome://extensions/',
+      } as chrome.tabs.Tab,
+    );
+
+    // No capture POST happened.
+    expect(fetchMock).not.toHaveBeenCalled();
+    // The user gets an honest reason — not "[object Object]".
+    const failCall = chrome.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { status?: string }).status === 'capture_failed',
+    );
+    expect(failCall).toBeTruthy();
+    const errorMsg = (failCall![1] as { error: string }).error;
+    expect(errorMsg).toMatch(/캡처할 수 없습니다|chrome:\/\//);
+    expect(errorMsg).not.toMatch(/\[object Object\]/);
   });
 });

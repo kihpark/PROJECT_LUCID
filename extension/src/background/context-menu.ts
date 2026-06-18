@@ -30,6 +30,12 @@ export const MENU_IDS = {
   page: 'lucid-save-page',
   selection: 'lucid-save-selection',
   image: 'lucid-save-image',
+  // B-45.5: pixel capture of the visible tab — works on Threads /
+  // Instagram stories / CSP-locked SPAs and any other surface where
+  // the DOM / image-URL paths fail. Treats the screenshot as a
+  // plain `page_image` so the existing vision extractor handles
+  // it unchanged.
+  screenshot: 'lucid-save-screenshot',
 } as const;
 
 // Mirrors backend MAX_PRECOMPRESSION_BYTES
@@ -309,6 +315,103 @@ export async function buildImagePayload(
   };
 }
 
+type ScreenshotOutcome =
+  | { ok: true; payload: CaptureRequest }
+  | { ok: false; error: string };
+
+/**
+ * B-45.5 — pixel capture of the visible tab.
+ *
+ * `chrome.tabs.captureVisibleTab(windowId, {format:'png'})` returns
+ * a `data:image/png;base64,...` URL. We strip the prefix and ship the
+ * base64 portion as `raw_payload_b64` so the backend lands the bytes
+ * as `SourceJob.raw_payload` (B-48 snapshot) and the vision extractor
+ * transcribes the image into claim text via the existing B-45
+ * pipeline. No content-script dependency — works on Threads,
+ * Instagram, anywhere.
+ *
+ * `source_url` is the page URL so the Detail panel hyperlink works
+ * and the B-48a S/P/O dedup converges across multiple screenshots
+ * of the same page.
+ */
+export async function buildScreenshotPayload(
+  tab: chrome.tabs.Tab | undefined,
+): Promise<ScreenshotOutcome | null> {
+  const pageUrl = tab?.url ?? '';
+  if (!pageUrl) return null;
+  const windowId = tab?.windowId;
+  if (windowId === undefined) return null;
+
+  let dataUrl: string;
+  try {
+    dataUrl = await new Promise<string>((resolve, reject) => {
+      const cb = (result?: string) => {
+        const err = chrome.runtime?.lastError;
+        if (err) {
+          reject(new Error(err.message || 'captureVisibleTab failed'));
+          return;
+        }
+        if (!result) {
+          reject(new Error('captureVisibleTab returned empty data'));
+          return;
+        }
+        resolve(result);
+      };
+      // PNG keeps text + chart edges crisp; JPEG q≤92 visibly hurts
+      // OCR on Korean small print.
+      (chrome.tabs.captureVisibleTab as unknown as (
+        windowId: number,
+        options: { format: 'png' | 'jpeg'; quality?: number },
+        cb: (dataUrl?: string) => void,
+      ) => void)(
+        windowId, { format: 'png' }, cb,
+      );
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        '화면을 캡처할 수 없습니다 — 확장 권한 또는 보호된 페이지일 수 있어요. '
+        + `(reason: ${err instanceof Error ? err.message : 'unknown'})`,
+    };
+  }
+
+  // dataUrl shape: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg..."
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0) {
+    return { ok: false, error: 'invalid captureVisibleTab data URL' };
+  }
+  const b64 = dataUrl.slice(comma + 1);
+
+  // Approximate byte count from base64 length (4 chars → 3 bytes).
+  const approxBytes = Math.floor(b64.length * 0.75);
+  if (approxBytes > MAX_IMAGE_BYTES) {
+    const mb = (approxBytes / 1024 / 1024).toFixed(1);
+    const limit = MAX_IMAGE_BYTES / 1024 / 1024;
+    return {
+      ok: false,
+      error:
+        `Screenshot too large (${mb} MB; limit ${limit} MB). `
+        + 'Zoom out or capture a smaller region.',
+    };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      source_url: pageUrl,
+      source_type: 'page_image',
+      captured_from: 'chrome_ext',
+      raw_payload_b64: b64,
+      client_metadata: {
+        source_page_url: pageUrl,
+        capture_kind: 'screenshot',
+        image_byte_count: String(approxBytes),
+      },
+    },
+  };
+}
+
 /**
  * Run a fetch in the page's content-script context so we can reach
  * `blob:` URLs and auth-walled CDN images. The page returns a base64
@@ -390,6 +493,15 @@ export function installContextMenus(): void {
         id: MENU_IDS.image,
         title: 'Save image to Lucid',
         contexts: ['image'],
+      });
+      chrome.contextMenus.create({
+        id: MENU_IDS.screenshot,
+        // B-45.5: distinct from "Save page" which fetches the rendered
+        // DOM. This one snaps the actual pixels of the visible tab —
+        // the only path that works on Threads video-frame text
+        // overlays and the like.
+        title: 'Save screen to Lucid',
+        contexts: ['page', 'frame', 'selection', 'image', 'video', 'link'],
       });
     });
   } catch (err) {
@@ -536,6 +648,20 @@ export async function handleContextMenuClick(
     // B-45: image fetch is async (we have to pull the bytes off the
     // remote host) so it can't share buildSyncPayload's pure path.
     const outcome = await buildImagePayload(info, tab);
+    if (outcome === null) return;
+    if (!outcome.ok) {
+      await notifyTab(tabId, {
+        type: 'show_toast',
+        status: 'capture_failed',
+        error: outcome.error,
+      });
+      return;
+    }
+    payload = outcome.payload;
+  } else if (info.menuItemId === MENU_IDS.screenshot) {
+    // B-45.5: visible-tab pixel capture for blob: / CSP-locked / SNS
+    // text-overlay surfaces where URL fetch can't reach.
+    const outcome = await buildScreenshotPayload(tab);
     if (outcome === null) return;
     if (!outcome.ok) {
       await notifyTab(tabId, {
