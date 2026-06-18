@@ -850,6 +850,41 @@ def recall(
         if fact is not None:
             facts.append(fact)
 
+    # B-45-fix3: if no fact survives the kNN floor, try the entity
+    # name path. Korean-text image facts often fail cross-lingual kNN
+    # against an English query (or marginal-score in-language hits
+    # sit at 0.71 just below the 0.72 floor). The entity lookup
+    # honours name + name_en + aliases — the same path B-49b's brief
+    # uses — so a query that resolves to a known entity surfaces ALL
+    # of that entity's manual facts. The kNN match_kind label stays
+    # "embedding" so the UI still shows a 🔍 badge; users see the
+    # facts they searched for rather than an empty envelope.
+    entity_seed_uids: list[str] = []
+    if not facts:
+        try:
+            matched_entities = _resolve_entities_by_name(q, str(ks.id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall: name-lookup fallback failed: %s", exc)
+            matched_entities = []
+        entity_seed_uids = [
+            uid for uid in (doc.get("object_uid") for doc in matched_entities)
+            if isinstance(uid, str)
+        ]
+        if entity_seed_uids:
+            try:
+                seed_hits = _facts_for_entity(
+                    entity_seed_uids, str(ks.id), max_hits=limit * 3,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "recall: name-lookup fact fetch failed: %s", exc,
+                )
+                seed_hits = []
+            for h in seed_hits:
+                fact = _hit_to_fact(h)
+                if fact is not None:
+                    facts.append(fact)
+
     if not facts:
         return _empty("no_facts_above_floor")
 
