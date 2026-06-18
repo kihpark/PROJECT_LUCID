@@ -1,0 +1,44 @@
+# DEVX-01 — development overrides (auto-loaded by `docker compose up`).
+#
+# This file is GIT-TRACKED on purpose: every developer gets the same
+# inner loop. To run the production shape instead, point compose at
+# the base file explicitly:
+#
+#     docker compose -f docker-compose.yml up --build
+#
+# Postgres and Elasticsearch are NOT redeclared here — their stateful
+# volumes (`postgres_data`, `es_data`) and healthchecks are tuned in
+# the base compose and should not be touched by dev tooling.
+#
+# Rebuild grades (see HANDOFF.md):
+#   CODE only          → bind-mount picks it up; no rebuild.
+#   DEPS (compose / requirements.txt / package.json)
+#                      → `docker compose up -d --build` once.
+#   MAPPING (ES strict)
+#                      → wipe + reindex_all + replay.
+services:
+
+  backend:
+    # The image is the same one base compose built; we only swap in
+    # the source bind mount and the --reload command so editing a .py
+    # file restarts uvicorn in-process. `uvicorn[standard]` is already
+    # in requirements.txt so watchfiles is available.
+    volumes:
+      - ./backend:/app
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  web:
+    # Next.js HMR. The override mounts the source tree but uses an
+    # anonymous volume to mask the host's node_modules and .next —
+    # both are platform-specific (Windows pnpm symlinks ≠ Linux
+    # container layout) and would otherwise overlay the
+    # cleanly-installed Linux node_modules from the image.
+    environment:
+      NODE_ENV: development
+      # Disable the Next.js telemetry banner so the HMR logs are clean.
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./frontend/web:/app
+      - /app/node_modules
+      - /app/.next
+    command: pnpm dev --hostname 0.0.0.0 --port 3000
