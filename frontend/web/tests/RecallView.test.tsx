@@ -112,6 +112,46 @@ describe('RecallView', () => {
     const btn = screen.getByRole('button', { name: 'Recall' }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
   });
+
+  it('recall fact card shows Korean predicate label, not English canonical (B-56)', async () => {
+    // The recall response carries the canonical English predicate
+    // (`decided_to_remove`); the rendered card MUST show the Korean
+    // label from PREDICATE_LABELS and MUST NOT leak the raw English
+    // snake_case key into the visible card body.
+    const RECALL_KO_LABEL: RecallResponse = {
+      signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
+      total: 1,
+      facts: [
+        {
+          fact_uid: 'fn-ko-label',
+          claim: '구청은 노후 옹벽을 철거하기로 결정했다.',
+          claim_en: null,
+          subject_uid: 'obj-gu',
+          predicate: 'decided_to_remove',
+          object_value: '노후 옹벽',
+          source_uids: [],
+          validated_at: new Date('2026-06-15T10:00:00Z').toISOString(),
+          validator_id: 'user-x',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.88,
+        },
+      ],
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_KO_LABEL);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '철거' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    const card = await screen.findByTestId('recall-fact-fn-ko-label');
+    // Korean label is visible inside the card.
+    expect(card.textContent).toContain('철거하기로 결정한 것은');
+    // The English canonical key is NOT leaked into the rendered card.
+    expect(card.textContent).not.toContain('decided_to_remove');
+  });
 });
 
 
