@@ -1,13 +1,14 @@
 :root {
-  --bg-base: #050507;
-  --bg-elevated: #0d0d12;
-  --bg-card: #16161e;
-  --bg-card-hover: #1c1c26;
-  --border-subtle: #262633;
-  --text-primary: #e8e8f0;
-  --text-secondary: #9999b3;
-  --text-muted: #6b6b80;
-  --accent-cool: #7be0e0;
+  /* B-58 — Lucid popup tokens (web app palette aligned). */
+  --bg-base: #06080b;
+  --bg-elevated: #0f1318;
+  --bg-card: #141a21;
+  --bg-card-hover: #1a2129;
+  --border-subtle: #1f2730;
+  --text-primary: #cdd9da;
+  --text-secondary: #93a0a6;
+  --text-muted: #647479;
+  --accent-cool: #3fe0c6;
   --accent-error: #ef5b5b;
 }
 
@@ -22,32 +23,120 @@ body {
   background: var(--bg-base);
   color: var(--text-primary);
   font-family:
-    'IBM Plex Mono', 'SF Mono', Monaco, ui-monospace, monospace;
+    'Pretendard Variable', 'Pretendard',
+    -apple-system, BlinkMacSystemFont, system-ui,
+    'Apple SD Gothic Neo', 'Malgun Gothic',
+    sans-serif;
   font-size: 13px;
 }
 
 #root {
-  width: 350px;
-  min-height: 480px;
+  width: 360px;
+  min-height: 320px;
+  max-height: 480px;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 16px;
 }
 
 .brand {
-  font-size: 18px;
-  font-weight: 300;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin: 0;
+  color: var(--text-primary);
 }
 
 .space {
   font-size: 11px;
   color: var(--text-muted);
+  font-feature-settings: 'tnum';
+}
+
+#body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* B-58 — brief block */
+.brief {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.brief-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.brief-label {
+  color: var(--text-secondary);
+}
+
+.brief-pending {
+  color: var(--accent-cool);
+  font-weight: 600;
+  font-feature-settings: 'tnum';
+}
+
+.brief-recent {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brief-recent li {
+  font-size: 11.5px;
+  color: var(--text-primary);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief-recent .subject {
+  color: var(--accent-cool);
+  font-weight: 500;
+}
+
+.brief-recent .sep {
+  color: var(--text-muted);
+  margin: 0 4px;
+}
+
+.brief-recent .claim {
+  color: var(--text-secondary);
+}
+
+.brief-fallback {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* B-58 — quick actions stack */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 button {
@@ -56,8 +145,10 @@ button {
   border: 1px solid var(--border-subtle);
   background: var(--bg-card);
   color: var(--text-primary);
-  padding: 8px 12px;
+  padding: 9px 12px;
   border-radius: 6px;
+  font-size: 13px;
+  transition: background 0.12s ease;
 }
 
 button:hover {
@@ -68,7 +159,11 @@ button.primary {
   background: var(--accent-cool);
   color: var(--bg-base);
   border-color: var(--accent-cool);
-  font-weight: 500;
+  font-weight: 600;
+}
+
+button.primary:hover {
+  background: #57e9d1;
 }
 
 button:disabled {
@@ -76,23 +171,7 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.muted {
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.error {
-  color: var(--accent-error);
-  font-size: 11px;
-}
-
-.link {
+button.link {
   background: none;
   border: none;
   color: var(--accent-cool);
@@ -101,10 +180,54 @@ button:disabled {
   cursor: pointer;
 }
 
-#capture-result {
-  margin-top: 12px;
-  padding: 8px;
+/* B-58 — ask row */
+.ask {
+  display: flex;
+  gap: 6px;
+}
+
+.ask input {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: var(--bg-elevated);
+  padding: 8px 10px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.ask input:focus {
+  border-color: var(--accent-cool);
+}
+
+.ask input::placeholder {
+  color: var(--text-muted);
+}
+
+.ask button {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+}
+
+.muted {
+  color: var(--text-muted);
   font-size: 11px;
+  margin: 0;
+}
+
+.error {
+  color: var(--accent-error);
+  font-size: 11px;
+}
+
+#capture-result {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 0 0 0;
+}
+
+#capture-result.error {
+  color: var(--accent-error);
 }

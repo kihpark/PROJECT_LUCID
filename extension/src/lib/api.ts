@@ -168,3 +168,62 @@ export async function getStructuredSummary(jobId: string): Promise<StructuredSum
     has_disambiguation: data.disambiguation_pending.length > 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// B-58 — home brief read for the popup "오늘의 brief" block. Mirrors the web
+// app's `getHomeBrief` (frontend/web/lib/api.ts) but lives here so the popup
+// doesn't pull in next.js / SSR helpers. The shape is exactly what
+// backend/api/routes/home.py returns. Fail-soft is the caller's contract:
+// every reject collapses to the muted fallback line in the popup.
+// ---------------------------------------------------------------------------
+
+export interface HomeBriefRecentItem {
+  fact_uid: string;
+  claim: string;
+  subject_label?: string | null;
+  validated_at: string;
+}
+
+export interface HomeBriefTotals {
+  facts: number;
+  entities: number;
+  sources: number;
+  this_week_validated: number;
+}
+
+export interface HomeBriefCluster {
+  entity_uid: string | null;
+  entity_name: string | null;
+  linked_count: number;
+}
+
+export interface HomeBrief {
+  totals: HomeBriefTotals;
+  pending_validation: number;
+  recent_validated: HomeBriefRecentItem[];
+  top_cluster: HomeBriefCluster | null;
+  is_empty: boolean;
+}
+
+export async function getHomeBrief(): Promise<HomeBrief> {
+  const auth = await getAuth();
+  if (!auth) throw new Error('not_authenticated');
+  const resp = await fetch(`${API_BASE}/api/home/brief`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${auth.token}`,
+      'Accept': 'application/json',
+    },
+  });
+  if (!resp.ok) {
+    let detail = `HTTP ${resp.status}`;
+    try {
+      const body = await resp.json();
+      detail = describeApiError(body, detail);
+    } catch {
+      // ignore — keep the HTTP status
+    }
+    throw new Error(detail);
+  }
+  return (await resp.json()) as HomeBrief;
+}

@@ -15,7 +15,7 @@ function resetDom() {
   document.body.innerHTML = `
     <div id="root" data-state="loading">
       <header class="header">
-        <h1 class="brand">Lucid</h1>
+        <h1 class="brand">Quick Lucid</h1>
         <span id="space-name" class="space" hidden></span>
       </header>
       <main id="body">
@@ -28,6 +28,7 @@ function resetDom() {
 beforeEach(() => {
   resetDom();
   vi.resetModules();
+  vi.unstubAllGlobals();
   chrome.cookies.get.mockReset();
   chrome.tabs.create.mockReset();
   chrome.tabs.query.mockReset();
@@ -38,10 +39,9 @@ describe('popup', () => {
   it('renders the logged-out state when cookies are missing', async () => {
     chrome.cookies.get.mockImplementation((_d: CookieDetails, cb: (c: chrome.cookies.Cookie | null) => void) => cb(null));
     await import('@/popup/popup.ts');
-    // Wait a microtask for the async boot() to render.
     await new Promise((r) => setTimeout(r, 0));
     expect(document.querySelector('button.primary')?.textContent).toMatch(
-      /Open lucid\.app to log in/,
+      /lucid\.app/,
     );
     expect(document.getElementById('root')?.dataset.state).toBe('logged_out');
   });
@@ -50,20 +50,21 @@ describe('popup', () => {
     chrome.cookies.get.mockImplementation((details: CookieDetails, cb: (c: chrome.cookies.Cookie | null) => void) => {
       cb({ value: details.name === 'lucid_jwt' ? 'jwt-xyz' : 'ks-1' } as chrome.cookies.Cookie);
     });
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})));
     await import('@/popup/popup.ts');
     await new Promise((r) => setTimeout(r, 0));
-    expect(document.getElementById('save-btn')).not.toBeNull();
+    expect(document.getElementById('capture-btn')).not.toBeNull();
+    expect(document.getElementById('ask-btn')).not.toBeNull();
+    expect(document.getElementById('home-btn')).not.toBeNull();
     expect(document.getElementById('root')?.dataset.state).toBe('ready');
     expect(document.getElementById('space-name')?.hidden).toBe(false);
   });
 
-  it('Save button dispatches a capture message to the SW', async () => {
+  it('Capture button dispatches a capture message to the SW', async () => {
     chrome.cookies.get.mockImplementation((details: CookieDetails, cb: (c: chrome.cookies.Cookie | null) => void) => {
       cb({ value: details.name === 'lucid_jwt' ? 'jwt-xyz' : 'ks-1' } as chrome.cookies.Cookie);
     });
-    chrome.tabs.query.mockImplementation((_q: chrome.tabs.QueryInfo, cb: (tabs: chrome.tabs.Tab[]) => void) => {
-      cb([{ id: 1, url: 'https://example.com/article' } as chrome.tabs.Tab]);
-    });
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})));
     chrome.tabs.query.mockReturnValue(
       Promise.resolve([{ url: 'https://example.com/article' }]),
     );
@@ -74,8 +75,8 @@ describe('popup', () => {
     await import('@/popup/popup.ts');
     await new Promise((r) => setTimeout(r, 0));
 
-    const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
-    saveBtn.click();
+    const captureBtn = document.getElementById('capture-btn') as HTMLButtonElement;
+    captureBtn.click();
     await new Promise((r) => setTimeout(r, 0));
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
