@@ -290,3 +290,35 @@ export interface FactMutationResponse {
   source_uids: string[];
   auto_retracted: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// B-55 / B-57 — Home brief response shape (mirrors backend; the runtime fetch
+// is fail-soft so this type lands even before B-55 is merged).
+// ---------------------------------------------------------------------------
+
+export interface HomeBriefTotals {
+  facts: number;
+  entities: number;
+  sources: number;
+  this_week: number;
+}
+
+export interface HomeBriefValidatedFact {
+  fact_uid: string;
+  claim: string;
+  validated_at: string;
+}
+
+export interface HomeBriefCluster {
+  uid: string;
+  name: string;
+  recent_fact_count: number;
+}
+
+export interface HomeBrief {
+  totals: HomeBriefTotals;
+  pending_validation: number;
+  recent_validated: HomeBriefValidatedFact[];
+  top_cluster: HomeBriefCluster | null;
+  is_empty: boolean;
+}
