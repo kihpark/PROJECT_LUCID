@@ -18,6 +18,14 @@ vi.mock('@/lib/api', () => ({
 
 import * as api from '@/lib/api';
 
+// B-60: default mode is simple, which hides the left filter / right
+// facet rails. Tests that assert on the power-rail chrome (facet
+// panel, search controls, entity brief, threshold note, drill-down
+// chips) must first flip the toggle so the rails mount.
+function switchToPowerMode() {
+  fireEvent.click(screen.getByTestId('recall-mode-toggle'));
+}
+
 const RECALL_HIT: RecallResponse = {
   signature: 'As far as I know — 그래프에 2개 검증 사실이 있습니다',
   total: 2,
@@ -65,6 +73,14 @@ const RECALL_EMPTY: RecallResponse = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // B-60: clear the persisted mode so each test starts at the simple
+  // default (matching a first-time user). Tests that need the power
+  // rail call switchToPowerMode() explicitly.
+  try {
+    window.localStorage.removeItem('lucid.recall.mode');
+  } catch {
+    // jsdom always provides localStorage; the guard is defensive.
+  }
 });
 
 describe('RecallView', () => {
@@ -270,6 +286,8 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
   it('shows the threshold note above the result list with expanded count', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(HIT_WITH_LABELS);
     render(<RecallView spaceId="ks-1" />);
+    // B-60: threshold note lives in the power rail; flip to power mode.
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
@@ -395,6 +413,7 @@ describe('RecallView — entity brief panel (B-41)', () => {
   it('renders the entity brief panel above the flat fact list', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
@@ -410,6 +429,7 @@ describe('RecallView — entity brief panel (B-41)', () => {
   it('shows subject-role and object-role groups separately', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
@@ -428,6 +448,7 @@ describe('RecallView — entity brief panel (B-41)', () => {
   it('displays the other-entity label when the related side resolved', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
@@ -453,6 +474,7 @@ describe('RecallView — entity brief panel (B-41)', () => {
     };
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(emptyEntity);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'Nobody' },
     });
@@ -502,6 +524,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
   it('renders the right-rail facet panel with class buckets', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
@@ -516,6 +539,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
   it('clicking an entity bar triggers a second recall call with entity filter', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
@@ -540,6 +564,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
   it('renders an active filter chip after drill-down + removes on ✕', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
@@ -562,6 +587,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
   it('"모두 지우기" wipes the entity filter array', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
@@ -584,6 +610,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
   it('toggling an entity bar twice removes it (idempotent toggle)', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
@@ -608,9 +635,13 @@ describe('RecallView — left search controls (B-50)', () => {
   // ★ helper: render + run an initial recall so the controls have a
   // submittedQuery to attach to. Subsequent control changes will
   // re-fire recall against that query.
+  // B-60: the search controls live in the power rail, so flip into
+  // power mode immediately after render — the toggle has no effect on
+  // the recall call shape (mode is pure layout).
   async function bootstrap() {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
@@ -727,6 +758,7 @@ describe('RecallView — left search controls (B-50)', () => {
 
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'BoK' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
@@ -806,6 +838,7 @@ describe('RecallView — left search controls (B-50)', () => {
     };
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
@@ -877,9 +910,13 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     ],
   };
 
+  // B-60: a few tests below assert the facet panel stays mounted with
+  // the modal open. Flip into power mode in the shared bootstrap so
+  // the right rail is present from the first assertion.
   async function bootstrap() {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT);
     render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'BoK' } });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
@@ -1090,5 +1127,160 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     await screen.findByTestId('fact-detail-modal');
     expect(screen.queryByTestId('fact-detail-trust-badge')).toBeNull();
     expect(screen.getByTestId('fact-detail-source-src-A')).toBeInTheDocument();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// B-60 — simple / power mode toggle. Simple is the default; the
+// search-controls rail and the facet rail are only mounted in power
+// mode. Both modes share the same recall response (no extra API
+// calls), and the predicate Korean label survives the simple-mode
+// shrink because the FactCard component is reused verbatim.
+// ---------------------------------------------------------------------------
+
+describe('RecallView — B-60 simple/power mode toggle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // A response that exercises the Korean predicate label so we can
+  // sanity-check the B-56 wire in simple mode.
+  const SIMPLE_KO: RecallResponse = {
+    signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
+    total: 1,
+    facts: [
+      {
+        fact_uid: 'fn-simple-ko',
+        claim: '구청은 노후 옹벽을 철거하기로 결정했다.',
+        claim_en: null,
+        subject_uid: 'obj-gu',
+        predicate: 'decided_to_remove',
+        object_value: '노후 옹벽',
+        source_uids: [],
+        validated_at: new Date('2026-06-15T10:00:00Z').toISOString(),
+        validator_id: 'user-x',
+        validation_method: 'manual',
+        knowledge_space_id: 'ks-1',
+        negation_flag: false,
+        negation_scope: null,
+        score: 0.88,
+      },
+    ],
+  };
+
+  it('default mode is simple — left filter panel is NOT in the document on first render', () => {
+    render(<RecallView spaceId="ks-1" />);
+    // The search input is always present (it lives in the shell).
+    expect(screen.getByLabelText('recall query')).toBeInTheDocument();
+    // The toggle button is present and announces "going to power".
+    const toggle = screen.getByTestId('recall-mode-toggle');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    // Power-mode rails are not mounted.
+    expect(screen.queryByTestId('search-controls')).toBeNull();
+    expect(screen.queryByTestId('facet-panel')).toBeNull();
+    expect(screen.queryByTestId('recall-power-body')).toBeNull();
+  });
+
+  it('toggle switches to power mode — left filter panel APPEARS after click', () => {
+    render(<RecallView spaceId="ks-1" />);
+    expect(screen.queryByTestId('search-controls')).toBeNull();
+    fireEvent.click(screen.getByTestId('recall-mode-toggle'));
+    expect(screen.getByTestId('search-controls')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-power-body')).toBeInTheDocument();
+    // aria-pressed flips to true so screen readers know the state changed.
+    expect(screen.getByTestId('recall-mode-toggle')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('toggle back to simple — left filter panel disappears again', () => {
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.click(screen.getByTestId('recall-mode-toggle'));
+    expect(screen.getByTestId('search-controls')).toBeInTheDocument();
+    // Click again → simple.
+    fireEvent.click(screen.getByTestId('recall-mode-toggle'));
+    expect(screen.queryByTestId('search-controls')).toBeNull();
+    expect(screen.queryByTestId('facet-panel')).toBeNull();
+    expect(screen.queryByTestId('recall-power-body')).toBeNull();
+    expect(screen.getByTestId('recall-mode-toggle')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('predicate Korean label still displays in simple mode (B-56 wire survives)', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(SIMPLE_KO);
+    render(<RecallView spaceId="ks-1" />);
+    // Stay in simple mode — do NOT click the toggle.
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '철거' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const card = await screen.findByTestId('recall-fact-fn-simple-ko');
+    // Korean label is visible — the predicateLabel() helper rendered.
+    expect(card.textContent).toContain('철거하기로 결정한 것은');
+    // The English canonical key is NOT leaked.
+    expect(card.textContent).not.toContain('decided_to_remove');
+    // We never mounted the power rails.
+    expect(screen.queryByTestId('search-controls')).toBeNull();
+    expect(screen.queryByTestId('facet-panel')).toBeNull();
+  });
+
+  it('fact card click opens FactDetailModal in BOTH modes', async () => {
+    const detail = {
+      fact: {
+        fact_uid: 'fn-simple-ko',
+        claim: '구청은 노후 옹벽을 철거하기로 결정했다.',
+        claim_en: null,
+        subject_uid: 'obj-gu',
+        subject_label: '구청',
+        predicate: 'decided_to_remove',
+        object_value: '노후 옹벽',
+        object_label: null,
+        validated_at: '2026-06-15T10:00:00Z',
+        retracted_at: null,
+        retracted_by: null,
+        edit_history: [],
+      },
+      entities: [
+        { uid: 'obj-gu', name: '구청', class: 'organization', role: 'subject', aliases: [] },
+      ],
+      sources: [],
+    };
+
+    // --- 1) simple mode: click the card → modal opens.
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(SIMPLE_KO);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '철거' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detail);
+    fireEvent.click(
+      await screen.findByTestId('recall-fact-fn-simple-ko-open-detail'),
+    );
+    await waitFor(() =>
+      expect(api.getFactDetail).toHaveBeenCalledWith('ks-1', 'fn-simple-ko'),
+    );
+    expect(await screen.findByTestId('fact-detail-modal')).toBeInTheDocument();
+
+    // Close the modal so the next assertion starts clean.
+    fireEvent.click(screen.getByTestId('fact-detail-close'));
+    expect(screen.queryByTestId('fact-detail-modal')).toBeNull();
+
+    // --- 2) flip to power mode: modal still opens from the same card.
+    fireEvent.click(screen.getByTestId('recall-mode-toggle'));
+    expect(screen.getByTestId('search-controls')).toBeInTheDocument();
+    expect(screen.getByTestId('facet-panel')).toBeInTheDocument();
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detail);
+    fireEvent.click(
+      screen.getByTestId('recall-fact-fn-simple-ko-open-detail'),
+    );
+    await waitFor(() => expect(api.getFactDetail).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('fact-detail-modal')).toBeInTheDocument();
   });
 });

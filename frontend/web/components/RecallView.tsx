@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * RecallView — DR-089 dogfood thin slice + B-40 polish.
+ * RecallView — DR-089 dogfood thin slice + B-40 polish + B-60 mode toggle.
  *
  * What this component is:
  *   - Single search input + a signature line + a list of fact cards.
@@ -19,6 +19,26 @@
  *   · A small badge labels each card as either "유사도 매치" or
  *     "엔티티 연결". The recall threshold is announced once above
  *     the result list so the user understands the filtering policy.
+ *
+ * B-60 — simple / power mode toggle:
+ *   · Default mode is `simple`: a single column of fact cards. No left
+ *     filter panel, no right facet panel. This is the "단순-기본" UX
+ *     that PO asked for so the recall page is approachable for the
+ *     first-time user.
+ *   · Toggling to `power` reveals the existing Palantir-style 3-panel
+ *     layout (left filter / center cards / right facets). Power mode
+ *     is the on-demand surface; nothing changes about the search
+ *     itself — both modes consume the SAME recall response, no second
+ *     API call ever fires from a mode flip.
+ *   · The mode is persisted in `localStorage` under
+ *     `lucid.recall.mode` so the user's preference survives reloads.
+ *
+ * Implementation pattern:
+ *   · `RecallView` owns the data (query, controls, recall result,
+ *     fact-detail modal) and exposes the body via `<RecallSimpleBody>`
+ *     / `<RecallPowerBody>` props — both bodies are dumb consumers.
+ *   · The 3-panel power layout is preserved verbatim from B-49/B-50;
+ *     no behaviour change was made to the existing panels.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -916,6 +936,189 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// B-60 — Simple body. The "단순-기본" mode strips the left filter rail
+// and right facet rail; the page becomes a single column of fact cards
+// stacked vertically. Everything else (predicate Korean label, modal,
+// score badge, source chips) is identical to power mode — only the
+// chrome around the list changes.
+// ---------------------------------------------------------------------------
+
+interface RecallSimpleBodyProps {
+  result: RecallResponse | null;
+  visibleFacts: RecallFact[];
+  error: string | null;
+  onOpenDetail: (factUid: string) => void;
+}
+
+function RecallSimpleBody({
+  result, visibleFacts, error, onOpenDetail,
+}: RecallSimpleBodyProps) {
+  return (
+    <>
+      {error && (
+        <p
+          role="alert"
+          className="mb-4 rounded-md border border-accent-error/40 bg-accent-error/5 p-3 text-sm text-accent-error"
+        >
+          {error}
+        </p>
+      )}
+
+      {result && (
+        <section aria-label="recall result" data-testid="recall-simple-body">
+          <p
+            data-testid="recall-signature"
+            className="text-sm text-text-primary mb-2 font-medium"
+          >
+            {result.signature}
+          </p>
+          {visibleFacts.length > 0 && (
+            visibleFacts.map((f) => (
+              <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
+            ))
+          )}
+        </section>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B-60 — Power body. The existing Palantir-style 3-panel layout is
+// preserved verbatim from B-49/B-50: left filter rail (search
+// controls + active chips), centre column (entity brief + cards), right
+// facet rail. Behaviour is unchanged from pre-B-60.
+// ---------------------------------------------------------------------------
+
+interface RecallPowerBodyProps {
+  result: RecallResponse | null;
+  sortedFacts: RecallFact[];
+  visibleFacts: RecallFact[];
+  error: string | null;
+  controls: SearchControlsState;
+  onControlsChange: (next: SearchControlsState) => void;
+  activeFilterDetails: { uid: string; name: string; bucket: string }[];
+  activeEntities: string[];
+  onToggleEntity: (uid: string) => void;
+  onRemoveChip: (uid: string) => void;
+  onClearAll: () => void;
+  onOpenDetail: (factUid: string) => void;
+}
+
+function RecallPowerBody({
+  result, sortedFacts, visibleFacts, error,
+  controls, onControlsChange,
+  activeFilterDetails, activeEntities,
+  onToggleEntity, onRemoveChip, onClearAll,
+  onOpenDetail,
+}: RecallPowerBodyProps) {
+  return (
+    <div className="flex gap-4" data-testid="recall-power-body">
+      <SearchControlsPanel state={controls} onChange={onControlsChange} />
+
+      <main className="flex-1 min-w-0">
+        <ActiveFilterChips
+          entities={activeFilterDetails}
+          onRemove={onRemoveChip}
+          onClearAll={onClearAll}
+        />
+
+        {error && (
+          <p
+            role="alert"
+            className="mb-4 rounded-md border border-accent-error/40 bg-accent-error/5 p-3 text-sm text-accent-error"
+          >
+            {error}
+          </p>
+        )}
+
+        {result && (
+          <section aria-label="recall result">
+            <p
+              data-testid="recall-signature"
+              className="text-sm text-text-primary mb-2 font-medium"
+            >
+              {result.signature}
+            </p>
+            {result.entity_brief && (
+              <EntityBriefPanel brief={result.entity_brief} />
+            )}
+            {sortedFacts.length > 0 && (
+              <>
+                <p
+                  data-testid="recall-threshold-note"
+                  className="text-xxs text-text-muted mb-4 font-mono"
+                >
+                  관련도 {controls.scoreThreshold.toFixed(2)} 이상 매치만 표시 · 점수 내림차순 정렬
+                  {result.expanded_count && result.expanded_count > 0
+                    ? ` · 엔티티 연결로 추가된 ${result.expanded_count}건 포함`
+                    : ''}
+                  {controls.keyword2.trim() && sortedFacts.length !== visibleFacts.length
+                    ? ` · 키워드 "${controls.keyword2.trim()}" 로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
+                    : ''}
+                </p>
+                {visibleFacts.length === 0 ? (
+                  <p
+                    data-testid="recall-keyword-empty"
+                    className="text-sm text-text-muted py-4"
+                  >
+                    키워드 「{controls.keyword2.trim()}」 와 일치하는 결과가 없습니다.
+                  </p>
+                ) : (
+                  visibleFacts.map((f) => (
+                    <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
+                  ))
+                )}
+              </>
+            )}
+          </section>
+        )}
+      </main>
+
+      {/* B-48c: right rail stays on facet/brief unconditionally;
+          fact detail is rendered as a modal overlay outside the
+          flex row so it can use the full viewport width. */}
+      <FacetPanel
+        facets={result?.facets}
+        activeEntityUids={activeEntities}
+        onToggleEntity={onToggleEntity}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B-60 — RecallView shell. Owns all data (query, recall response,
+// modal, controls) and dispatches the body to RecallSimpleBody or
+// RecallPowerBody based on `mode`. The mode toggle button lives in the
+// page header next to the search bar.
+// ---------------------------------------------------------------------------
+
+type RecallMode = 'simple' | 'power';
+
+const RECALL_MODE_STORAGE_KEY = 'lucid.recall.mode';
+
+function loadStoredMode(): RecallMode {
+  // SSR-safe: localStorage is only read on the client.
+  if (typeof window === 'undefined') return 'simple';
+  try {
+    const v = window.localStorage.getItem(RECALL_MODE_STORAGE_KEY);
+    return v === 'power' ? 'power' : 'simple';
+  } catch {
+    return 'simple';
+  }
+}
+
+function persistMode(mode: RecallMode): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(RECALL_MODE_STORAGE_KEY, mode);
+  } catch {
+    // localStorage may be unavailable (private mode); ignore.
+  }
+}
+
 export function RecallView({ spaceId }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
@@ -927,6 +1130,23 @@ export function RecallView({ spaceId }: Props) {
   // B-48b: open detail panel swaps in over the entity-brief facet panel.
   const [detail, setDetail] = useState<FactDetailResponse | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
+  // B-60: simple is the default; power is opt-in. We start in simple
+  // on SSR (deterministic markup) and hydrate from localStorage in an
+  // effect so a returning user lands back in the rail they prefer.
+  const [mode, setMode] = useState<RecallMode>('simple');
+
+  useEffect(() => {
+    const stored = loadStoredMode();
+    if (stored !== 'simple') setMode(stored);
+  }, []);
+
+  const onToggleMode = () => {
+    setMode((prev) => {
+      const next = prev === 'simple' ? 'power' : 'simple';
+      persistMode(next);
+      return next;
+    });
+  };
 
   const sortedFacts = useMemo(
     () => (result ? sortFacts(result.facts) : []),
@@ -939,6 +1159,10 @@ export function RecallView({ spaceId }: Props) {
   //   can hide 🔗 엔티티 연결 rows from the rendered list, but the
   //   underlying recall response is unchanged so toggling never zeros
   //   the result — the old UX trap is gone.
+  // B-60: visibleFacts is shared by both modes. Simple mode ignores
+  // the keyword2 / matchKinds controls (they live in the power rail);
+  // because the controls default to "all on / empty keyword", the
+  // simple mode renders the full sorted list.
   const visibleFacts = useMemo(() => {
     let out = sortedFacts;
     const kw = controls.keyword2.trim().toLowerCase();
@@ -1120,97 +1344,64 @@ export function RecallView({ spaceId }: Props) {
   };
 
   return (
-    <div className="flex gap-4 px-4 py-6 mx-auto max-w-7xl">
-      <SearchControlsPanel state={controls} onChange={onControlsChange} />
-
-      <main className="flex-1 min-w-0">
-        <header className="mb-6">
+    <div className="px-4 py-6 mx-auto max-w-7xl" data-recall-mode={mode}>
+      <header className="mb-6 flex items-start justify-between gap-3">
+        <div>
           <h1 className="text-2xl font-light">Recall</h1>
           <p className="text-sm text-text-secondary">
             그래프 안의 사실만 답합니다. 그래프 밖은 답하지 않습니다.
           </p>
-        </header>
+        </div>
+        <button
+          type="button"
+          data-testid="recall-mode-toggle"
+          aria-label="toggle recall layout mode"
+          aria-pressed={mode === 'power'}
+          onClick={onToggleMode}
+          className="shrink-0 mt-1 rounded-md border border-border-subtle bg-bg-card px-3 py-1.5 text-xs font-mono text-text-secondary hover:bg-bg-elevated/60"
+          title="단순 보기 ↔ 고급/그래프 보기"
+        >
+          {mode === 'simple' ? '고급/그래프 보기 →' : '← 단순 보기'}
+        </button>
+      </header>
 
-        <form onSubmit={onSubmit} className="flex gap-2 mb-4">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="질문을 입력하세요 (Ko/En)"
-            className="flex-1 rounded-md border border-border-subtle bg-bg-card p-2 text-sm focus:outline-none focus:border-accent-cool"
-            aria-label="recall query"
-          />
-          <ActionButton type="submit" variant="primary" disabled={busy || !query.trim()}>
-            {busy ? '검색 중…' : 'Recall'}
-          </ActionButton>
-        </form>
-
-        <ActiveFilterChips
-          entities={activeFilterDetails}
-          onRemove={onRemoveChip}
-          onClearAll={onClearAll}
+      <form onSubmit={onSubmit} className="flex gap-2 mb-4">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="질문을 입력하세요 (Ko/En)"
+          className="flex-1 rounded-md border border-border-subtle bg-bg-card p-2 text-sm focus:outline-none focus:border-accent-cool"
+          aria-label="recall query"
         />
+        <ActionButton type="submit" variant="primary" disabled={busy || !query.trim()}>
+          {busy ? '검색 중…' : 'Recall'}
+        </ActionButton>
+      </form>
 
-        {error && (
-          <p
-            role="alert"
-            className="mb-4 rounded-md border border-accent-error/40 bg-accent-error/5 p-3 text-sm text-accent-error"
-          >
-            {error}
-          </p>
-        )}
-
-        {result && (
-          <section aria-label="recall result">
-            <p
-              data-testid="recall-signature"
-              className="text-sm text-text-primary mb-2 font-medium"
-            >
-              {result.signature}
-            </p>
-            {result.entity_brief && (
-              <EntityBriefPanel brief={result.entity_brief} />
-            )}
-            {sortedFacts.length > 0 && (
-              <>
-                <p
-                  data-testid="recall-threshold-note"
-                  className="text-xxs text-text-muted mb-4 font-mono"
-                >
-                  관련도 {controls.scoreThreshold.toFixed(2)} 이상 매치만 표시 · 점수 내림차순 정렬
-                  {result.expanded_count && result.expanded_count > 0
-                    ? ` · 엔티티 연결로 추가된 ${result.expanded_count}건 포함`
-                    : ''}
-                  {controls.keyword2.trim() && sortedFacts.length !== visibleFacts.length
-                    ? ` · 키워드 "${controls.keyword2.trim()}" 로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
-                    : ''}
-                </p>
-                {visibleFacts.length === 0 ? (
-                  <p
-                    data-testid="recall-keyword-empty"
-                    className="text-sm text-text-muted py-4"
-                  >
-                    키워드 「{controls.keyword2.trim()}」 와 일치하는 결과가 없습니다.
-                  </p>
-                ) : (
-                  visibleFacts.map((f) => (
-                    <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
-                  ))
-                )}
-              </>
-            )}
-          </section>
-        )}
-      </main>
-
-      {/* B-48c: right rail stays on facet/brief unconditionally;
-          fact detail is rendered as a modal overlay outside the
-          flex row so it can use the full viewport width. */}
-      <FacetPanel
-        facets={result?.facets}
-        activeEntityUids={activeEntities}
-        onToggleEntity={onToggleEntity}
-      />
+      {mode === 'simple' ? (
+        <RecallSimpleBody
+          result={result}
+          visibleFacts={visibleFacts}
+          error={error}
+          onOpenDetail={onOpenDetail}
+        />
+      ) : (
+        <RecallPowerBody
+          result={result}
+          sortedFacts={sortedFacts}
+          visibleFacts={visibleFacts}
+          error={error}
+          controls={controls}
+          onControlsChange={onControlsChange}
+          activeFilterDetails={activeFilterDetails}
+          activeEntities={activeEntities}
+          onToggleEntity={onToggleEntity}
+          onRemoveChip={onRemoveChip}
+          onClearAll={onClearAll}
+          onOpenDetail={onOpenDetail}
+        />
+      )}
 
       {detail && (
         <FactDetailModal
