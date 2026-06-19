@@ -40,6 +40,12 @@ services:
       retries: 18
       start_period: 30s
 
+  # DEVX-01: this is the PRODUCTION shape — the image built from
+  # backend/Dockerfile runs as-is (no source mount, no --reload).
+  # `docker-compose.override.yml` (auto-loaded when present) adds the
+  # bind mount + --reload for the dev inner loop. To force production
+  # mode, run `docker compose -f docker-compose.yml up` (skips the
+  # override) or delete the override file.
   backend:
     build: ./backend
     ports:
@@ -54,10 +60,9 @@ services:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # DEVX-01: production Next.js (`pnpm start`, NODE_ENV=production).
+  # The dev override swaps `pnpm dev` + bind mount for HMR.
   web:
     build: ./frontend/web
     ports:
