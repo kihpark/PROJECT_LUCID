@@ -300,19 +300,20 @@ export interface HomeBriefTotals {
   facts: number;
   entities: number;
   sources: number;
-  this_week: number;
+  this_week_validated: number;
 }
 
 export interface HomeBriefValidatedFact {
   fact_uid: string;
   claim: string;
+  subject_label?: string | null;
   validated_at: string;
 }
 
 export interface HomeBriefCluster {
-  uid: string;
-  name: string;
-  recent_fact_count: number;
+  entity_uid: string | null;
+  entity_name: string | null;
+  linked_count: number;
 }
 
 export interface HomeBrief {
