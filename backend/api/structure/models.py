@@ -47,6 +47,10 @@ class StructureObject(LucidBaseModel):
     class_: ObjectClass = Field(alias="class")
     name: str
     name_en: str | None = None
+    # B-52: surface-form aliases (Korean original / abbreviations /
+    # English calque) so a query in the source language matches an
+    # entity normalized into another language.
+    aliases: list[str] = Field(default_factory=list)
     properties: dict[str, Any] = Field(default_factory=dict)
 
 

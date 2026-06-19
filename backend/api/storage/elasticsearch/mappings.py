@@ -117,6 +117,15 @@ LUCID_OBJECTS_MAPPING: dict[str, Any] = {
                 "fields": {"keyword": {"type": "keyword"}},
             },
             "name_en": {"type": "text", "analyzer": "standard"},
+            # B-52: surface-form aliases so a Korean query matches an
+            # entity normalized into English (or vice versa). text with
+            # korean_analyzer for substring / morpheme matching, plus a
+            # keyword sub-field for exact-match dedup checks.
+            "aliases": {
+                "type": "text",
+                "analyzer": "korean_analyzer",
+                "fields": {"keyword": {"type": "keyword"}},
+            },
             "properties": {"type": "object", "dynamic": True},
             "fact_uids": {"type": "keyword"},
             "connected_objects": {

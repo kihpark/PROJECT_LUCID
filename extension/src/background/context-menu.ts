@@ -30,6 +30,12 @@ export const MENU_IDS = {
   page: 'lucid-save-page',
   selection: 'lucid-save-selection',
   image: 'lucid-save-image',
+  // B-45.5: pixel capture of the visible tab — works on Threads /
+  // Instagram stories / CSP-locked SPAs and any other surface where
+  // the DOM / image-URL paths fail. Treats the screenshot as a
+  // plain `page_image` so the existing vision extractor handles
+  // it unchanged.
+  screenshot: 'lucid-save-screenshot',
 } as const;
 
 // Mirrors backend MAX_PRECOMPRESSION_BYTES
@@ -309,6 +315,103 @@ export async function buildImagePayload(
   };
 }
 
+type ScreenshotOutcome =
+  | { ok: true; payload: CaptureRequest }
+  | { ok: false; error: string };
+
+/**
+ * B-45.5 — pixel capture of the visible tab.
+ *
+ * `chrome.tabs.captureVisibleTab(windowId, {format:'png'})` returns
+ * a `data:image/png;base64,...` URL. We strip the prefix and ship the
+ * base64 portion as `raw_payload_b64` so the backend lands the bytes
+ * as `SourceJob.raw_payload` (B-48 snapshot) and the vision extractor
+ * transcribes the image into claim text via the existing B-45
+ * pipeline. No content-script dependency — works on Threads,
+ * Instagram, anywhere.
+ *
+ * `source_url` is the page URL so the Detail panel hyperlink works
+ * and the B-48a S/P/O dedup converges across multiple screenshots
+ * of the same page.
+ */
+export async function buildScreenshotPayload(
+  tab: chrome.tabs.Tab | undefined,
+): Promise<ScreenshotOutcome | null> {
+  const pageUrl = tab?.url ?? '';
+  if (!pageUrl) return null;
+  const windowId = tab?.windowId;
+  if (windowId === undefined) return null;
+
+  let dataUrl: string;
+  try {
+    dataUrl = await new Promise<string>((resolve, reject) => {
+      const cb = (result?: string) => {
+        const err = chrome.runtime?.lastError;
+        if (err) {
+          reject(new Error(err.message || 'captureVisibleTab failed'));
+          return;
+        }
+        if (!result) {
+          reject(new Error('captureVisibleTab returned empty data'));
+          return;
+        }
+        resolve(result);
+      };
+      // PNG keeps text + chart edges crisp; JPEG q≤92 visibly hurts
+      // OCR on Korean small print.
+      (chrome.tabs.captureVisibleTab as unknown as (
+        windowId: number,
+        options: { format: 'png' | 'jpeg'; quality?: number },
+        cb: (dataUrl?: string) => void,
+      ) => void)(
+        windowId, { format: 'png' }, cb,
+      );
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        '화면을 캡처할 수 없습니다 — 확장 권한 또는 보호된 페이지일 수 있어요. '
+        + `(reason: ${err instanceof Error ? err.message : 'unknown'})`,
+    };
+  }
+
+  // dataUrl shape: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg..."
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0) {
+    return { ok: false, error: 'invalid captureVisibleTab data URL' };
+  }
+  const b64 = dataUrl.slice(comma + 1);
+
+  // Approximate byte count from base64 length (4 chars → 3 bytes).
+  const approxBytes = Math.floor(b64.length * 0.75);
+  if (approxBytes > MAX_IMAGE_BYTES) {
+    const mb = (approxBytes / 1024 / 1024).toFixed(1);
+    const limit = MAX_IMAGE_BYTES / 1024 / 1024;
+    return {
+      ok: false,
+      error:
+        `Screenshot too large (${mb} MB; limit ${limit} MB). `
+        + 'Zoom out or capture a smaller region.',
+    };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      source_url: pageUrl,
+      source_type: 'page_image',
+      captured_from: 'chrome_ext',
+      raw_payload_b64: b64,
+      client_metadata: {
+        source_page_url: pageUrl,
+        capture_kind: 'screenshot',
+        image_byte_count: String(approxBytes),
+      },
+    },
+  };
+}
+
 /**
  * Run a fetch in the page's content-script context so we can reach
  * `blob:` URLs and auth-walled CDN images. The page returns a base64
@@ -391,25 +494,135 @@ export function installContextMenus(): void {
         title: 'Save image to Lucid',
         contexts: ['image'],
       });
+      chrome.contextMenus.create({
+        id: MENU_IDS.screenshot,
+        // B-45.5: distinct from "Save page" which fetches the rendered
+        // DOM. This one snaps the actual pixels of the visible tab —
+        // the only path that works on Threads video-frame text
+        // overlays and the like.
+        title: 'Save screen to Lucid',
+        contexts: ['page', 'frame', 'selection', 'image', 'video', 'link'],
+      });
     });
   } catch (err) {
     console.warn('[lucid] context menu install failed', err);
   }
 }
 
+/**
+ * B-45-fix2: deliver capture feedback through whichever channel is
+ * actually reachable.
+ *
+ * Primary: in-page toast (rich, beside the captured content).
+ * Fallback 1: system notification — "Lucid: capture started/failed"
+ *   in the OS notification tray. Works even when the page blocks
+ *   content scripts (Threads, CSP-strict pages, chrome://, inert
+ *   tabs).
+ * Fallback 2 (ambient): an icon badge that flips to "✓" / "!" so
+ *   the user gets a confirmation pinned to the toolbar even if
+ *   they dismissed the notification. Auto-clears after a few
+ *   seconds.
+ *
+ * The capture path NEVER throws because of toast delivery — the
+ * try/catch ladder swallows every failure into a console.info log
+ * so a missing notifications permission or a closed tab can never
+ * roll back a 202.
+ */
 async function notifyTab(
   tabId: number | undefined,
   message: Record<string, unknown>,
 ): Promise<void> {
-  if (tabId === undefined) return;
-  try {
-    await chrome.tabs.sendMessage(tabId, message);
-  } catch (err) {
-    // chrome:// tabs / closed tabs / tabs without the content script
-    // can't receive messages. The capture itself may already have
-    // landed; the SW log is enough.
-    console.info('[lucid] toast dispatch failed', err);
+  // Always flash the badge — it works on every page, including
+  // restricted URLs.
+  flashBadge(messageOutcome(message));
+
+  let delivered = false;
+  if (tabId !== undefined) {
+    try {
+      await chrome.tabs.sendMessage(tabId, message);
+      delivered = true;
+    } catch (err) {
+      console.info('[lucid] in-page toast unavailable, using fallback', err);
+    }
   }
+
+  if (!delivered) {
+    await showSystemNotification(message);
+  }
+}
+
+type ToastOutcome = 'pending' | 'failed';
+
+function messageOutcome(message: Record<string, unknown>): ToastOutcome {
+  const status = message['status'];
+  if (status === 'capture_failed') return 'failed';
+  return 'pending';
+}
+
+async function showSystemNotification(
+  message: Record<string, unknown>,
+): Promise<void> {
+  const notifications = (chrome as { notifications?: chrome.notifications.NotificationOptions }).notifications;
+  if (!notifications || typeof (notifications as { create?: unknown }).create !== 'function') {
+    return; // permission absent — badge is the only feedback we can give
+  }
+  const failed = messageOutcome(message) === 'failed';
+  const jobId = typeof message['job_id'] === 'string' ? (message['job_id'] as string) : '';
+  const errorDetail = typeof message['error'] === 'string' ? (message['error'] as string) : '';
+  const title = failed ? 'Lucid: 저장 실패' : 'Lucid: 저장 진행 중';
+  const body = failed
+    ? (errorDetail || '캡처를 처리할 수 없습니다.')
+    : (jobId ? `Pending → 잠시 후 Pending Queue 에서 확인하세요. (job ${jobId.slice(0, 8)})`
+              : 'Pending Queue 에서 진행 상태를 확인하세요.');
+  try {
+    await new Promise<void>((resolve) => {
+      (chrome.notifications.create as (opts: chrome.notifications.NotificationOptions, cb?: () => void) => void)(
+        {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('public/icons/icon-128.png'),
+          title,
+          message: body,
+        } as chrome.notifications.NotificationOptions,
+        () => resolve(),
+      );
+    });
+  } catch (err) {
+    console.info('[lucid] system notification failed', err);
+  }
+}
+
+const BADGE_CLEAR_MS = 6000;
+let badgeClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flashBadge(outcome: ToastOutcome): void {
+  const action = (chrome as { action?: chrome.action.ActionDisabledDetails }).action;
+  if (!action) return;
+  const text = outcome === 'failed' ? '!' : '✓';
+  const color = outcome === 'failed' ? '#cc4444' : '#1f8b6a';
+  try {
+    (chrome.action.setBadgeBackgroundColor as (
+      d: chrome.action.BadgeBackgroundColorDetails, cb?: () => void,
+    ) => void)({ color }, () => undefined);
+    (chrome.action.setBadgeText as (
+      d: chrome.action.BadgeTextDetails, cb?: () => void,
+    ) => void)({ text }, () => undefined);
+  } catch (err) {
+    console.info('[lucid] badge update failed', err);
+    return;
+  }
+  if (badgeClearTimer !== null) {
+    clearTimeout(badgeClearTimer);
+  }
+  badgeClearTimer = setTimeout(() => {
+    try {
+      (chrome.action.setBadgeText as (
+        d: chrome.action.BadgeTextDetails, cb?: () => void,
+      ) => void)({ text: '' }, () => undefined);
+    } catch {
+      // ignore
+    }
+    badgeClearTimer = null;
+  }, BADGE_CLEAR_MS);
 }
 
 export async function handleContextMenuClick(
@@ -435,6 +648,20 @@ export async function handleContextMenuClick(
     // B-45: image fetch is async (we have to pull the bytes off the
     // remote host) so it can't share buildSyncPayload's pure path.
     const outcome = await buildImagePayload(info, tab);
+    if (outcome === null) return;
+    if (!outcome.ok) {
+      await notifyTab(tabId, {
+        type: 'show_toast',
+        status: 'capture_failed',
+        error: outcome.error,
+      });
+      return;
+    }
+    payload = outcome.payload;
+  } else if (info.menuItemId === MENU_IDS.screenshot) {
+    // B-45.5: visible-tab pixel capture for blob: / CSP-locked / SNS
+    // text-overlay surfaces where URL fetch can't reach.
+    const outcome = await buildScreenshotPayload(tab);
     if (outcome === null) return;
     if (!outcome.ok) {
       await notifyTab(tabId, {

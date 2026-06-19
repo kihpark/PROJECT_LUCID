@@ -24,14 +24,25 @@ interface FakeChrome {
     onMessage: { addListener: AnyFn; removeListener: AnyFn };
     onInstalled: { addListener: AnyFn };
     lastError: chrome.runtime.LastError | undefined;
+    getURL: AnyFn;
   };
   tabs: {
     query: AnyFn;
     create: AnyFn;
     sendMessage: AnyFn;
+    // B-45.5: visible-tab pixel capture.
+    captureVisibleTab: AnyFn;
   };
   scripting: {
     executeScript: AnyFn;
+  };
+  // B-45-fix2: notifications + badge fallback when in-page toast can't reach the tab.
+  notifications: {
+    create: AnyFn;
+  };
+  action: {
+    setBadgeText: AnyFn;
+    setBadgeBackgroundColor: AnyFn;
   };
 }
 
@@ -60,14 +71,23 @@ const fakeChrome: FakeChrome = {
     onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
     onInstalled: { addListener: vi.fn() },
     lastError: undefined,
+    getURL: vi.fn((path: string) => `chrome-extension://test/${path}`),
   },
   tabs: {
     query: vi.fn(),
     create: vi.fn(),
     sendMessage: vi.fn(),
+    captureVisibleTab: vi.fn(),
   },
   scripting: {
     executeScript: vi.fn(),
+  },
+  notifications: {
+    create: vi.fn((_opts: unknown, cb?: () => void) => cb && cb()),
+  },
+  action: {
+    setBadgeText: vi.fn((_d: unknown, cb?: () => void) => cb && cb()),
+    setBadgeBackgroundColor: vi.fn((_d: unknown, cb?: () => void) => cb && cb()),
   },
 };
 

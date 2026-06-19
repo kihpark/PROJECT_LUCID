@@ -63,6 +63,12 @@ class Object(LucidBaseModel):
     class_: ObjectClass = Field(alias="class")
     name: str
     name_en: str | None = None
+    # B-52: alternate surface forms (Korean original, abbreviations,
+    # English calque, etc.) that mention the same canonical entity.
+    # The decomposer fills these from the original text so a Korean
+    # query "국방부" matches an entity normalized as "Ministry of
+    # Defense" in `name_en`. Empty list is fine.
+    aliases: list[str] = Field(default_factory=list)
     properties: dict[str, Any] = Field(default_factory=dict)
     fact_uids: list[UID] = Field(default_factory=list)
     connected_objects: list[ConnectedObject] = Field(default_factory=list)

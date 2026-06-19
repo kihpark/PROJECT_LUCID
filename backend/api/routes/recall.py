@@ -421,6 +421,17 @@ def _resolve_entities_by_name(
     if not q or not q.strip():
         return []
     q_norm = q.strip().lower()
+    q_stripped = q.strip()
+    # B-52 — Korean ↔ English cross-language matching.
+    # The decomposer normalizes some entities into English ("Ministry
+    # of Defense") even when the source article is Korean. A user
+    # then searching for "국방부" must still surface those facts.
+    # Three-tier lookup:
+    #   1. Exact-keyword on name / name_en / aliases — fastest path,
+    #      survives even when the analyzer would chunk the term.
+    #   2. Analyzed match across the same three fields — picks up
+    #      partial / morpheme matches when the analyzer split tokens.
+    #   3. Wildcard fallback for substring queries.
     body: dict[str, Any] = {
         "size": max_hits,
         "query": {
@@ -429,8 +440,9 @@ def _resolve_entities_by_name(
                     {"term": {"knowledge_space_id": knowledge_space_id}},
                 ],
                 "should": [
-                    {"term": {"name.keyword": q.strip()}},
-                    {"term": {"name_en.keyword": q.strip()}},
+                    {"term": {"name.keyword": q_stripped}},
+                    {"term": {"name_en.keyword": q_stripped}},
+                    {"term": {"aliases.keyword": q_stripped}},
                 ],
                 "minimum_should_match": 1,
             },
@@ -441,10 +453,24 @@ def _resolve_entities_by_name(
         client = get_client()
         resp = client.search(index=LUCID_OBJECTS, body=body)
         hits = list(resp["hits"]["hits"])
+        # Tier 2: analyzed match — covers tokenizer-driven splits the
+        # exact term filter misses ("국방부" tokenized by nori).
+        if not hits:
+            body["query"]["bool"]["should"] = [  # type: ignore[index]
+                {"multi_match": {
+                    "query": q_stripped,
+                    "fields": ["name", "name_en", "aliases"],
+                    "type": "best_fields",
+                }},
+            ]
+            resp = client.search(index=LUCID_OBJECTS, body=body)
+            hits = list(resp["hits"]["hits"])
+        # Tier 3: wildcard substring fallback (last resort).
         if not hits:
             body["query"]["bool"]["should"] = [  # type: ignore[index]
                 {"wildcard": {"name": f"*{q_norm}*"}},
                 {"wildcard": {"name_en": f"*{q_norm}*"}},
+                {"wildcard": {"aliases.keyword": f"*{q_stripped}*"}},
             ]
             resp = client.search(index=LUCID_OBJECTS, body=body)
             hits = list(resp["hits"]["hits"])
@@ -823,6 +849,41 @@ def recall(
         fact = _hit_to_fact(hit)
         if fact is not None:
             facts.append(fact)
+
+    # B-45-fix3: if no fact survives the kNN floor, try the entity
+    # name path. Korean-text image facts often fail cross-lingual kNN
+    # against an English query (or marginal-score in-language hits
+    # sit at 0.71 just below the 0.72 floor). The entity lookup
+    # honours name + name_en + aliases — the same path B-49b's brief
+    # uses — so a query that resolves to a known entity surfaces ALL
+    # of that entity's manual facts. The kNN match_kind label stays
+    # "embedding" so the UI still shows a 🔍 badge; users see the
+    # facts they searched for rather than an empty envelope.
+    entity_seed_uids: list[str] = []
+    if not facts:
+        try:
+            matched_entities = _resolve_entities_by_name(q, str(ks.id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall: name-lookup fallback failed: %s", exc)
+            matched_entities = []
+        entity_seed_uids = [
+            uid for uid in (doc.get("object_uid") for doc in matched_entities)
+            if isinstance(uid, str)
+        ]
+        if entity_seed_uids:
+            try:
+                seed_hits = _facts_for_entity(
+                    entity_seed_uids, str(ks.id), max_hits=limit * 3,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "recall: name-lookup fact fetch failed: %s", exc,
+                )
+                seed_hits = []
+            for h in seed_hits:
+                fact = _hit_to_fact(h)
+                if fact is not None:
+                    facts.append(fact)
 
     if not facts:
         return _empty("no_facts_above_floor")
