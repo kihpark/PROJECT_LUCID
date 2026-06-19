@@ -8,6 +8,7 @@ import type {
   FactDetailResponse,
   FactMutationResponse,
   GraphNote,
+  HomeBrief,
   KnowledgeSpacePublic,
   LoginRequest,
   LoginResponse,
@@ -244,4 +245,13 @@ export function detachSource(
     `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/detach-source`,
     { method: 'POST', body: JSON.stringify({ source_uid: sourceUid }) },
   );
+}
+
+// ---------------------------------------------------------------------------
+// B-55 / B-57 — home brief (fail-soft on the caller side; this just hits the
+// endpoint and lets the caller catch). Wired by the app shell's nav badge.
+// ---------------------------------------------------------------------------
+
+export function getHomeBrief(): Promise<HomeBrief> {
+  return request<HomeBrief>('/api/home/brief');
 }
