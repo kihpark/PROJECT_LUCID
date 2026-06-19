@@ -31,6 +31,7 @@ import {
   restoreFact as apiRestoreFact,
   retractFact as apiRetractFact,
 } from '@/lib/api';
+import { predicateLabel } from '@/lib/predicateLabels';
 import type {
   EntityBrief,
   EntityBriefGroup,
@@ -124,7 +125,7 @@ function RecallFactCard({
         </div>
         <div>
           <dt className="opacity-60">predicate</dt>
-          <dd>{fact.predicate}</dd>
+          <dd>{predicateLabel(fact.predicate)}</dd>
         </div>
         <div>
           <dt className="opacity-60">object</dt>
@@ -411,7 +412,7 @@ function FactDetailModal({
             </span>
             <span className="text-text-muted font-mono text-xs">→</span>
             <span className="rounded-md bg-accent-cool/10 border border-accent-cool/30 text-accent-cool px-3 py-1.5 font-mono text-xs">
-              {fact.predicate}
+              {predicateLabel(fact.predicate)}
             </span>
             <span className="text-text-muted font-mono text-xs">→</span>
             <span
