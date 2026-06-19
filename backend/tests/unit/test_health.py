@@ -37,8 +37,15 @@ def test_health_status_matches_probe_results():
 
 
 def test_all_routers_are_mounted():
-    """Every router from AGENTS.md section 6 is included on the app."""
-    paths = {route.path for route in app.routes}
+    """Every router from AGENTS.md section 6 is included on the app.
+
+    FastAPI 0.110+ wraps `app.include_router(prefix=…)` outputs in
+    `_IncludedRouter` objects that don't carry a `path` attribute
+    (the prefix moves down to each nested Route). We guard with
+    hasattr so the comprehension survives the new shape; the
+    `/api/health` route is registered via `@app.get` so it stays on
+    the top-level list with a real path either way.
+    """
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
     assert "/api/health" in paths
-    prefixes = {getattr(route, "path", "") for route in app.routes}
-    assert any(p.startswith("/api/") for p in prefixes)
+    assert any(p.startswith("/api/") for p in paths)
