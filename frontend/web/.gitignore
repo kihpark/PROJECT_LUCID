@@ -5,3 +5,6 @@ node_modules/
 next-env.d.ts
 .env.local
 .env*.local
+
+# pnpm local store (created by corepack pnpm install in this dir)
+.pnpm-store/
