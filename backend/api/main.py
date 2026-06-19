@@ -16,6 +16,7 @@ from api.routes import (
     auth,
     capture,
     graph,
+    home,
     jobs,
     query,
     recall,
@@ -153,6 +154,7 @@ for _router in (
     surface.router,
     query.router,
     recall.router,
+    home.router,
     validation_api.router,
 ):
     app.include_router(_router)
