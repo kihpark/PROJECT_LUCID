@@ -223,3 +223,72 @@ class FactMutationResponse(LucidBaseModel):
     retracted_at: datetime | None = None
     source_uids: list[str] = Field(default_factory=list)
     auto_retracted: bool = False
+
+
+# ---------------------------------------------------------------------------
+# B-55 — Home brief
+# ---------------------------------------------------------------------------
+
+class HomeBriefTotals(LucidBaseModel):
+    """Aggregate counters for the user's default (or selected) KS.
+
+    All four are scoped to (knowledge_space_id, validation_method=manual)
+    where applicable. `this_week_validated` is the count of manual facts
+    whose validated_at lands in the last 7 days (UTC, inclusive of now).
+    """
+
+    facts: int
+    entities: int
+    sources: int
+    this_week_validated: int
+
+
+class HomeBriefRecentItem(LucidBaseModel):
+    """One row in the "recently validated" list on the home brief.
+
+    Carries just enough to render the row without a second round-trip
+    — the panel can deep-link to /api/spaces/{sid}/facts/{fact_uid}
+    when the user clicks through.
+    """
+
+    fact_uid: str
+    claim: str
+    subject_label: str | None = None
+    validated_at: datetime
+
+
+class HomeBriefTopCluster(LucidBaseModel):
+    """The dominant entity in the last-7d window.
+
+    A `terms` aggregation over subject_uid (size=1) picks the bucket
+    with the most validated facts. The bucket's uid is resolved to a
+    human-readable name via a single lucid_objects get.
+
+    When no fact lands in the window, all fields are null/zero so the
+    UI can render an empty-state card without branching on shape.
+    """
+
+    entity_uid: str | None = None
+    entity_name: str | None = None
+    linked_count: int = 0
+
+
+class HomeBrief(LucidBaseModel):
+    """GET /api/home/brief envelope.
+
+    `pending_validation` is a Postgres count (SourceJobORM rows whose
+    status sits in the "ready for the user to decide" set — currently
+    just `structured`). Every other field comes from ES (counts +
+    bounded searches + one terms aggregation). All ES calls are wrapped
+    in degrade-quietly try/except so a single failure can't 500 the
+    response — fields zero/empty instead.
+
+    `is_empty` is the convenience flag the home UI uses to flip into
+    the onboarding state without re-checking totals.facts.
+    """
+
+    totals: HomeBriefTotals
+    pending_validation: int
+    recent_validated: list[HomeBriefRecentItem] = Field(default_factory=list)
+    top_cluster: HomeBriefTopCluster
+    is_empty: bool
