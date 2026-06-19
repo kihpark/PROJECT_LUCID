@@ -164,10 +164,22 @@ export function StellarGraph(props: StellarGraphProps) {
       composer.addPass(bloom);
     }
 
-    // Starfield behind the graph.
+    // Dark cosmic background + starfield.
+    //
+    // B-62-fix1 — the ForceGraph3D `backgroundColor` prop is set, but with
+    // UnrealBloomPass mounted on the composer the clear color reverts to
+    // white at the first frame (the bloom pass's intermediate buffer was
+    // running over the renderer's clear). A non-zero clear that high
+    // (1,1,1 ≫ threshold 0.15) made the bloom flare the entire canvas to
+    // whiteout. Setting `scene.background` directly bypasses the prop path
+    // and forces the dark colour onto the scene the bloom pass actually
+    // sees — verified by PO (white screen → galaxy on dark canvas).
     const scene = handle.scene?.();
-    if (scene && !starsRef.current) {
-      starsRef.current = attachStarfield(scene);
+    if (scene) {
+      scene.background = new THREE.Color(0x06080b);
+      if (!starsRef.current) {
+        starsRef.current = attachStarfield(scene);
+      }
     }
 
     // Camera + controls: narrow FOV, autoRotate slow, damping on.
@@ -251,7 +263,7 @@ export function StellarGraph(props: StellarGraphProps) {
           graphData={data}
           width={size.w}
           height={size.h}
-          backgroundColor="#000000"
+          backgroundColor="#06080b"
           nodeId="id"
           nodeLabel={labelOf}
           nodeColor={nodeColor}
