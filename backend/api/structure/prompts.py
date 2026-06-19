@@ -107,6 +107,43 @@ Run these IN ORDER on the input text:
           Korea"; "박현주 회장" + "박현주").
           An empty list (`"aliases": []`) is fine when the source
           surface form equals `name`.
+  Step 2b. B-53 — KEEP FACT TEXT IN THE SOURCE LANGUAGE.
+          The fact's `claim` and `object_value` MUST be written in
+          the same language as the source text. Do NOT translate
+          numbers, units, idioms, or quoted phrases into English
+          when the source is Korean (or vice versa).
+          ONLY EXCEPTION: `predicate` stays in English snake_case
+          regardless of source language — predicate vocabulary is a
+          stable graph-key surface, not user-facing prose.
+          Entity NAMES follow Step 2a (B-52): you may normalize
+          `name` but you must preserve the source surface in
+          `aliases`. THIS step (2b) is the catch-all for everything
+          else inside the fact.
+          Examples — Korean source → Korean fact text:
+            source: "SpaceX는 보통주 5억5천556만주를 매각해 750억달러를 조달했다."
+              OK    {"claim":"SpaceX는 보통주 5억5천556만주를 매각해 750억달러를 조달했다.",
+                     "predicate":"raised_initial_funding",
+                     "object_value":"750억달러"}
+              NOT   "object_value":"75 billion USD"      # translated number
+              NOT   "object_value":"$75B"                # translated unit
+              NOT   "object_value":"75,000,000,000 USD"  # currency normalized
+            source: "주관사단이 그린슈 옵션을 행사하기로 했다."
+              OK    "object_value":"그린슈 옵션"
+              NOT   "object_value":"greenshoe option"
+            source: "한국은행 기준금리는 2024년 12월 기준 3.0%였다."
+              OK    "object_value":"3.0%"                 # numeric units OK
+              NOT   "object_value":"3.0 percent"
+          English source → English fact text:
+            source: "Goldman Sachs raised 75 billion USD."
+              OK    "object_value":"75 billion USD"
+              NOT   "object_value":"750억달러"
+          Rule of thumb: if you can read the source sentence back
+          with the `object_value` substituted in and it sounds like
+          natural source-language prose, you got it right.
+          Cross-lingual canonicalisation (e.g. cents vs 원) belongs
+          on the property dict of the Object — NEVER inside the
+          fact's `object_value`.
+
   Step 3. Decompose every assertion into one or more AtomicFact
           candidates (proposition or procedure). Each fact must be a
           SINGLE falsifiable statement.
