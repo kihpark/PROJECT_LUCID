@@ -126,6 +126,28 @@ function mixToDim(hex: string, retainedSaturation: number): string {
   return `#${out(nr)}${out(ng)}${out(nb)}`;
 }
 
+// B-62-focus-select-fix-edges-highlight — blend toward white for the
+// selected / focused tiers. The `lift()` helper above is capped at the
+// 0.95 emissive ceiling, so for already-bright nodes (well-validated,
+// factor at the cap) the tier deltas of +0.05 / +0.10 were a no-op —
+// PO repro: selected node didn't visibly highlight on the canvas.
+// blendToWhite layers a white mix on top of the lifted base WITHOUT
+// touching the underlying lift cap; the result reads as visibly
+// brighter regardless of the base validation strength.
+//   t = 0 → return hex unchanged
+//   t = 1 → return pure white
+function blendToWhite(hex: string, t: number): string {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const blend = (x: number) => x + (1 - x) * t;
+  const out = (x: number) =>
+    Math.round(Math.max(0, Math.min(1, x)) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${out(blend(r))}${out(blend(g))}${out(blend(b))}`;
+}
+
 interface ForceGraphRefHandle {
   postProcessingComposer?: () => { addPass: (pass: unknown) => void } | undefined;
   scene?: () => THREE.Scene;
@@ -765,10 +787,20 @@ export function StellarGraph(props: StellarGraphProps) {
         typeof link.target === 'string'
           ? link.target
           : (link.target as { id?: string } | null)?.id ?? '';
-      const incident = src === focusedId || tgt === focusedId;
+      // B-62-focus-select-fix-edges-highlight — an edge is bright when
+      // BOTH endpoints live in the highlight subgraph (focused +
+      // selected + the union'd 1-hop / expanded ring). Previously the
+      // rule was "src OR tgt === focusedId", which left edges between
+      // 펼치기-ed nodes invisible — PO repro: "펼치기 하면 노드
+      // 하이라이트는 되는데 연결된 edge 는 안 나타남."
+      const inSubgraph = (id: string) =>
+        id === focusedId ||
+        id === selectedId ||
+        neighborSet.has(id);
+      const incident = inSubgraph(src) && inSubgraph(tgt);
       return incident ? baseColor : 'rgba(45,55,65,0.06)';
     },
-    [mode, focusedId],
+    [mode, focusedId, selectedId, neighborSet],
   );
 
   // B-62-demo-clusters-edges — link width also scales with corroboration
@@ -816,18 +848,25 @@ export function StellarGraph(props: StellarGraphProps) {
       const factor = Math.min(0.95, 0.7 + vs * 0.25);
       const lifted = lift(base, factor);
       if (focusedId === null) return lifted;
-      // B-62-focus-select-actions — three-tier hierarchy inside the
-      // focus subgraph:
-      //   focused      → brightest (anchor, factor + 0.10, capped at 1.0)
-      //   selected     → between focused and highlighted
-      //                  (factor + 0.05, capped at 1.0). Distinct from
-      //                  highlighted so "지금 고른 게 이거" is unambiguous.
-      //   highlighted  → 1-hop ring at the normal lifted factor
-      //   distant      → mixToDim
-      // When selectedId === focusedId the tier collapses to focused.
-      if (focusedId === node.id) return lift(base, Math.min(1.0, factor + 0.1));
+      // B-62-focus-select-fix-edges-highlight — tier deltas now use
+      // `blendToWhite` instead of an additive `lift` factor.
+      //
+      // Why: PO repro — selected node didn't visibly highlight on the
+      // canvas. For well-validated nodes the base lift factor is
+      // already at the 0.95 cap, so `factor + 0.05` and `factor + 0.10`
+      // both collapse to 0.95 — no visible change. blendToWhite layers
+      // a white mix on TOP of the lifted base, so the tiers separate
+      // even at peak validation. The glow cap (0.95 lift) is still
+      // applied to `lifted`, preserving the PO constraint that the
+      // base emissive ceiling stays put.
+      //   focused      → blendToWhite(lifted, 0.40)  — brightest peak
+      //   selected     → blendToWhite(lifted, 0.22)  — clearly above
+      //                                                 highlighted
+      //   highlighted  → lifted                       — base palette
+      //   distant      → mixToDim                     — dim
+      if (focusedId === node.id) return blendToWhite(lifted, 0.4);
       if (selectedId !== null && selectedId === node.id) {
-        return lift(base, Math.min(1.0, factor + 0.05));
+        return blendToWhite(lifted, 0.22);
       }
       if (neighborSet.has(node.id)) return lifted;
       return mixToDim(lifted, 0.18);
