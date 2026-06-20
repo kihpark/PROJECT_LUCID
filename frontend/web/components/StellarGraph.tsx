@@ -176,19 +176,24 @@ function attachStarfield(scene: THREE.Scene): THREE.Points {
     positions[i * 3 + 2] = Math.sin(theta) * r * RADIUS;
   }
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  // B-62-fix3 — starfield further dimmed so it cannot meaningfully
-  // contribute to bloom even if the per-frame buffer clear silently
-  // no-ops. PO repro on fix2 showed full whiteout in SYNTHETIC (2000
-  // nodes) — high node density means even a moderate bloom contribution
-  // per pixel adds up across the canvas. Effective brightness now sits
-  // at color (luminance ~0.18) × opacity 0.25 ≈ 0.045, far under the
-  // bloom threshold (0.5), so the starfield is unconditionally exempt.
+  // B-62-cosmic-tune — starfield re-tuned for "확실한 배경 역할".
+  // PO directive: stars should read as a crisp static texture, NOT
+  // dissolve into fog when bloom strength rises (we just bumped to
+  // 0.5). Recipe:
+  //   color   0x2a3540 → 0x3a4858 (luminance 0.18 → 0.27 — visibly
+  //           "또렷한" against the #06080b background).
+  //   opacity 0.25 → 0.40           (more presence per pixel).
+  //   size    0.6 unchanged.
+  // Effective brightness ≈ 0.27 × 0.40 = 0.108, still well under the
+  // bloom threshold (0.55), so the stars stay as points and do NOT
+  // bloom-bleed into surrounding haze. (per PO acceptance ② — "또렷한
+  // 정적 배경, bloom 으로 안 번짐".)
   const material = new THREE.PointsMaterial({
-    color: 0x2a3540,
+    color: 0x3a4858,
     size: 0.6,
     sizeAttenuation: true,
     transparent: true,
-    opacity: 0.25,
+    opacity: 0.4,
     depthWrite: false,
   });
   const stars = new THREE.Points(geometry, material);
@@ -334,7 +339,13 @@ export function StellarGraph(props: StellarGraphProps) {
     // peaks stay identifiable even under accumulation pressure.
     const composer = handle.postProcessingComposer?.();
     if (composer && typeof composer.addPass === 'function') {
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.3, 0.25, 0.55);
+      // B-62-cosmic-tune — strength 0.3 → 0.5. PO directive: nodes
+      // should glow more visibly now that ACESFilmic tone mapping +
+      // emissive cap + once-only bloom add are in place to prevent
+      // whiteout. Threshold 0.55 / radius 0.25 unchanged so the bloom
+      // still picks ONLY the high-luminance peaks (well-validated
+      // facts), not the dim background or the mid-tone clusters.
+      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.5, 0.25, 0.55);
       composer.addPass(bloom);
       bloomRef.current = bloom as UnrealBloomPass & BloomTargets;
       composerRef.current = composer as unknown as ComposerTargets;
@@ -411,12 +422,14 @@ export function StellarGraph(props: StellarGraphProps) {
   //       start forces the pass to start from black every time.
   useEffect(() => {
     let cancelled = false;
-    let last = performance.now();
-    function tick(now: number) {
-      const dt = (now - last) / 1000;
-      last = now;
-      const stars = starsRef.current;
-      if (stars) stars.rotation.y += dt * 0.012; // very slow drift
+    function tick() {
+      // B-62-cosmic-tune — starfield is now a STATIC background.
+      // PO directive: "twinkle/반짝임 애니메이션 완전 제거 — 별의
+      // 크기·투명도 per-frame 변동 없애고 고정값". The previous slow
+      // y-rotation has been removed; the points sit on a fixed sphere
+      // and never move. Combined with the brighter material above
+      // this reads as "a confident background texture" rather than
+      // "ambient particles".
 
       // Clear every render target that could be holding stale bloom:
       //   1. UnrealBloomPass's per-mip ping-pong pairs (renderTargets-
@@ -466,13 +479,18 @@ export function StellarGraph(props: StellarGraphProps) {
 
   // B-62-fix4 — starfield visibility tracks mode.
   // PO directive: REAL mode must NOT use the synthetic starfield as
-  // backdrop ("실데이터가 가짜 은하처럼 보이면 안 됨"). In SYNTHETIC the
-  // sparse field reads as cosmic dust behind the galaxy; in REAL it
-  // would read as fake stars padding out a 5-node graph. Hide it.
+  // B-62-cosmic-tune — starfield is now visible in BOTH modes. fix4
+  // hid it on REAL to avoid the "fake galaxy" reading when only 5
+  // facts existed; now that B-62-real-all-facts surfaces every fact
+  // AND the starfield itself is a static, dim background texture
+  // (no rotation, no twinkle, well below the bloom threshold), the
+  // PO directive is to show stars in both modes as a "확실한 배경
+  // 역할". Identity of synthetic vs real is carried by the data
+  // (node count, cluster colour palette), not by the background.
   useEffect(() => {
     const stars = starsRef.current;
     if (!stars) return;
-    stars.visible = mode === 'synthetic';
+    stars.visible = true;
   }, [mode]);
 
   // B-62-fix-glow-clamp — keep the zoom readout in sync with the actual
