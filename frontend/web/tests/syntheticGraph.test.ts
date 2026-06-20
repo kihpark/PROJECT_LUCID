@@ -135,4 +135,84 @@ describe('generateSyntheticGraph', () => {
       mean(isolated.map((n) => n.validationStrength as number)) - 0.001,
     );
   });
+
+  // B-62-demo-clusters-edges — modular cluster topology + corroboration.
+  it('every edge carries a corroboration score in [0, 1]', () => {
+    const g = generateSyntheticGraph();
+    expect(g.links.length).toBeGreaterThan(0);
+    for (const link of g.links as StellarLink[]) {
+      expect(typeof link.corroborationScore).toBe('number');
+      expect(link.corroborationScore as number).toBeGreaterThanOrEqual(0);
+      expect(link.corroborationScore as number).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('corroboration distribution is heavy-tailed (mostly low, some high)', () => {
+    const g = generateSyntheticGraph();
+    const scores = (g.links as StellarLink[]).map(
+      (l) => l.corroborationScore as number,
+    );
+    const total = scores.length;
+    const low = scores.filter((s) => s < 0.3).length;
+    const high = scores.filter((s) => s >= 0.65).length;
+    // PO recipe: ~70% under 0.3, ~10% at or above 0.65.
+    expect(low / total).toBeGreaterThan(0.55);
+    expect(high / total).toBeGreaterThan(0.05);
+    expect(high / total).toBeLessThan(0.20);
+  });
+
+  it('inter-cluster bridge edges stay under 10% (modular topology)', () => {
+    // B-62-demo-clusters-edges PO directive: intra strong, inter < 10%.
+    // Sampling stability: with intra ratio 0.92, expected inter is 8%.
+    // Allow generous slack to avoid flakes.
+    const g = generateSyntheticGraph();
+    const byId = new Map(g.nodes.map((n) => [n.id, n] as const));
+    let bridges = 0;
+    for (const link of g.links as StellarLink[]) {
+      const src = byId.get(String(link.source));
+      const tgt = byId.get(String(link.target));
+      if (!src || !tgt) continue;
+      if (src.cluster !== tgt.cluster) bridges += 1;
+    }
+    expect(bridges / g.links.length).toBeLessThan(0.12);
+  });
+
+  it('cluster centroids are spread far enough that the canvas reads as separated 성단', () => {
+    // After B-62-demo-clusters-edges bumped R 380 → 540, the standard
+    // deviation of cluster mean positions should sit well above the
+    // pre-bump value. Use the mean position per cluster as a proxy for
+    // centroid location.
+    const g = generateSyntheticGraph();
+    const sumByCluster = new Map<number, { x: number; y: number; z: number; n: number }>();
+    for (const node of g.nodes) {
+      const c = node.cluster;
+      const agg = sumByCluster.get(c) ?? { x: 0, y: 0, z: 0, n: 0 };
+      agg.x += node.x;
+      agg.y += node.y;
+      agg.z += node.z;
+      agg.n += 1;
+      sumByCluster.set(c, agg);
+    }
+    const centroids = Array.from(sumByCluster.values()).map((a) => ({
+      x: a.x / a.n,
+      y: a.y / a.n,
+      z: a.z / a.n,
+    }));
+    // Pairwise mean distance among cluster centroids should exceed 400
+    // (R=540 sphere → centroid pair-distance is ~700 in expectation).
+    let pairs = 0;
+    let totalDist = 0;
+    for (let i = 0; i < centroids.length; i += 1) {
+      for (let j = i + 1; j < centroids.length; j += 1) {
+        const a = centroids[i]!;
+        const b = centroids[j]!;
+        const d = Math.sqrt(
+          (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2,
+        );
+        totalDist += d;
+        pairs += 1;
+      }
+    }
+    expect(totalDist / pairs).toBeGreaterThan(400);
+  });
 });

@@ -160,7 +160,12 @@ interface ComposerTargets {
  *  bloom pass doesn't bleed them; the rotation gives the "우주감" without
  *  flooding the eye. */
 function attachStarfield(scene: THREE.Scene): THREE.Points {
-  const count = 4000;
+  // B-62-demo-clusters-edges — density bumped 4000 → 9000 so the
+  // background reads as a 풍부 cosmic backdrop. Per-star material
+  // (color 0x3a4858 × opacity 0.4 ≈ 0.108 effective brightness) is
+  // still under the bloom threshold 0.55, so raising the count does
+  // NOT bloom-bleed — the "노드만 글로우" principle holds.
+  const count = 9000;
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
   // Place each point on a large sphere (radius 4500) — far behind the
@@ -422,6 +427,29 @@ export function StellarGraph(props: StellarGraphProps) {
       controls.dampingFactor = 0.08;
     }
 
+    // B-62-demo-clusters-edges — tune d3-force-3d charge so clusters
+    // don't collapse to a central hairball. ForceGraph3D wraps the
+    // d3 simulation; .d3Force(name) returns the live force instance.
+    // We bump:
+    //   charge.strength: -30 (default) → -150 — stronger global
+    //     repulsion pushes nodes (and therefore clusters) apart.
+    //   link.distance: ~30 → 18 — keeps intra-cluster ties short so
+    //     each cluster stays compact while the centroids spread.
+    // The synthetic generator pre-seeds positions on a spread sphere
+    // (R=540), tighter halos (σ=32), and 92% intra-cluster ratio —
+    // the force tuning here makes that topology read on the canvas
+    // instead of dissolving once the simulation runs.
+    type ForceLike = {
+      strength?: (s: number) => unknown;
+      distance?: (d: number) => unknown;
+    };
+    type ForceGraphForcedExt = {
+      d3Force?: (name: string) => ForceLike | undefined;
+    };
+    const inst = handle as unknown as ForceGraphForcedExt;
+    inst.d3Force?.('charge')?.strength?.(-150);
+    inst.d3Force?.('link')?.distance?.(18);
+
     // B-62-search-legibility — pull-back uses data-aware initial dist
     // so a 65-node real graph doesn't open as dust at z=900.
     handle.cameraPosition?.(
@@ -590,10 +618,25 @@ export function StellarGraph(props: StellarGraphProps) {
   // so the focal subgraph reads cleanly.
   const linkColor = useCallback(
     (link: StellarLink): string => {
-      const baseColor =
-        mode === 'real'
-          ? 'rgba(63,224,198,0.55)'
-          : EDGE_COLORS[link.type] ?? 'rgba(255,255,255,0.35)';
+      // B-62-demo-clusters-edges — corroboration modulates the alpha
+      // channel in synthetic mode. score 0.05 → near-invisible
+      // background filament, score 1.0 → bright constellation edge.
+      // Real mode (no score) keeps the flat accent.
+      let baseColor: string;
+      if (mode === 'real') {
+        baseColor = 'rgba(63,224,198,0.55)';
+      } else {
+        const typeColor = EDGE_COLORS[link.type] ?? '#ffffff';
+        const score =
+          typeof link.corroborationScore === 'number'
+            ? Math.max(0.04, Math.min(1, link.corroborationScore))
+            : 0.55;
+        // Convert hex → rgb so we can attach the corroboration alpha.
+        const r = parseInt(typeColor.slice(1, 3), 16);
+        const g = parseInt(typeColor.slice(3, 5), 16);
+        const b = parseInt(typeColor.slice(5, 7), 16);
+        baseColor = `rgba(${r},${g},${b},${score.toFixed(3)})`;
+      }
       if (focusedId === null) return baseColor;
       // ForceGraph3D mutates link.source/target to node objects after the
       // simulation runs. Handle both shapes.
@@ -609,6 +652,21 @@ export function StellarGraph(props: StellarGraphProps) {
       return incident ? baseColor : 'rgba(45,55,65,0.06)';
     },
     [mode, focusedId],
+  );
+
+  // B-62-demo-clusters-edges — link width also scales with corroboration
+  // (low score = thin filament, high score = chunky filament) so the
+  // bright constellation pops on both colour AND geometry channels.
+  const linkWidth = useCallback(
+    (link: StellarLink): number => {
+      if (mode === 'real') return 0.6;
+      const score =
+        typeof link.corroborationScore === 'number'
+          ? Math.max(0, Math.min(1, link.corroborationScore))
+          : 0.5;
+      return 0.4 + score * 1.0;
+    },
+    [mode],
   );
 
   // B-62-v1 — node colour composes three signals:
@@ -739,8 +797,11 @@ export function StellarGraph(props: StellarGraphProps) {
           nodeOpacity={0.88}
           nodeResolution={12}
           linkColor={linkColor}
+          /* B-62-demo-clusters-edges — link width as a corroboration-
+           * driven function (was a constant 0.6). Synthetic mode only;
+           * real mode still gets the flat 0.6. */
           linkOpacity={mode === 'real' ? 0.4 : 0.5}
-          linkWidth={0.6}
+          linkWidth={linkWidth}
           linkDirectionalParticles={0}
           linkDirectionalParticleSpeed={0.004}
           linkDirectionalParticleWidth={1.1}
