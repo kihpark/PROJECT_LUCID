@@ -168,6 +168,11 @@ export function StellarGraph(props: StellarGraphProps) {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // B-62-fix4 — zoom controller state. 1.0 = initial camera distance
+  // (900 in scene units). >1 = closer, <1 = farther. Clamped to [0.25, 4]
+  // so the user can't dolly past the cluster or out into the starfield.
+  const [zoom, setZoom] = useState(1.0);
+  const INITIAL_DIST = 900;
 
   // Observe container size so the canvas fills the parent fullscreen layout.
   useEffect(() => {
@@ -230,23 +235,34 @@ export function StellarGraph(props: StellarGraphProps) {
     // clear composer.renderTarget1/2 (these DO live on the composer
     // object) — that's the secondary line of defense if the bloom
     // ping-pong targets stay stuck for any reason.
+    // B-62-fix4 — bloom balance: stars sharp, not blurry blobs.
+    // fix3 dropped strength to 0.6 / radius 0.4 / threshold 0.6 to defeat
+    // whiteout. PO acceptance: stars now visible but they read as fuzzy
+    // halos rather than sharp points. Raise strength slightly (0.6 → 0.8
+    // matches PO's "~0.8" target) and crush the radius (0.4 → 0.25) so
+    // bloom contributes a tight glow around each node instead of a wide
+    // blur. Threshold relaxed 0.6 → 0.55 to keep mid-tone teal nodes
+    // genuinely bright, not anaemic.
     const composer = handle.postProcessingComposer?.();
     if (composer && typeof composer.addPass === 'function') {
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.6, 0.4, 0.6);
+      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.8, 0.25, 0.55);
       composer.addPass(bloom);
       bloomRef.current = bloom as UnrealBloomPass & BloomTargets;
       composerRef.current = composer as unknown as ComposerTargets;
     }
-    // Renderer reference for the per-frame buffer clear. NOTE: this may
-    // return undefined depending on the react-force-graph-3d version's
-    // ref API; treat the clear loop as best-effort.
+    // Renderer reference for the per-frame buffer clear, the auto-clear
+    // guarantee, and the fix4 pixelRatio bump.
     const renderer = handle.renderer?.();
     if (renderer) {
-      // Ensure the renderer's auto-clear is on so the main frame buffer
-      // resets every tick regardless of what the composer wants.
       renderer.autoClear = true;
       renderer.autoClearColor = true;
       renderer.autoClearDepth = true;
+      // B-62-fix4 — honour the device pixel ratio so high-DPI displays
+      // render the canvas at native resolution. The default ratio (1)
+      // makes individual node pixels visibly soft on retina/4K panels.
+      // Cap at 2 so we don't pay for 3× supersampling on phones.
+      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
+      renderer.setPixelRatio(Math.min(dpr, 2));
       rendererRef.current = renderer;
     }
 
@@ -350,6 +366,38 @@ export function StellarGraph(props: StellarGraphProps) {
     };
   }, []);
 
+  // B-62-fix4 — starfield visibility tracks mode.
+  // PO directive: REAL mode must NOT use the synthetic starfield as
+  // backdrop ("실데이터가 가짜 은하처럼 보이면 안 됨"). In SYNTHETIC the
+  // sparse field reads as cosmic dust behind the galaxy; in REAL it
+  // would read as fake stars padding out a 5-node graph. Hide it.
+  useEffect(() => {
+    const stars = starsRef.current;
+    if (!stars) return;
+    stars.visible = mode === 'synthetic';
+  }, [mode]);
+
+  // B-62-fix4 — imperative zoom step. Reads the current camera
+  // direction from the live ref so it composes correctly with autoRotate
+  // and user orbit; only the distance along the eye→origin axis changes.
+  const applyZoom = useCallback((nextZoom: number) => {
+    const clamped = Math.max(0.25, Math.min(4, nextZoom));
+    setZoom(clamped);
+    const handle = fgRef.current;
+    const camera = handle?.camera?.();
+    if (!camera || !handle?.cameraPosition) return;
+    const dir = camera.position.clone();
+    if (dir.lengthSq() === 0) dir.set(0, 0, 1);
+    dir.normalize();
+    const newDist = INITIAL_DIST / clamped;
+    const target = dir.multiplyScalar(newDist);
+    handle.cameraPosition(
+      { x: target.x, y: target.y, z: target.z },
+      { x: 0, y: 0, z: 0 },
+      250,
+    );
+  }, []);
+
   const linkColor = useCallback(
     (link: StellarLink): string => {
       if (mode === 'real') return 'rgba(63,224,198,0.55)';
@@ -427,6 +475,83 @@ export function StellarGraph(props: StellarGraphProps) {
           d3VelocityDecay={0.55}
         />
       ) : null}
+      {/* B-62-fix4 — bottom-right zoom controller. Three rows: + / scale /
+       *  −. Buttons step by 1.25× / 0.8× (factor matches camera dolly
+       *  feel). Disabled at the clamp ends. Scale shown to 2 decimals. */}
+      <div
+        data-testid="stellar-zoom-controls"
+        style={{
+          position: 'absolute',
+          right: 20,
+          bottom: 20,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'stretch',
+          gap: 4,
+          padding: 6,
+          background: 'rgba(13,20,23,0.78)',
+          border: '1px solid #1d2b2f',
+          borderRadius: 12,
+          backdropFilter: 'blur(8px)',
+          fontFamily: 'JetBrains Mono, monospace',
+          color: '#cdd9da',
+          fontSize: 12,
+          zIndex: 5,
+          userSelect: 'none',
+        }}
+      >
+        <button
+          type="button"
+          data-testid="stellar-zoom-in"
+          aria-label="zoom in"
+          disabled={zoom >= 4}
+          onClick={() => applyZoom(zoom * 1.25)}
+          style={{
+            width: 36,
+            height: 28,
+            borderRadius: 7,
+            background: zoom >= 4 ? '#0d1417' : '#102023',
+            border: '1px solid #1d2b2f',
+            color: '#3fe0c6',
+            fontWeight: 600,
+            cursor: zoom >= 4 ? 'not-allowed' : 'pointer',
+            opacity: zoom >= 4 ? 0.4 : 1,
+          }}
+        >
+          +
+        </button>
+        <div
+          data-testid="stellar-zoom-scale"
+          style={{
+            textAlign: 'center',
+            padding: '2px 0',
+            color: '#9db0b5',
+            letterSpacing: '0.04em',
+          }}
+        >
+          {zoom.toFixed(2)}x
+        </div>
+        <button
+          type="button"
+          data-testid="stellar-zoom-out"
+          aria-label="zoom out"
+          disabled={zoom <= 0.25}
+          onClick={() => applyZoom(zoom * 0.8)}
+          style={{
+            width: 36,
+            height: 28,
+            borderRadius: 7,
+            background: zoom <= 0.25 ? '#0d1417' : '#102023',
+            border: '1px solid #1d2b2f',
+            color: '#3fe0c6',
+            fontWeight: 600,
+            cursor: zoom <= 0.25 ? 'not-allowed' : 'pointer',
+            opacity: zoom <= 0.25 ? 0.4 : 1,
+          }}
+        >
+          −
+        </button>
+      </div>
     </div>
   );
 }
