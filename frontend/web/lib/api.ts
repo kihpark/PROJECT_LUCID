@@ -7,6 +7,7 @@ import type {
   DecideResponse,
   FactDetailResponse,
   FactMutationResponse,
+  FactsList,
   GraphNote,
   HomeBrief,
   KnowledgeSpacePublic,
@@ -205,6 +206,26 @@ export function recall(
   }
   return request<RecallResponse>(
     `/api/spaces/${spaceId}/recall?${params.toString()}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B-62 — facts listing (Stellar real-mode).
+//
+// Plain "give me every validated fact in this KS" — not the keyword-
+// matched recall endpoint, so the Stellar real adapter can surface ALL
+// the user's facts, not just the ones a generic seed query happens to
+// hit. Server caps at 500; default 200.
+// ---------------------------------------------------------------------------
+
+export function listSpaceFacts(
+  spaceId: string,
+  limit = 200,
+): Promise<FactsList> {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  return request<FactsList>(
+    `/api/spaces/${spaceId}/facts?${params.toString()}`,
   );
 }
 

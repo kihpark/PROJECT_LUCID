@@ -19,7 +19,7 @@
  * component decides whether to call it (toggle state in localStorage).
  */
 
-import { getHomeBrief, recall } from './api';
+import { getHomeBrief, listSpaceFacts, recall } from './api';
 import { getCurrentSpace } from './auth';
 import { predicateLabel } from './predicateLabels';
 import type { HomeBrief, RecallFact, RecallResponse } from './types';
@@ -120,12 +120,47 @@ export async function loadRealStellarGraph(
   const topClusterLabel = brief?.top_cluster?.entity_name ?? null;
   const clusters: string[] = ['최근 검증', topClusterLabel ? topClusterLabel : '코퍼스'];
 
-  // brief.recent_validated only has the claim + subject_label + validated_at;
-  // we synthesize a sparse subject/object split from the claim text so the
-  // node tooltip is meaningful. The label is what matters for the spike.
+  // B-62 — primary path: GET /api/spaces/{ks}/facts. Returns every
+  // validated fact in the KS (capped at server-side 500, default 200).
+  // This is the load-bearing fetch — without it the adapter could only
+  // surface facts that happened to match the seed-query fan-out below,
+  // which left SpaceX / 한국은행 / etc. completely invisible in real
+  // mode. PO repro: only 국방부 showed because the seed queries
+  // coincidentally hit defence-themed claims.
+  let primaryUsed = false;
+  if (spaceId) {
+    try {
+      const list = await listSpaceFacts(spaceId, maxNodes);
+      for (const fact of list.facts) {
+        // Cluster index 1 = whole-corpus facts; the home-brief recent
+        // batch below will overwrite the cluster to 0 for any fact
+        // that was also recent-validated, marking it as fresh.
+        pushFactAsNode(acc, fact, 1);
+        if (acc.byId.size >= maxNodes) break;
+      }
+      primaryUsed = true;
+    } catch {
+      // Fail-soft: drop through to the legacy fan-out path. Old
+      // backends without the /facts endpoint, or transient ES
+      // failures, both end up here.
+    }
+  }
+
+  // brief.recent_validated overlays the "fresh" cluster on top — if a
+  // fact is in both the full list AND the recent list, the recent
+  // version wins (cluster 0, higher validationStrength).
   if (brief?.recent_validated) {
     for (const r of brief.recent_validated) {
-      if (acc.byId.has(r.fact_uid)) continue;
+      const existing = acc.byId.get(r.fact_uid);
+      if (existing) {
+        // Promote to fresh cluster; keep the rest of the node intact.
+        existing.cluster = 0;
+        existing.validationStrength = Math.max(
+          existing.validationStrength ?? 0.5,
+          0.9,
+        );
+        continue;
+      }
       acc.byId.set(r.fact_uid, {
         id: r.fact_uid,
         label: r.claim,
@@ -144,8 +179,11 @@ export async function loadRealStellarGraph(
     }
   }
 
-  // Fan-out: only if we have a space and we're not already saturated.
-  if (spaceId && acc.byId.size < maxNodes) {
+  // Fan-out FALLBACK: only when the primary path failed AND we have
+  // room to grow. This keeps the old behaviour around for transient
+  // /facts outages but no longer runs in the happy case (so SpaceX
+  // etc. now consistently appear).
+  if (!primaryUsed && spaceId && acc.byId.size < maxNodes) {
     const fanOut = await Promise.allSettled(
       SEED_QUERIES.map((q) => recall(spaceId, q, { limit: 40 })),
     );

@@ -44,6 +44,7 @@ from api.models.recall import (
     FactDetailResponse,
     FactDetailSource,
     FactMutationResponse,
+    FactsList,
     PredicateFacetItem,
     RecallFacets,
     RecallFact,
@@ -1297,4 +1298,105 @@ def detach_source(
         retracted_at=retracted_at_out,
         source_uids=next_sources,
         auto_retracted=auto_retracted,
+    )
+
+
+# ---------------------------------------------------------------------------
+# B-62 — facts listing for Stellar real-mode.
+#
+# The recall endpoint is semantic + keyword-scored, and DR-089 forbids
+# the empty q. That left the Stellar real adapter doing keyword fishing
+# with 5 generic seed queries (사실 / 분석 / 보고서 / 발표 / 체결) which
+# could only surface facts whose text happened to match. PO repro:
+# SpaceX facts NEVER appeared in real-mode because none of the seed
+# queries hit them.
+#
+# This endpoint is intent-separated: recall is for "find me facts about
+# X"; facts is for "give me the whole graph slice". Plain `match_all`
+# + filter (KS + manual) + sort validated_at desc. Capped at 500 server-
+# side so a runaway client can not pull a 100k-fact KS into memory.
+# ---------------------------------------------------------------------------
+
+FACTS_DEFAULT_LIMIT = 200
+FACTS_MAX_LIMIT = 500
+
+
+@router.get("/facts", response_model=FactsList)
+def list_space_facts(
+    space_id: uuid.UUID,
+    limit: int = Query(
+        default=FACTS_DEFAULT_LIMIT,
+        ge=1,
+        le=FACTS_MAX_LIMIT,
+        description="Maximum facts to return. Hard-capped server-side.",
+    ),
+    user: User = Depends(get_current_user),
+) -> FactsList:
+    """All validated facts in one KS, sorted newest first.
+
+    Resolution: same auth pattern as `recall` — 404 on unknown space,
+    403 when not owned by the caller.
+
+    Query: `match_all` inside an ES `bool.filter` so the response is
+    deterministic and the score is not consulted (no kNN, no semantic
+    weighting). The filter pins `knowledge_space_id` + `validation_method
+    = manual` so the response can never leak auto-validated rows or
+    rows from another KS.
+
+    Fail-soft: if ES throws, the endpoint returns an empty `FactsList`
+    rather than 500. Auth/space errors stay as 401/403/404.
+    """
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+    ks_id = str(space_id)
+
+    body: dict[str, Any] = {
+        "size": limit,
+        "sort": [{"validated_at": {"order": "desc"}}],
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"knowledge_space_id": ks_id}},
+                    {"term": {"validation_method": "manual"}},
+                ],
+                # Exclude soft-deleted (retracted) facts so the
+                # visualisation does not show ghosts.
+                "must_not": [
+                    {"exists": {"field": "retracted_at"}},
+                ],
+            },
+        },
+    }
+    try:
+        client = get_client()
+        resp = client.search(index=LUCID_FACTS, body=body)
+    except Exception as exc:  # noqa: BLE001 - degrade quietly
+        logger.warning("facts: ES search failed: %s", exc)
+        return FactsList(facts=[], total=0, truncated=False)
+
+    hits = list(resp.get("hits", {}).get("hits") or [])
+    facts: list[RecallFact] = []
+    for hit in hits:
+        fact = _hit_to_fact(hit)
+        if fact is not None:
+            facts.append(fact)
+
+    facts = _enrich_with_labels(facts, ks_id)
+
+    # `hits.total` carries the true count (across all matches), not
+    # just the bounded `size` page. ES returns it as either an int
+    # (older shapes) or a dict with `value`.
+    total_raw = (resp.get("hits") or {}).get("total")
+    if isinstance(total_raw, dict):
+        total_int = int(total_raw.get("value") or 0)
+    else:
+        total_int = int(total_raw or 0)
+
+    return FactsList(
+        facts=facts,
+        total=len(facts),
+        truncated=total_int > len(facts),
     )
