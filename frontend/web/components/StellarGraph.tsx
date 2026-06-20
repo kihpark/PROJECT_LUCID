@@ -105,6 +105,15 @@ interface BloomTargets {
   renderTargetsVertical?: THREE.WebGLRenderTarget[];
 }
 
+// B-62-fix3 — EffectComposer exposes its primary ping-pong pair as
+// renderTarget1 / renderTarget2. Clearing these is a secondary defense
+// against bloom accumulation if the bloom pass's own targets stay stuck.
+interface ComposerTargets {
+  renderTarget1?: THREE.WebGLRenderTarget;
+  renderTarget2?: THREE.WebGLRenderTarget;
+  addPass: (pass: unknown) => void;
+}
+
 /** Add a slow-rotating starfield behind the graph. The dots are tiny so the
  *  bloom pass doesn't bleed them; the rotation gives the "우주감" without
  *  flooding the eye. */
@@ -125,18 +134,19 @@ function attachStarfield(scene: THREE.Scene): THREE.Points {
     positions[i * 3 + 2] = Math.sin(theta) * r * RADIUS;
   }
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  // B-62-fix2 — dim cosmic dust, not glowing stars.
-  // Bloom threshold sits at 0.4 (see handleEngineReady) so we keep the
-  // starfield colour below that luminance: 0x506070 ≈ luminance 0.36,
-  // multiplied by opacity 0.4 yields an effective contribution well
-  // under threshold. Smaller size (0.9 < 1.4) also keeps each pixel's
-  // brightness from clipping into bloom.
+  // B-62-fix3 — starfield further dimmed so it cannot meaningfully
+  // contribute to bloom even if the per-frame buffer clear silently
+  // no-ops. PO repro on fix2 showed full whiteout in SYNTHETIC (2000
+  // nodes) — high node density means even a moderate bloom contribution
+  // per pixel adds up across the canvas. Effective brightness now sits
+  // at color (luminance ~0.18) × opacity 0.25 ≈ 0.045, far under the
+  // bloom threshold (0.5), so the starfield is unconditionally exempt.
   const material = new THREE.PointsMaterial({
-    color: 0x506070,
-    size: 0.9,
+    color: 0x2a3540,
+    size: 0.6,
     sizeAttenuation: true,
     transparent: true,
-    opacity: 0.4,
+    opacity: 0.25,
     depthWrite: false,
   });
   const stars = new THREE.Points(geometry, material);
@@ -149,10 +159,12 @@ export function StellarGraph(props: StellarGraphProps) {
   const { data, mode, onNodeHover, onNodeClick } = props;
   const fgRef = useRef<ForceGraphRefHandle | null>(null);
   const starsRef = useRef<THREE.Points | null>(null);
-  // B-62-fix2 — references held so the per-frame tick can clear the
-  // bloom pass's ping-pong buffers (defeats the brightness accumulation
-  // that made nodes "appear to grow" and starfield bleed into noise).
+  // B-62-fix2/fix3 — references held so the per-frame tick can clear
+  // both the bloom pass's ping-pong buffers AND the EffectComposer's
+  // primary ping-pong pair (defeats brightness accumulation that made
+  // nodes "appear to grow" and the starfield bleed into noise).
   const bloomRef = useRef<(UnrealBloomPass & BloomTargets) | null>(null);
+  const composerRef = useRef<ComposerTargets | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -196,15 +208,47 @@ export function StellarGraph(props: StellarGraphProps) {
     //                          (color 0x506070 ≈ luminance 0.36 × opacity
     //                          0.4) sits comfortably below the line, so
     //                          stars are now points, not torches.
+    // B-62-fix3 — bloom dramatically softened + composer reference.
+    //
+    // fix2 set strength 1.2, threshold 0.4. PO repro: SYNTHETIC (2000
+    // nodes) was immediate whiteout; REAL (5 nodes) was bearable. The
+    // density-dependent failure confirms the bloom contribution per
+    // pixel was still too high — and we couldn't rely on the per-frame
+    // bloom-target clear because the ForceGraphRefHandle from
+    // react-force-graph-3d does NOT expose `.renderer()`, so the clear
+    // loop was a silent no-op. fix3 attacks the magnitude instead:
+    //   strength  1.2 → 0.6  — half. Nodes still glow but a single frame
+    //                          of bloom contribution is sub-perceptible
+    //                          on dense clusters.
+    //   radius    0.5 → 0.4  — tighter halo, less spread into adjacent
+    //                          pixels.
+    //   threshold 0.4 → 0.6  — pixels below luminance 0.6 are exempt,
+    //                          which now includes mid-tone teal pixels;
+    //                          only the brightest peaks bloom.
+    //
+    // We also capture the composer reference itself so the tick can
+    // clear composer.renderTarget1/2 (these DO live on the composer
+    // object) — that's the secondary line of defense if the bloom
+    // ping-pong targets stay stuck for any reason.
     const composer = handle.postProcessingComposer?.();
     if (composer && typeof composer.addPass === 'function') {
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 1.2, 0.5, 0.4);
+      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.6, 0.4, 0.6);
       composer.addPass(bloom);
       bloomRef.current = bloom as UnrealBloomPass & BloomTargets;
+      composerRef.current = composer as unknown as ComposerTargets;
     }
-    // Renderer reference for the per-frame buffer clear (below).
+    // Renderer reference for the per-frame buffer clear. NOTE: this may
+    // return undefined depending on the react-force-graph-3d version's
+    // ref API; treat the clear loop as best-effort.
     const renderer = handle.renderer?.();
-    if (renderer) rendererRef.current = renderer;
+    if (renderer) {
+      // Ensure the renderer's auto-clear is on so the main frame buffer
+      // resets every tick regardless of what the composer wants.
+      renderer.autoClear = true;
+      renderer.autoClearColor = true;
+      renderer.autoClearDepth = true;
+      rendererRef.current = renderer;
+    }
 
     // Dark cosmic background + starfield.
     //
@@ -260,20 +304,39 @@ export function StellarGraph(props: StellarGraphProps) {
       const stars = starsRef.current;
       if (stars) stars.rotation.y += dt * 0.012; // very slow drift
 
-      // Clear bloom ping-pong buffers.
+      // Clear every render target that could be holding stale bloom:
+      //   1. UnrealBloomPass's per-mip ping-pong pairs (renderTargets-
+      //      Horizontal / Vertical),
+      //   2. EffectComposer's primary pair (renderTarget1 / renderTarget2)
+      //      — this is the fix3 secondary defense.
+      // If the ref API doesn't expose .renderer() on this build of
+      // react-force-graph-3d, rendererRef.current stays null and this
+      // block is a no-op (the magnitude reductions in handleEngineReady
+      // are the load-bearing fix in that case).
       const renderer = rendererRef.current;
       const bloom = bloomRef.current;
-      if (renderer && bloom) {
+      const composer = composerRef.current;
+      if (renderer && (bloom || composer)) {
         const prevTarget = renderer.getRenderTarget();
-        const horizontal = bloom.renderTargetsHorizontal ?? [];
-        const vertical = bloom.renderTargetsVertical ?? [];
-        for (const t of horizontal) {
-          renderer.setRenderTarget(t);
-          renderer.clear(true, true, true);
+        if (bloom) {
+          for (const t of bloom.renderTargetsHorizontal ?? []) {
+            renderer.setRenderTarget(t);
+            renderer.clear(true, true, true);
+          }
+          for (const t of bloom.renderTargetsVertical ?? []) {
+            renderer.setRenderTarget(t);
+            renderer.clear(true, true, true);
+          }
         }
-        for (const t of vertical) {
-          renderer.setRenderTarget(t);
-          renderer.clear(true, true, true);
+        if (composer) {
+          if (composer.renderTarget1) {
+            renderer.setRenderTarget(composer.renderTarget1);
+            renderer.clear(true, true, true);
+          }
+          if (composer.renderTarget2) {
+            renderer.setRenderTarget(composer.renderTarget2);
+            renderer.clear(true, true, true);
+          }
         }
         renderer.setRenderTarget(prevTarget);
       }
@@ -335,12 +398,18 @@ export function StellarGraph(props: StellarGraphProps) {
           nodeLabel={labelOf}
           nodeColor={nodeColor}
           nodeVal={nodeSize}
-          nodeOpacity={0.95}
+          /* B-62-fix3 — small reductions across the lighting surfaces
+           * so SYNTHETIC density (2000 nodes) does not pile per-pixel
+           * bloom contributions into whiteout: node opacity slightly
+           * down from 0.95 → 0.88, link particles disabled (each
+           * particle is a bright dot that bloom catches; killing them
+           * removes an entire category of point lights). */
+          nodeOpacity={0.88}
           nodeResolution={12}
           linkColor={linkColor}
-          linkOpacity={mode === 'real' ? 0.4 : 0.55}
+          linkOpacity={mode === 'real' ? 0.4 : 0.5}
           linkWidth={0.6}
-          linkDirectionalParticles={mode === 'synthetic' ? 1 : 0}
+          linkDirectionalParticles={0}
           linkDirectionalParticleSpeed={0.004}
           linkDirectionalParticleWidth={1.1}
           enableNodeDrag={false}
