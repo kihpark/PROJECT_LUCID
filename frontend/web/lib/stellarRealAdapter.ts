@@ -23,6 +23,7 @@ import { getHomeBrief, recall } from './api';
 import { getCurrentSpace } from './auth';
 import { predicateLabel } from './predicateLabels';
 import type { HomeBrief, RecallFact, RecallResponse } from './types';
+import { attachGraphMetrics } from './syntheticGraph';
 import type { StellarGraphData, StellarLink, StellarNode } from './syntheticGraph';
 
 /** Generic queries used to fan out the canvas when the brief is too thin
@@ -48,11 +49,17 @@ function pushFactAsNode(acc: NodeAccumulator, fact: RecallFact, clusterHint: num
   const subject = fact.subject_label || fact.subject_uid;
   const object = fact.object_label || fact.object_value;
   const label = `${subject} · ${predicateLabel(fact.predicate)} · ${object}`;
+  const sourceCount = Math.max(1, fact.source_uids?.length ?? 1);
+  // B-62-v1 — "검증된 팩트일수록 빛난다" — source count drives the
+  // emissive strength. 1 source ≈ 0.35 (visible but quiet), 3+ sources
+  // saturate at 1.0 (full glow).
+  const validationStrength = Math.max(0.3, Math.min(1, 0.3 + sourceCount * 0.25));
   acc.byId.set(fact.fact_uid, {
     id: fact.fact_uid,
     label,
     cluster: clusterHint,
-    weight: Math.max(1, fact.source_uids?.length ?? 1),
+    weight: sourceCount,
+    validationStrength,
     // Position is left at 0 — the force-graph engine spreads on first tick.
     x: 0,
     y: 0,
@@ -124,6 +131,8 @@ export async function loadRealStellarGraph(
         label: r.claim,
         cluster: 0,
         weight: 3,
+        // Recent-validated facts came through HITL — by definition validated.
+        validationStrength: 0.9,
         x: 0,
         y: 0,
         z: 0,
@@ -153,11 +162,11 @@ export async function loadRealStellarGraph(
 
   linkBySubjectOverlap(acc);
 
-  return {
+  return attachGraphMetrics({
     nodes: Array.from(acc.byId.values()),
     links: acc.links,
     clusters,
-  };
+  });
 }
 
 /** Exposed for tests so they can build a synthetic "what loadRealStellarGraph

@@ -96,4 +96,43 @@ describe('generateSyntheticGraph', () => {
     const big = generateSyntheticGraph({ nodeCount: 100000 });
     expect(big.nodes.length).toBeLessThanOrEqual(3000);
   });
+
+  // B-62-v1 — graph metrics must be attached after the link set is built.
+  it('every node carries a degree that matches the link incidence count', () => {
+    const g = generateSyntheticGraph();
+    const expected = new Map<string, number>();
+    for (const link of g.links) {
+      expected.set(String(link.source), (expected.get(String(link.source)) ?? 0) + 1);
+      expected.set(String(link.target), (expected.get(String(link.target)) ?? 0) + 1);
+    }
+    for (const node of g.nodes) {
+      expect(typeof node.degree).toBe('number');
+      expect(node.degree).toBe(expected.get(node.id) ?? 0);
+    }
+  });
+
+  it('every node has validationStrength in (0, 1] — drives the emissive lift', () => {
+    const g = generateSyntheticGraph();
+    for (const node of g.nodes) {
+      expect(typeof node.validationStrength).toBe('number');
+      expect(node.validationStrength as number).toBeGreaterThan(0);
+      expect(node.validationStrength as number).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('higher-degree nodes have ≥ validationStrength than zero-degree nodes', () => {
+    // The metric formula blends degree + weight; isolating "degree alone"
+    // requires comparing nodes with similar weights but different degrees.
+    // The aggregate guarantee: the MEAN validationStrength of the top
+    // decile by degree should exceed the mean of zero-degree nodes.
+    const g = generateSyntheticGraph();
+    const byDeg = [...g.nodes].sort((a, b) => (b.degree ?? 0) - (a.degree ?? 0));
+    const top = byDeg.slice(0, Math.max(10, Math.floor(byDeg.length / 10)));
+    const isolated = g.nodes.filter((n) => (n.degree ?? 0) === 0);
+    if (isolated.length === 0) return; // 모든 노드 연결된 경우는 skip
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(mean(top.map((n) => n.validationStrength as number))).toBeGreaterThanOrEqual(
+      mean(isolated.map((n) => n.validationStrength as number)) - 0.001,
+    );
+  });
 });

@@ -21,6 +21,8 @@ function MockRenderer(props: {
   mode: 'synthetic' | 'real';
   onNodeHover?: (n: StellarNode | null) => void;
   onNodeClick?: (n: StellarNode) => void;
+  focusedId?: string | null;
+  focusedNeighborIds?: Set<string>;
 }) {
   lastRendererProps.current = props;
   return (
@@ -147,6 +149,83 @@ describe('StellarView', () => {
     // Simulate click → drawer opens.
     fireEvent.click(screen.getByTestId('mock-fire-click'));
     await waitFor(() => expect(screen.getByTestId('stellar-fact-drawer')).toBeInTheDocument());
+  });
+
+  // B-62-v1 — focus mode tests.
+  it('click → focus: renderer receives focusedId + neighbour set (1-hop)', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+    expect(lastRendererProps.current.focusedNeighborIds).toBeInstanceOf(Set);
+    // fake-1 ↔ fake-2 in the seed link list.
+    expect(lastRendererProps.current.focusedNeighborIds.has('fake-2')).toBe(true);
+  });
+
+  it('focus opens the panel with a relations list (clickable for chain-navigate)', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    expect(screen.getByTestId('stellar-fact-drawer')).toBeInTheDocument();
+    const rows = screen.queryAllByTestId('stellar-focus-relation-row');
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('back button pops focus history; disabled at the root', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    // No focus yet → no panel.
+    expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
+    // First focus.
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    const back = screen.getByTestId('stellar-focus-back');
+    expect(back.hasAttribute('disabled')).toBe(true); // no history yet
+    // Chain-navigate: click the first relation row → push history.
+    const firstRow = screen.getAllByTestId('stellar-focus-relation-row')[0]!;
+    fireEvent.click(firstRow);
+    expect(lastRendererProps.current.focusedId).toBe('fake-2');
+    // Back button is now enabled.
+    const backAfter = screen.getByTestId('stellar-focus-back');
+    expect(backAfter.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(backAfter);
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+  });
+
+  it('Esc clears focus entirely', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(lastRendererProps.current.focusedId).toBeNull();
+    expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
+  });
+
+  it('edge legend shows the 4 relation types in synthetic mode', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    expect(screen.getByTestId('stellar-edge-legend')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-edge-legend-supports')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-edge-legend-elaborates')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-edge-legend-causes')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-edge-legend-contradicts')).toBeInTheDocument();
+  });
+
+  it('source toggle resets focus + history (no stale focus across modes)', async () => {
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [],
+      links: [],
+      clusters: [],
+    } satisfies StellarGraphData);
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+    fireEvent.click(screen.getByTestId('stellar-source-real'));
+    await waitFor(() => expect(realLoader).toHaveBeenCalled());
+    expect(lastRendererProps.current.focusedId).toBeNull();
   });
 
   it('honors persisted localStorage choice on next mount', async () => {

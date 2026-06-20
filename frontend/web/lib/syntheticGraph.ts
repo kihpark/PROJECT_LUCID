@@ -63,8 +63,18 @@ export interface StellarNode {
   label: string;
   /** 0-based cluster index this node belongs to. */
   cluster: number;
-  /** Free-floating "weight" used to drive node size (source-count analogue). */
+  /** Source-count analogue. Kept for backward compat — newer surfaces should
+   *  prefer `degree` for size and `validationStrength` for emissive feel. */
   weight: number;
+  /** B-62-v1 — actual graph degree (in + out edges incident on this node).
+   *  Populated by `attachGraphMetrics` after the generator builds the link
+   *  set. The Stellar renderer drives node size from this so size === how
+   *  connected the fact is, not a random sample. */
+  degree?: number;
+  /** B-62-v1 — 0..1 scalar derived from validation provenance (source count
+   *  for real, weight for synthetic). Drives the emissive lift in nodeColor:
+   *  well-validated facts glow brighter. */
+  validationStrength?: number;
   /** Initial 3D position seeded by the generator (ForceGraph3D respects x/y/z). */
   x: number;
   y: number;
@@ -450,7 +460,41 @@ export function generateSyntheticGraph(
     });
   }
 
-  return { nodes, links, clusters };
+  return attachGraphMetrics({ nodes, links, clusters });
+}
+
+// ---------------------------------------------------------------------------
+// B-62-v1 — shared post-build pass that populates node.degree and
+// node.validationStrength. Pure function so the real adapter can call it
+// too. Both metrics are derived from the link set, so this MUST run after
+// links are finalised.
+//
+// * degree            — number of edges incident on the node. Drives node
+//                       size in the renderer (size = sqrt(degree)).
+// * validationStrength — 0..1 confidence proxy. Higher = brighter glow.
+//                       For synthetic we map (weight + degree) onto 0..1
+//                       so popular clusters look more "validated"; the real
+//                       adapter overrides this with a true source-count
+//                       calculation before calling us.
+// ---------------------------------------------------------------------------
+
+export function attachGraphMetrics(data: StellarGraphData): StellarGraphData {
+  const degree = new Map<string, number>();
+  for (const link of data.links) {
+    degree.set(String(link.source), (degree.get(String(link.source)) ?? 0) + 1);
+    degree.set(String(link.target), (degree.get(String(link.target)) ?? 0) + 1);
+  }
+  const nodes = data.nodes.map((n) => {
+    const d = degree.get(n.id) ?? 0;
+    const w = n.weight ?? 1;
+    // Soft sigmoid-ish blend of degree (network importance) and weight
+    // (source-count analogue). Anchored so a 0-degree node still glows
+    // at ~0.3, never invisible.
+    const raw = 0.3 + 0.5 * Math.tanh(d / 6) + 0.2 * Math.tanh(w / 4);
+    const validationStrength = n.validationStrength ?? Math.max(0.3, Math.min(1, raw));
+    return { ...n, degree: d, validationStrength };
+  });
+  return { nodes, links: data.links, clusters: data.clusters };
 }
 
 // ---------------------------------------------------------------------------

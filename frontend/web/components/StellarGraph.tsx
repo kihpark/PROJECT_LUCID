@@ -65,6 +65,7 @@ const ForceGraph3DLazy = dynamic(() => import('react-force-graph-3d'), {
 const ForceGraph3D = ForceGraph3DLazy as unknown as React.ComponentType<Record<string, unknown>>;
 
 const ACCENT = '#3fe0c6';
+const EMPTY_SET = new Set<string>();
 
 export interface StellarGraphProps {
   /** Graph payload. Updating swaps the canvas data; the camera is preserved. */
@@ -75,6 +76,47 @@ export interface StellarGraphProps {
   onNodeHover?: (node: StellarNode | null) => void;
   /** Click callback (full node). */
   onNodeClick?: (node: StellarNode) => void;
+  /** B-62-v1 — id of the currently focused node (set by parent on click).
+   *  When non-null, distant nodes dim and only focus-incident edges keep
+   *  their typed colour. */
+  focusedId?: string | null;
+  /** B-62-v1 — set of node ids that are 1-hop from `focusedId`. The parent
+   *  computes this from the link set once per focus change. */
+  focusedNeighborIds?: Set<string>;
+}
+
+// B-62-v1 — colour helpers used by the renderer hooks.
+//
+// `lift` multiplies each channel by `factor` (clamped). Used to lift a base
+// cluster colour by the node's validation strength: a 1.0× pixel sits at the
+// palette colour; a >1× pixel pushes past it (and past the bloom threshold)
+// so well-validated facts visibly glow.
+//
+// `mixToDim` blends toward a near-background neutral so out-of-focus nodes
+// fade without disappearing — the spec says "흐리게", not "invisible".
+function lift(hex: string, factor: number): string {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const clamp = (x: number) => Math.max(0, Math.min(1, x));
+  const out = (x: number) => Math.round(clamp(x) * 255).toString(16).padStart(2, '0');
+  return `#${out(r * factor)}${out(g * factor)}${out(b * factor)}`;
+}
+function mixToDim(hex: string, retainedSaturation: number): string {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  // Background-leaning neutral with a teal hint so dim nodes still read as
+  // "knowledge graph" rather than dead grey.
+  const bgR = 0.08;
+  const bgG = 0.12;
+  const bgB = 0.13;
+  const k = retainedSaturation;
+  const nr = r * k + bgR * (1 - k);
+  const ng = g * k + bgG * (1 - k);
+  const nb = b * k + bgB * (1 - k);
+  const out = (x: number) => Math.round(x * 255).toString(16).padStart(2, '0');
+  return `#${out(nr)}${out(ng)}${out(nb)}`;
 }
 
 interface ForceGraphRefHandle {
@@ -156,7 +198,17 @@ function attachStarfield(scene: THREE.Scene): THREE.Points {
 }
 
 export function StellarGraph(props: StellarGraphProps) {
-  const { data, mode, onNodeHover, onNodeClick } = props;
+  const {
+    data,
+    mode,
+    onNodeHover,
+    onNodeClick,
+    focusedId = null,
+    focusedNeighborIds,
+  } = props;
+  // Stable identity for the "no focus" case so the callback memo deps don't
+  // churn when the parent hasn't sent a set yet.
+  const neighborSet = focusedNeighborIds ?? EMPTY_SET;
   const fgRef = useRef<ForceGraphRefHandle | null>(null);
   const starsRef = useRef<THREE.Points | null>(null);
   // B-62-fix2/fix3 — references held so the per-frame tick can clear
@@ -252,12 +304,16 @@ export function StellarGraph(props: StellarGraphProps) {
     // bloom contributes a tight glow around each node instead of a wide
     // blur. Threshold relaxed 0.6 → 0.55 to keep mid-tone teal nodes
     // genuinely bright, not anaemic.
-    // B-62-fix5 — bloom strength floored per PO directive ("0.1로 최대로
-    // 낮춰줘"). The radius/threshold tuning from fix4 stays; the goal is
-    // visibly distinct nodes that do NOT glow into the canvas.
+    // B-62-v1 — bloom balanced for "검증된 팩트일수록 빛난다".
+    // strength 0.4 sits between fix4's 0.8 (too bright) and fix5's 0.1
+    // (too dark). Combined with the `lift()` colour multiplier in
+    // `nodeColor`, well-validated facts (validationStrength → 1) push
+    // their pixel luminance over threshold 0.5 and bloom; weakly
+    // validated facts (vs ~0.35) sit at base palette luminance and stay
+    // as sharp points. radius 0.25 keeps the halo tight.
     const composer = handle.postProcessingComposer?.();
     if (composer && typeof composer.addPass === 'function') {
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.1, 0.25, 0.55);
+      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.4, 0.25, 0.5);
       composer.addPass(bloom);
       bloomRef.current = bloom as UnrealBloomPass & BloomTargets;
       composerRef.current = composer as unknown as ComposerTargets;
@@ -410,29 +466,70 @@ export function StellarGraph(props: StellarGraphProps) {
     );
   }, []);
 
+  // B-62-v1 — link colour reflects edge TYPE (synthetic) or the single
+  // accent (real). Focus mode adds a second layer: edges incident on the
+  // focused node keep their typed colour; the rest fade to near-invisible
+  // so the focal subgraph reads cleanly.
   const linkColor = useCallback(
     (link: StellarLink): string => {
-      if (mode === 'real') return 'rgba(63,224,198,0.55)';
-      return EDGE_COLORS[link.type] ?? 'rgba(255,255,255,0.35)';
+      const baseColor =
+        mode === 'real'
+          ? 'rgba(63,224,198,0.55)'
+          : EDGE_COLORS[link.type] ?? 'rgba(255,255,255,0.35)';
+      if (focusedId === null) return baseColor;
+      // ForceGraph3D mutates link.source/target to node objects after the
+      // simulation runs. Handle both shapes.
+      const src =
+        typeof link.source === 'string'
+          ? link.source
+          : (link.source as { id?: string } | null)?.id ?? '';
+      const tgt =
+        typeof link.target === 'string'
+          ? link.target
+          : (link.target as { id?: string } | null)?.id ?? '';
+      const incident = src === focusedId || tgt === focusedId;
+      return incident ? baseColor : 'rgba(45,55,65,0.06)';
     },
-    [mode],
+    [mode, focusedId],
   );
 
-  const nodeColor = useCallback((node: StellarNode): string => {
-    const c = node.cluster ?? 0;
-    return CLUSTER_PALETTE[c % CLUSTER_PALETTE.length] ?? ACCENT;
-  }, []);
+  // B-62-v1 — node colour composes three signals:
+  //   1. cluster palette (which subject group this fact belongs to).
+  //   2. validation strength — the colour is multiplied by (0.6 + vs * 0.5)
+  //      so well-validated facts push past the bloom threshold and glow,
+  //      while thin facts stay as sharp but un-bloomed points.
+  //   3. focus dim — when the user has focused a node, distant nodes
+  //      blend toward the dark background so the 1-hop subgraph stands out.
+  const nodeColor = useCallback(
+    (node: StellarNode): string => {
+      const base =
+        CLUSTER_PALETTE[(node.cluster ?? 0) % CLUSTER_PALETTE.length] ?? ACCENT;
+      const vs = node.validationStrength ?? 0.5;
+      const lifted = lift(base, 0.6 + vs * 0.5);
+      if (focusedId === null) return lifted;
+      if (focusedId === node.id) return lift(base, 1.05); // focused = brightest
+      if (neighborSet.has(node.id)) return lifted;        // neighbour = full
+      return mixToDim(lifted, 0.18);                       // distant = dim
+    },
+    [focusedId, neighborSet],
+  );
 
-  // B-62-fix5 — fixed 1.4× scale on hover. Capped, non-accumulating,
-  // resets when hoveredId returns to null. The base function stays a
-  // pure function of node.weight; hover only multiplies the result by
-  // 1.4 when the id matches.
+  // B-62-v1 — node size derives from graph degree (connection count), per
+  // the spec ("노드 크기 = 중요도"). Falls back to legacy `weight` for
+  // backward compatibility with any test fixture that hasn't been
+  // re-baked. Hover/focus add a fixed multiplier on top — capped,
+  // non-accumulating, resets when state clears.
   const nodeSize = useCallback(
     (node: StellarNode): number => {
-      const base = 1.2 + Math.sqrt(node.weight ?? 1);
-      return hoveredId === node.id ? base * 1.4 : base;
+      const importance = node.degree ?? node.weight ?? 1;
+      const base = 0.9 + Math.sqrt(importance);
+      let scale = 1;
+      if (focusedId === node.id) scale = 1.6;
+      else if (focusedId !== null && neighborSet.has(node.id)) scale = 1.25;
+      if (hoveredId === node.id) scale = Math.max(scale, 1.4);
+      return base * scale;
     },
-    [hoveredId],
+    [hoveredId, focusedId, neighborSet],
   );
 
   // B-62-fix5 — wrap the parent's hover callback so we can track the

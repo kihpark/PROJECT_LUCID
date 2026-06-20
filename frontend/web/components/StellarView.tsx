@@ -15,7 +15,11 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { generateSyntheticGraph } from '@/lib/syntheticGraph';
+import {
+  generateSyntheticGraph,
+  EDGE_COLORS,
+  type EdgeType,
+} from '@/lib/syntheticGraph';
 import type { StellarGraphData, StellarNode } from '@/lib/syntheticGraph';
 import { emptyStellarGraph, loadRealStellarGraph } from '@/lib/stellarRealAdapter';
 import { predicateLabel } from '@/lib/predicateLabels';
@@ -37,6 +41,13 @@ const StellarGraphLazy = dynamic(
 
 export type StellarSource = 'synthetic' | 'real';
 const LS_KEY = 'lucid.stellar.source';
+
+// B-62-v1 — relation row shape used by the focus panel.
+interface FocusRelation {
+  type: EdgeType;
+  direction: 'out' | 'in';
+  other: StellarNode;
+}
 
 function readPersistedSource(): StellarSource {
   if (typeof window === 'undefined') return 'synthetic';
@@ -166,88 +177,9 @@ function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
 }
 
-// ---------------------------------------------------------------------------
-// Side drawer (click-to-open fact detail).
-// ---------------------------------------------------------------------------
-
-function FactDrawer({
-  node,
-  onClose,
-}: {
-  node: StellarNode | null;
-  onClose: () => void;
-}) {
-  if (!node) return null;
-  return (
-    <aside
-      data-testid="stellar-fact-drawer"
-      role="dialog"
-      aria-label="fact detail"
-      style={{
-        position: 'absolute',
-        top: 16,
-        right: 18,
-        zIndex: 20,
-        width: 380,
-        maxHeight: 'calc(100% - 32px)',
-        overflowY: 'auto',
-        background: PANEL_BG,
-        border: `1px solid ${PANEL_BORDER}`,
-        borderRadius: 14,
-        padding: 18,
-        marginTop: 56, // sit just below the source-toggle pill
-        color: TEXT_PRIMARY,
-        boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
-        backdropFilter: 'blur(10px)',
-      }}
-    >
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <span style={{ color: ACCENT, fontSize: 11, letterSpacing: '0.08em', fontWeight: 600 }}>
-          STELLAR · FACT
-        </span>
-        <button
-          type="button"
-          data-testid="stellar-drawer-close"
-          onClick={onClose}
-          aria-label="close"
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: TEXT_DIM,
-            fontSize: 18,
-            cursor: 'pointer',
-            lineHeight: 1,
-            padding: 4,
-          }}
-        >
-          ×
-        </button>
-      </header>
-      <div style={{ fontSize: 14, fontWeight: 600, color: TEXT_PRIMARY, lineHeight: 1.5 }}>
-        {node.subject}
-      </div>
-      <div style={{ marginTop: 4, fontSize: 12, color: TEXT_DIM }}>
-        {predicateLabel(node.predicate)}
-      </div>
-      <div style={{ marginTop: 10, fontSize: 13, color: TEXT_BODY, lineHeight: 1.6 }}>
-        {node.object}
-      </div>
-      <div style={{ marginTop: 16, fontSize: 11, color: TEXT_DIM }}>
-        cluster #{node.cluster} · weight {node.weight}
-      </div>
-      <div style={{ marginTop: 6, fontSize: 11, color: TEXT_DIM }}>
-        node id: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{node.id}</span>
-      </div>
-    </aside>
-  );
-}
+// B-62-v1 — the old FactDrawer (click-to-open detail) has been replaced
+// by FocusPanel (click → focus + 1-hop + relation list + chain-navigate).
+// See FocusPanel further down.
 
 // ---------------------------------------------------------------------------
 // Empty state — cold-start hint when real mode returns nothing.
@@ -280,7 +212,17 @@ function ColdStartHint() {
 // Status pill (bottom-left) — small diagnostic for the spike.
 // ---------------------------------------------------------------------------
 
-function StatusPill({ source, nodes, links }: { source: StellarSource; nodes: number; links: number }) {
+function StatusPill({
+  source,
+  nodes,
+  links,
+  focused,
+}: {
+  source: StellarSource;
+  nodes: number;
+  links: number;
+  focused: StellarNode | null;
+}) {
   return (
     <div
       data-testid="stellar-status-pill"
@@ -306,7 +248,292 @@ function StatusPill({ source, nodes, links }: { source: StellarSource; nodes: nu
       <span>nodes {nodes.toLocaleString()}</span>
       <span style={{ color: TEXT_DIM }}>·</span>
       <span>edges {links.toLocaleString()}</span>
+      {focused ? (
+        <>
+          <span style={{ color: TEXT_DIM }}>·</span>
+          <span style={{ color: ACCENT }} data-testid="stellar-status-focus">
+            focus · deg {focused.degree ?? '·'}
+          </span>
+        </>
+      ) : null}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B-62-v1 — edge type legend (top-left). In synthetic mode the four
+// relation types are colour-coded so the user knows what they're looking
+// at. In real mode we only have entity-link edges today (single accent).
+// ---------------------------------------------------------------------------
+
+const EDGE_LABEL_KO: Record<EdgeType, string> = {
+  supports: '뒷받침',
+  elaborates: '부연',
+  causes: '원인',
+  contradicts: '반박',
+};
+
+function EdgeLegend({ mode }: { mode: StellarSource }) {
+  return (
+    <div
+      data-testid="stellar-edge-legend"
+      style={{
+        position: 'absolute',
+        top: 16,
+        left: 16,
+        zIndex: 10,
+        padding: '10px 12px',
+        borderRadius: 12,
+        background: PANEL_BG,
+        border: `1px solid ${PANEL_BORDER}`,
+        color: TEXT_BODY,
+        fontSize: 11,
+        letterSpacing: '0.04em',
+        fontFamily: 'JetBrains Mono, monospace',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        backdropFilter: 'blur(8px)',
+      }}
+    >
+      <div style={{ color: TEXT_DIM, fontSize: 10, marginBottom: 2 }}>
+        EDGE · 관계
+      </div>
+      {mode === 'synthetic' ? (
+        (Object.keys(EDGE_LABEL_KO) as EdgeType[]).map((t) => (
+          <div
+            key={t}
+            data-testid={`stellar-edge-legend-${t}`}
+            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+          >
+            <span
+              style={{
+                width: 12,
+                height: 2,
+                background: EDGE_COLORS[t],
+                display: 'inline-block',
+                boxShadow: `0 0 6px ${EDGE_COLORS[t]}`,
+              }}
+            />
+            <span>{EDGE_LABEL_KO[t]}</span>
+          </div>
+        ))
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            style={{
+              width: 12,
+              height: 2,
+              background: ACCENT,
+              display: 'inline-block',
+              boxShadow: `0 0 6px ${ACCENT}`,
+            }}
+          />
+          <span>엔티티 링크</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B-62-v1 — focus panel. Replaces the old FactDrawer. Shows the focused
+// fact, its 1-hop relations (clickable to chain-navigate), a back button
+// (pops history), and a close button (clears focus entirely). The relation
+// rows are colour-coded by edge type and labeled with the Korean relation
+// name, mirroring the legend.
+// ---------------------------------------------------------------------------
+
+function FocusPanel({
+  focused,
+  relations,
+  historyDepth,
+  onBack,
+  onJump,
+  onClose,
+}: {
+  focused: StellarNode | null;
+  relations: FocusRelation[];
+  historyDepth: number;
+  onBack: () => void;
+  onJump: (node: StellarNode) => void;
+  onClose: () => void;
+}) {
+  if (!focused) return null;
+  return (
+    <aside
+      data-testid="stellar-fact-drawer"
+      role="dialog"
+      aria-label="fact detail"
+      style={{
+        position: 'absolute',
+        top: 16,
+        right: 18,
+        zIndex: 20,
+        width: 380,
+        maxHeight: 'calc(100% - 32px)',
+        overflowY: 'auto',
+        background: PANEL_BG,
+        border: `1px solid ${PANEL_BORDER}`,
+        borderRadius: 14,
+        padding: 18,
+        marginTop: 56,
+        color: TEXT_PRIMARY,
+        boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
+        backdropFilter: 'blur(10px)',
+      }}
+    >
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 12,
+        }}
+      >
+        <span
+          style={{ color: ACCENT, fontSize: 11, letterSpacing: '0.08em', fontWeight: 600 }}
+        >
+          STELLAR · FOCUS
+        </span>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            data-testid="stellar-focus-back"
+            onClick={onBack}
+            disabled={historyDepth === 0}
+            aria-label="back"
+            style={{
+              background: historyDepth === 0 ? 'transparent' : 'rgba(63,224,198,0.08)',
+              border: `1px solid ${historyDepth === 0 ? '#1a2528' : '#244448'}`,
+              color: historyDepth === 0 ? TEXT_DIM : ACCENT,
+              borderRadius: 6,
+              padding: '2px 8px',
+              fontSize: 11,
+              cursor: historyDepth === 0 ? 'not-allowed' : 'pointer',
+              opacity: historyDepth === 0 ? 0.4 : 1,
+              fontFamily: 'JetBrains Mono, monospace',
+            }}
+          >
+            ← back{historyDepth > 0 ? ` (${historyDepth})` : ''}
+          </button>
+          <button
+            type="button"
+            data-testid="stellar-drawer-close"
+            onClick={onClose}
+            aria-label="close"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: TEXT_DIM,
+              fontSize: 18,
+              cursor: 'pointer',
+              lineHeight: 1,
+              padding: 4,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      </header>
+      <div style={{ fontSize: 14, fontWeight: 600, color: TEXT_PRIMARY, lineHeight: 1.5 }}>
+        {focused.subject}
+      </div>
+      <div style={{ marginTop: 4, fontSize: 12, color: TEXT_DIM }}>
+        {predicateLabel(focused.predicate)}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 13, color: TEXT_BODY, lineHeight: 1.6 }}>
+        {focused.object}
+      </div>
+      <div style={{ marginTop: 16, fontSize: 11, color: TEXT_DIM, display: 'flex', gap: 10 }}>
+        <span>cluster #{focused.cluster}</span>
+        <span>·</span>
+        <span>deg {focused.degree ?? '·'}</span>
+        <span>·</span>
+        <span>vs {(focused.validationStrength ?? 0).toFixed(2)}</span>
+      </div>
+      {relations.length > 0 ? (
+        <div
+          data-testid="stellar-focus-relations"
+          style={{
+            marginTop: 18,
+            borderTop: `1px solid ${PANEL_BORDER}`,
+            paddingTop: 14,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: TEXT_DIM,
+              letterSpacing: '0.08em',
+              marginBottom: 8,
+            }}
+          >
+            관계 · {relations.length}
+          </div>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {relations.slice(0, 50).map((rel, i) => (
+              <li key={`${rel.other.id}-${i}`}>
+                <button
+                  type="button"
+                  data-testid="stellar-focus-relation-row"
+                  onClick={() => onJump(rel.other)}
+                  style={{
+                    display: 'flex',
+                    width: '100%',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 8px',
+                    background: 'transparent',
+                    border: '1px solid transparent',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    color: TEXT_BODY,
+                    fontSize: 12,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(63,224,198,0.06)';
+                    e.currentTarget.style.borderColor = '#244448';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = 'transparent';
+                  }}
+                >
+                  <span
+                    title={EDGE_LABEL_KO[rel.type]}
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      background: EDGE_COLORS[rel.type],
+                      boxShadow: `0 0 6px ${EDGE_COLORS[rel.type]}`,
+                      flex: 'none',
+                    }}
+                  />
+                  <span style={{ color: TEXT_DIM, fontSize: 10, width: 24 }}>
+                    {rel.direction === 'out' ? '→' : '←'}
+                  </span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {rel.other.subject}
+                  </span>
+                </button>
+              </li>
+            ))}
+            {relations.length > 50 ? (
+              <li style={{ color: TEXT_DIM, fontSize: 11, padding: '4px 8px' }}>
+                +{relations.length - 50}개 더 (스크롤)
+              </li>
+            ) : null}
+          </ul>
+        </div>
+      ) : (
+        <div style={{ marginTop: 18, color: TEXT_DIM, fontSize: 12 }}>
+          이 사실은 다른 사실과 연결되지 않았습니다.
+        </div>
+      )}
+    </aside>
   );
 }
 
@@ -322,6 +549,8 @@ export interface StellarViewProps {
     mode: StellarSource;
     onNodeHover?: (n: StellarNode | null) => void;
     onNodeClick?: (n: StellarNode) => void;
+    focusedId?: string | null;
+    focusedNeighborIds?: Set<string>;
   }) => React.ReactElement;
   /** Test-mode override for the real-data adapter. */
   realLoader?: () => Promise<StellarGraphData>;
@@ -332,7 +561,13 @@ export interface StellarViewProps {
 export function StellarView(props: StellarViewProps = {}) {
   const [source, setSource] = useState<StellarSource>('synthetic');
   const [hovered, setHovered] = useState<HoverState | null>(null);
-  const [selected, setSelected] = useState<StellarNode | null>(null);
+  // B-62-v1 — focus replaces the old "selected" idea. Focusing a node:
+  //   1. dims everything except the node and its 1-hop neighbours,
+  //   2. opens the side panel with fact detail + a list of related facts
+  //      that the user can click to chain-navigate,
+  //   3. pushes the previous focus onto a history stack so "back" works.
+  const [focused, setFocused] = useState<StellarNode | null>(null);
+  const [focusHistory, setFocusHistory] = useState<StellarNode[]>([]);
   const [realData, setRealData] = useState<StellarGraphData | null>(null);
   const [realLoading, setRealLoading] = useState(false);
   const realLoadedRef = useRef(false);
@@ -383,7 +618,8 @@ export function StellarView(props: StellarViewProps = {}) {
     setSource(next);
     persistSource(next);
     setHovered(null);
-    setSelected(null);
+    setFocused(null);
+    setFocusHistory([]);
   }, []);
 
   const handleHover = useCallback((node: StellarNode | null) => {
@@ -394,13 +630,121 @@ export function StellarView(props: StellarViewProps = {}) {
     setHovered({ node, x: cursorRef.current.x, y: cursorRef.current.y });
   }, []);
 
-  const handleClick = useCallback((node: StellarNode) => {
-    setSelected(node);
+  // B-62-v1 — click is now FOCUS. The handler pushes the previous focus
+  // onto the history stack (only if it's actually changing — clicking the
+  // already-focused node is a no-op for history).
+  const handleClick = useCallback(
+    (node: StellarNode) => {
+      setFocused((prev) => {
+        if (prev && prev.id !== node.id) {
+          setFocusHistory((h) => [...h, prev]);
+        }
+        return node;
+      });
+    },
+    [],
+  );
+
+  // B-62-v1 — focus pop / clear handlers.
+  const handleBack = useCallback(() => {
+    setFocusHistory((h) => {
+      if (h.length === 0) {
+        setFocused(null);
+        return h;
+      }
+      const next = h.slice(0, -1);
+      setFocused(h[h.length - 1] ?? null);
+      return next;
+    });
   }, []);
+  const handleClearFocus = useCallback(() => {
+    setFocused(null);
+    setFocusHistory([]);
+  }, []);
+
+  // B-62-v1 — Esc clears focus. Convenient escape hatch from a deep
+  // chain navigation.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        handleClearFocus();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleClearFocus]);
 
   const Renderer = props.renderer ?? StellarGraphLazy;
 
   const realIsEmpty = source === 'real' && !realLoading && activeData.nodes.length === 0;
+
+  // B-62-v1 — neighbour index for the current data set. Built once per
+  // activeData reference; the lookup is O(1) for the renderer's hot path.
+  // For each link we record both endpoints' counterparts; the resulting
+  // map answers "what are X's 1-hop neighbours?" in constant time.
+  const neighborIndex = useMemo(() => {
+    const idx = new Map<string, Set<string>>();
+    const push = (a: string, b: string) => {
+      let s = idx.get(a);
+      if (!s) {
+        s = new Set();
+        idx.set(a, s);
+      }
+      s.add(b);
+    };
+    for (const link of activeData.links) {
+      const src =
+        typeof link.source === 'string'
+          ? link.source
+          : (link.source as { id?: string } | null)?.id ?? '';
+      const tgt =
+        typeof link.target === 'string'
+          ? link.target
+          : (link.target as { id?: string } | null)?.id ?? '';
+      if (!src || !tgt) continue;
+      push(src, tgt);
+      push(tgt, src);
+    }
+    return idx;
+  }, [activeData]);
+
+  // B-62-v1 — 1-hop relations for the focused node, materialised for the
+  // side panel. Each relation carries the edge type (colour) + the other-
+  // end node (clickable to chain-navigate). Empty when nothing is focused.
+  const focusedNeighborIds = useMemo<Set<string>>(
+    () => (focused ? neighborIndex.get(focused.id) ?? new Set() : new Set()),
+    [focused, neighborIndex],
+  );
+  const focusRelations = useMemo<FocusRelation[]>(() => {
+    if (!focused) return [];
+    const out: FocusRelation[] = [];
+    const byId = new Map(activeData.nodes.map((n) => [n.id, n] as const));
+    for (const link of activeData.links) {
+      const src =
+        typeof link.source === 'string'
+          ? link.source
+          : (link.source as { id?: string } | null)?.id ?? '';
+      const tgt =
+        typeof link.target === 'string'
+          ? link.target
+          : (link.target as { id?: string } | null)?.id ?? '';
+      let other: string | null = null;
+      let direction: 'out' | 'in' | null = null;
+      if (src === focused.id) {
+        other = tgt;
+        direction = 'out';
+      } else if (tgt === focused.id) {
+        other = src;
+        direction = 'in';
+      } else {
+        continue;
+      }
+      const otherNode = other ? byId.get(other) : null;
+      if (!otherNode) continue;
+      out.push({ type: link.type, direction: direction!, other: otherNode });
+    }
+    return out;
+  }, [focused, activeData]);
 
   return (
     <div
@@ -420,17 +764,32 @@ export function StellarView(props: StellarViewProps = {}) {
           mode={source}
           onNodeHover={handleHover}
           onNodeClick={handleClick}
+          focusedId={focused?.id ?? null}
+          focusedNeighborIds={focusedNeighborIds}
         />
       </div>
 
       <SourceToggle source={source} onChange={handleToggle} />
+      <EdgeLegend mode={source} />
 
       {realIsEmpty ? <ColdStartHint /> : null}
 
-      <StatusPill source={source} nodes={activeData.nodes.length} links={activeData.links.length} />
+      <StatusPill
+        source={source}
+        nodes={activeData.nodes.length}
+        links={activeData.links.length}
+        focused={focused}
+      />
 
       <HoverTooltip state={hovered} />
-      <FactDrawer node={selected} onClose={() => setSelected(null)} />
+      <FocusPanel
+        focused={focused}
+        relations={focusRelations}
+        historyDepth={focusHistory.length}
+        onBack={handleBack}
+        onJump={handleClick}
+        onClose={handleClearFocus}
+      />
     </div>
   );
 }
