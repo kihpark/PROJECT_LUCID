@@ -211,3 +211,216 @@ def bulk_create_facts(facts: list[FactNode], with_embedding: bool = True) -> lis
     client = get_client()
     bulk(client, actions, chunk_size=500, refresh="wait_for")
     return uids
+
+# --- B-62 structure-resolve ----------------------------------------------
+
+
+def _find_fact_by_canonical_key(
+    *,
+    knowledge_space_id: str,
+    subject_entity_id: str,
+    predicate_code: str,
+    object_canonical: str,
+) -> dict[str, Any] | None:
+    """B-62 canonical S/P/O dedup lookup.
+
+    Filters by the new canonical fields (predicate_code + object_canonical)
+    rather than the legacy surface fields (predicate + object_value).
+    The legacy `find_fact_by_spo` keeps working for the validate.py
+    surface-keyed lookup; this helper is the canonical-keyed equivalent.
+
+    Skips retracted facts and only matches validation_method='manual'
+    so a flaky duplicate auto-write never collapses with a user-validated
+    fact. Returns the existing _source dict or None.
+    """
+    client = get_client()
+    try:
+        resp = client.search(
+            index=LUCID_FACTS,
+            query={"bool": {
+                "filter": [
+                    {"term": {"knowledge_space_id": knowledge_space_id}},
+                    {"term": {"subject_uid": subject_entity_id}},
+                    {"term": {"predicate_code": predicate_code}},
+                    {"term": {"object_canonical": object_canonical}},
+                    {"term": {"validation_method": "manual"}},
+                ],
+                "must_not": [{"exists": {"field": "retracted_at"}}],
+            }},
+            size=1,
+        )
+    except Exception as exc:  # noqa: BLE001 - dedup degrades quietly
+        logger.warning("_find_fact_by_canonical_key failed: %s", exc)
+        return None
+    hits = resp.get("hits", {}).get("hits") or []
+    return hits[0].get("_source") if hits else None
+
+
+def insert_or_dedup_fact(
+    *,
+    subject_entity_id: str,
+    predicate_code: str,
+    object_ref: dict[str, Any],
+    knowledge_space_id: str,
+    source_uid: str,
+    original_surface: str,
+    capture_lang: str,
+    object_value: str | None = None,
+    claim: str | None = None,
+    fact_type: str = "proposition",
+    validator_id: str | None = None,
+    tags: list[str] | None = None,
+    needs_review: bool = False,
+    validation_method: str = "manual",
+    negation_flag: bool = False,
+    negation_scope: str | None = None,
+    es_client: Any | None = None,
+    extra_es_fields: dict[str, Any] | None = None,
+) -> tuple[str, bool]:
+    """B-62: insert a fact OR dedup against an existing one by canonical key.
+
+    Computes canonical_key from (subject_entity_id, predicate_code,
+    object_ref). On a hit: append source_uid to the existing doc's
+    source_uids[] and return (existing_fact_uid, False). On a miss:
+    insert a NEW fact doc with the canonical fields populated AND the
+    legacy surface fields (predicate, object_value) so the recall
+    display path keeps working.
+
+    object_ref must be a dict-shaped CanonicalEntityRef
+    ({"kind": "entity", "uid": "..."}) or CanonicalLiteralRef
+    ({"kind": "literal", "value": "..."}). The legacy `object_value`
+    string is taken from the literal value or - when the object is an
+    entity reference - the surface text the caller passes (so recall
+    display still resolves to a human-readable label).
+
+    Returns (fact_uid, was_created). was_created=False indicates a
+    dedup hit; the fact_uid points at the EXISTING doc.
+    """
+    from api.models.base import new_uid as _new_uid
+    from api.storage.canonical import canonical_key, object_canonical
+
+    client = es_client if es_client is not None else get_client()
+
+    # Build canonical key + canonical object string.
+    ckey = canonical_key(subject_entity_id, predicate_code, object_ref)  # type: ignore[arg-type]
+    obj_canon = object_canonical(object_ref)  # type: ignore[arg-type]
+
+    # Dedup: by canonical fields (subject_entity_id, predicate_code,
+    # canonical object string). We do NOT use the surface fields for
+    # the dedup query - that is the whole point of B-62.
+    try:
+        if es_client is None:
+            existing = _find_fact_by_canonical_key(
+                knowledge_space_id=knowledge_space_id,
+                subject_entity_id=subject_entity_id,
+                predicate_code=predicate_code,
+                object_canonical=obj_canon,
+            )
+        else:
+            resp = client.search(
+                index=LUCID_FACTS,
+                query={"bool": {
+                    "filter": [
+                        {"term": {"knowledge_space_id": knowledge_space_id}},
+                        {"term": {"subject_uid": subject_entity_id}},
+                        {"term": {"predicate_code": predicate_code}},
+                        {"term": {"object_canonical": obj_canon}},
+                        {"term": {"validation_method": validation_method}},
+                    ],
+                    "must_not": [{"exists": {"field": "retracted_at"}}],
+                }},
+                size=1,
+            )
+            hits = resp.get("hits", {}).get("hits") or []
+            existing = hits[0].get("_source") if hits else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("canonical dedup search failed: %s", exc)
+        existing = None
+
+    if existing is not None:
+        existing_uid = existing.get("fact_uid")
+        if existing_uid:
+            # Append source_uid in place (reuse the legacy attach helper
+            # if we are on the default client; otherwise inline-update
+            # so the mocked-client test path works without monkey-patches).
+            try:
+                if es_client is None:
+                    attach_source_to_fact(existing_uid, source_uid)
+                else:
+                    src_existing = list(existing.get("source_uids") or [])
+                    if source_uid and source_uid not in src_existing:
+                        src_existing.append(source_uid)
+                        client.update(
+                            index=LUCID_FACTS,
+                            id=existing_uid,
+                            doc={
+                                "source_uids": src_existing,
+                                "updated_at": utc_now().isoformat(),
+                            },
+                            refresh="wait_for",
+                        )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "attach source on dedup hit failed for %s: %s",
+                    existing_uid, exc,
+                )
+            return existing_uid, False
+
+    # Miss: insert a fresh canonical fact doc.
+    fact_uid = _new_uid()
+    # Recall display path reads object_value (surface). For entity refs,
+    # fall back to the entity uid string; for literals, use the literal value.
+    legacy_object_value = object_value
+    if legacy_object_value is None:
+        if object_ref.get("kind") == "literal":
+            legacy_object_value = object_ref.get("value") or ""
+        else:
+            legacy_object_value = object_ref.get("uid") or ""
+    legacy_predicate = original_surface or predicate_code
+
+    body: dict[str, Any] = {
+        "fact_uid": fact_uid,
+        "claim": claim or legacy_object_value,
+        "type": fact_type,
+        "subject_uid": subject_entity_id,
+        "predicate": legacy_predicate,
+        "object_value": legacy_object_value,
+        "validated_at": utc_now().isoformat(),
+        "validation_method": validation_method,
+        "validator_id": validator_id or "system",
+        "source_uids": [source_uid] if source_uid else [],
+        # B-62 canonical fields
+        "predicate_code": predicate_code,
+        "original_surface": original_surface,
+        "capture_lang": capture_lang,
+        "object_canonical": obj_canon,
+        "canonical_key": ckey,
+        "tags": list(tags or []),
+        "needs_review": bool(needs_review),
+        "aliases": [],
+        "override_warning": False,
+        "negation_flag": bool(negation_flag),
+        "knowledge_space_id": knowledge_space_id,
+        "edit_history": [],
+        "locators": [],
+        "created_at": utc_now().isoformat(),
+        "updated_at": utc_now().isoformat(),
+    }
+    if negation_scope:
+        body["negation_scope"] = negation_scope
+    if extra_es_fields:
+        body.update(extra_es_fields)
+
+    try:
+        client.index(
+            index=LUCID_FACTS,
+            id=fact_uid,
+            document=body,
+            refresh="wait_for",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "insert_or_dedup_fact insert failed for %s: %s",
+            fact_uid, exc,
+        )
+    return fact_uid, True

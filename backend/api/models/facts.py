@@ -142,3 +142,13 @@ class FactNode(LucidBaseModel):
     retracted_by: UID | None = None
     # B-48a locator scaffold. Empty in Phase 1; Phase 2 fills.
     locators: list[Locator] = Field(default_factory=list)
+    # B-62 structure-resolve - canonical S-P-O additions. All optional
+    # so legacy facts captured before the OPL layer landed still
+    # validate. Surface fields (predicate, object_value) stay around
+    # for the recall display path.
+    predicate_code: str | None = None
+    original_surface: str | None = None
+    capture_lang: str | None = None
+    object_canonical: str | None = None
+    canonical_key: str | None = None
+    needs_review: bool = False

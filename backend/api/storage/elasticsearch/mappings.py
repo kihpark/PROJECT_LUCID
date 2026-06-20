@@ -62,6 +62,18 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             # capture (e.g. "ko", "en"). Drives downstream cross-
             # lingual fact collapse at the canonical-entity layer.
             "capture_lang": {"type": "keyword"},
+            # B-62 structure-resolve - canonical S-P-O object segment
+            # (entity:<uid> | literal:<normalized-value>). The dedup
+            # gate in `insert_or_dedup_fact` filters on this field
+            # together with predicate_code so two captures of the same
+            # canonical triple collapse to one ES doc.
+            "object_canonical": {"type": "keyword"},
+            # B-62 structure-resolve - full canonical_key
+            # `<subject_uid>|<predicate_code>|<object_canonical>`.
+            "canonical_key": {"type": "keyword"},
+            # B-62 structure-resolve - HITL surface flag. True when
+            # the predicate degraded to RELATED_TO.
+            "needs_review": {"type": "boolean"},
             "tags": {"type": "keyword"},
             "aliases": {"type": "text", "analyzer": "korean_analyzer"},
             "override_warning": {"type": "boolean"},
