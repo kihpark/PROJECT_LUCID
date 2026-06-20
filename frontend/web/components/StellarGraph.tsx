@@ -214,6 +214,46 @@ function attachStarfield(scene: THREE.Scene): THREE.Points {
   return stars;
 }
 
+/** B-62-synthetic-galaxy-starfield — bright accent stars for synthetic.
+ *
+ * A second, sparser Points layer that shows ONLY in synthetic mode.
+ * Bigger and slightly brighter than the main field, giving the galaxy
+ * the "some stars stand out" texture you see on a night sky photo.
+ * Still tuned well under the bloom threshold (color luminance ~0.43 ×
+ * opacity 0.55 ≈ 0.24, threshold 0.55) so the accent layer stays as
+ * crisp points and does NOT bloom-bleed.
+ */
+function attachAccentStarfield(scene: THREE.Scene): THREE.Points {
+  const count = 350;
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  // Accent layer sits a touch closer than the main field so the depth
+  // separation reads correctly even though both layers ignore depth.
+  const RADIUS = 4100;
+  for (let i = 0; i < count; i += 1) {
+    const u = Math.random() * 2 - 1;
+    const theta = Math.random() * 2 * Math.PI;
+    const r = Math.sqrt(1 - u * u);
+    positions[i * 3 + 0] = Math.cos(theta) * r * RADIUS;
+    positions[i * 3 + 1] = u * RADIUS;
+    positions[i * 3 + 2] = Math.sin(theta) * r * RADIUS;
+  }
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: 0x8aa0bc,  // pale blue-white, luminance ~0.43
+    size: 1.4,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+  });
+  const stars = new THREE.Points(geometry, material);
+  stars.name = 'lucid-stellar-accent-stars';
+  stars.visible = false; // toggled on per mode in the useEffect below
+  scene.add(stars);
+  return stars;
+}
+
 export function StellarGraph(props: StellarGraphProps) {
   const {
     data,
@@ -229,6 +269,10 @@ export function StellarGraph(props: StellarGraphProps) {
   const neighborSet = focusedNeighborIds ?? EMPTY_SET;
   const fgRef = useRef<ForceGraphRefHandle | null>(null);
   const starsRef = useRef<THREE.Points | null>(null);
+  // B-62-synthetic-galaxy-starfield — accent layer for the brighter
+  // "stand-out" stars in synthetic mode. Held in its own ref so the
+  // mode useEffect can hide it without touching the main field.
+  const accentStarsRef = useRef<THREE.Points | null>(null);
   // B-62-fix2/fix3 — references held so the per-frame tick can clear
   // both the bloom pass's ping-pong buffers AND the EffectComposer's
   // primary ping-pong pair (defeats brightness accumulation that made
@@ -419,6 +463,12 @@ export function StellarGraph(props: StellarGraphProps) {
       if (!starsRef.current) {
         starsRef.current = attachStarfield(scene);
       }
+      // B-62-synthetic-galaxy-starfield — accent layer mounted at
+      // engine-ready; visibility is then driven by the mode useEffect
+      // below so it only appears in synthetic.
+      if (!accentStarsRef.current) {
+        accentStarsRef.current = attachAccentStarfield(scene);
+      }
     }
 
     // Camera + controls: narrow FOV, autoRotate slow, damping on.
@@ -543,10 +593,40 @@ export function StellarGraph(props: StellarGraphProps) {
   // PO directive is to show stars in both modes as a "확실한 배경
   // 역할". Identity of synthetic vs real is carried by the data
   // (node count, cluster colour palette), not by the background.
+  // B-62-synthetic-galaxy-starfield — mode-aware starfield brightness.
+  // PO directive: "배경 starfield 가 synthetic 에서는 더 선명하게 보이길
+  // 원한다. 갤럭시 느낌을 완성해야 한다." Real mode keeps the subtle
+  // texture (KS data should dominate); synthetic gets a brighter main
+  // layer + a sparse accent layer for the "stand-out stars" feel.
+  //
+  // All four tuned values stay under the bloom threshold (0.55):
+  //   synthetic main:   color 0x5e7488 (lum 0.42) × opacity 0.7 ≈ 0.30
+  //   synthetic accent: color 0x8aa0bc (lum 0.43) × opacity 0.55 ≈ 0.24
+  //   real main:        color 0x3a4858 (lum 0.27) × opacity 0.40 ≈ 0.11
+  //   real accent:      hidden
+  // The "노드만 글로우" principle holds — only the validated nodes
+  // bloom; the starfield, even at synthetic brightness, stays as
+  // crisp points.
   useEffect(() => {
     const stars = starsRef.current;
-    if (!stars) return;
-    stars.visible = true;
+    const accent = accentStarsRef.current;
+    if (stars) {
+      stars.visible = true;
+      const mat = stars.material as THREE.PointsMaterial;
+      if (mode === 'synthetic') {
+        mat.color.setHex(0x5e7488);
+        mat.opacity = 0.7;
+        mat.size = 0.85;
+      } else {
+        mat.color.setHex(0x3a4858);
+        mat.opacity = 0.4;
+        mat.size = 0.6;
+      }
+      mat.needsUpdate = true;
+    }
+    if (accent) {
+      accent.visible = mode === 'synthetic';
+    }
   }, [mode]);
 
   // B-62-fix-glow-clamp — keep the zoom readout in sync with the actual
