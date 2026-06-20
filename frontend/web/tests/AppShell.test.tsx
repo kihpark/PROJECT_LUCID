@@ -80,10 +80,13 @@ describe('AppShell', () => {
 
     const nav = screen.getByTestId('app-shell-nav');
     expect(nav).toBeInTheDocument();
-    // three nav items in this order: 홈 / Recall / 검증
+    // four nav items in this order: 홈 / Recall / Stellar / 검증 (B-62)
     expect(screen.getByTestId('app-shell-nav-home')).toHaveTextContent('홈');
     expect(screen.getByTestId('app-shell-nav-recall')).toHaveTextContent(
       'Recall',
+    );
+    expect(screen.getByTestId('app-shell-nav-stellar')).toHaveTextContent(
+      'Stellar',
     );
     expect(screen.getByTestId('app-shell-nav-pending')).toHaveTextContent(
       '검증',
