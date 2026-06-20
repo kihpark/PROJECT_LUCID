@@ -87,11 +87,22 @@ interface ForceGraphRefHandle {
     enableDamping?: boolean;
     dampingFactor?: number;
   };
+  // B-62-fix2 — added for bloom-accumulation defeat. We need the renderer
+  // to wipe UnrealBloomPass's ping-pong targets every frame.
+  renderer?: () => THREE.WebGLRenderer;
   cameraPosition?: (
     pos: { x: number; y: number; z: number },
     lookAt?: { x: number; y: number; z: number } | null,
     duration?: number,
   ) => void;
+}
+
+// B-62-fix2 — UnrealBloomPass exposes the ping-pong target arrays we need
+// to clear each frame. Three's typings don't expose these on the base
+// Pass class, so we narrow with our own structural type.
+interface BloomTargets {
+  renderTargetsHorizontal?: THREE.WebGLRenderTarget[];
+  renderTargetsVertical?: THREE.WebGLRenderTarget[];
 }
 
 /** Add a slow-rotating starfield behind the graph. The dots are tiny so the
@@ -114,12 +125,18 @@ function attachStarfield(scene: THREE.Scene): THREE.Points {
     positions[i * 3 + 2] = Math.sin(theta) * r * RADIUS;
   }
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  // B-62-fix2 — dim cosmic dust, not glowing stars.
+  // Bloom threshold sits at 0.4 (see handleEngineReady) so we keep the
+  // starfield colour below that luminance: 0x506070 ≈ luminance 0.36,
+  // multiplied by opacity 0.4 yields an effective contribution well
+  // under threshold. Smaller size (0.9 < 1.4) also keeps each pixel's
+  // brightness from clipping into bloom.
   const material = new THREE.PointsMaterial({
-    color: 0xffffff,
-    size: 1.4,
+    color: 0x506070,
+    size: 0.9,
     sizeAttenuation: true,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.4,
     depthWrite: false,
   });
   const stars = new THREE.Points(geometry, material);
@@ -132,6 +149,11 @@ export function StellarGraph(props: StellarGraphProps) {
   const { data, mode, onNodeHover, onNodeClick } = props;
   const fgRef = useRef<ForceGraphRefHandle | null>(null);
   const starsRef = useRef<THREE.Points | null>(null);
+  // B-62-fix2 — references held so the per-frame tick can clear the
+  // bloom pass's ping-pong buffers (defeats the brightness accumulation
+  // that made nodes "appear to grow" and starfield bleed into noise).
+  const bloomRef = useRef<(UnrealBloomPass & BloomTargets) | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -154,15 +176,35 @@ export function StellarGraph(props: StellarGraphProps) {
     const handle = fgRef.current;
     if (!handle) return;
 
-    // Bloom pass via the built-in postprocessing hook.
+    // B-62-fix2 — bloom tuning + reference capture.
+    //
+    // Previous (fix1): strength 1.7, radius 0.55, threshold 0.15. PO
+    // dogfood found nodes apparently growing over time and starfield
+    // glowing as noise. Root cause (PO's hypothesis, confirmed by the
+    // tick-loop clear below): UnrealBloomPass's internal ping-pong
+    // render targets were not being cleared each frame, so each frame's
+    // bloom contribution layered on top of the previous one — perceived
+    // as steady brightness inflation across the whole canvas.
+    //
+    // Tuning:
+    //   strength  1.7 → 1.2  — still glows the teal/cyan/mint nodes
+    //                          (luminance ~0.7) but stops the canvas-
+    //                          wide halo wash.
+    //   radius    0.55 → 0.5 — slightly tighter spread.
+    //   threshold 0.15 → 0.4 — pixels below luminance 0.4 are exempt
+    //                          from bloom entirely. The dimmed starfield
+    //                          (color 0x506070 ≈ luminance 0.36 × opacity
+    //                          0.4) sits comfortably below the line, so
+    //                          stars are now points, not torches.
     const composer = handle.postProcessingComposer?.();
     if (composer && typeof composer.addPass === 'function') {
-      // strength 1.7, radius 0.55, threshold 0.15 — tuned to "stars glow,
-      // not bleed". The resolution arg is fed by EffectComposer when we
-      // hand the pass off, so the constructor's Vector2 is fine.
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 1.7, 0.55, 0.15);
+      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 1.2, 0.5, 0.4);
       composer.addPass(bloom);
+      bloomRef.current = bloom as UnrealBloomPass & BloomTargets;
     }
+    // Renderer reference for the per-frame buffer clear (below).
+    const renderer = handle.renderer?.();
+    if (renderer) rendererRef.current = renderer;
 
     // Dark cosmic background + starfield.
     //
@@ -200,9 +242,15 @@ export function StellarGraph(props: StellarGraphProps) {
     handle.cameraPosition?.({ x: 0, y: 0, z: 900 }, { x: 0, y: 0, z: 0 }, 0);
   }, []);
 
-  // Slowly rotate the starfield. We rely on react-force-graph-3d's per-frame
-  // render loop; setting userData on the field lets the engine pick it up via
-  // onSatelliteRotate. Simplest: tick via requestAnimationFrame loop.
+  // Per-frame tick. Two duties:
+  //   (a) drift the starfield (very slow y-rotation),
+  //   (b) B-62-fix2: clear UnrealBloomPass's ping-pong render targets so
+  //       each frame's bloom doesn't accumulate on top of the previous
+  //       one — without this the canvas brightness drifts upward forever
+  //       (PO repro: nodes "growing", starfield turning into a glowing
+  //       noise floor). UnrealBloomPass renders its blur into two pairs
+  //       of ping-pong targets per mip level; clearing them at frame
+  //       start forces the pass to start from black every time.
   useEffect(() => {
     let cancelled = false;
     let last = performance.now();
@@ -211,6 +259,25 @@ export function StellarGraph(props: StellarGraphProps) {
       last = now;
       const stars = starsRef.current;
       if (stars) stars.rotation.y += dt * 0.012; // very slow drift
+
+      // Clear bloom ping-pong buffers.
+      const renderer = rendererRef.current;
+      const bloom = bloomRef.current;
+      if (renderer && bloom) {
+        const prevTarget = renderer.getRenderTarget();
+        const horizontal = bloom.renderTargetsHorizontal ?? [];
+        const vertical = bloom.renderTargetsVertical ?? [];
+        for (const t of horizontal) {
+          renderer.setRenderTarget(t);
+          renderer.clear(true, true, true);
+        }
+        for (const t of vertical) {
+          renderer.setRenderTarget(t);
+          renderer.clear(true, true, true);
+        }
+        renderer.setRenderTarget(prevTarget);
+      }
+
       if (!cancelled) requestAnimationFrame(tick);
     }
     const handle = requestAnimationFrame(tick);
@@ -280,6 +347,15 @@ export function StellarGraph(props: StellarGraphProps) {
           showNavInfo={false}
           onNodeHover={onNodeHover}
           onNodeClick={onNodeClick}
+          /* B-62-fix2 — let the d3-force simulation settle after ~300
+           * ticks so node positions stop drifting. PO repro showed nodes
+           * appearing to slowly grow even after the bloom-accumulation
+           * fix; the residual movement was the simulation continuing to
+           * compress clusters indefinitely. The velocity decay raise
+           * (0.4 default → 0.55) shortens the settle without changing
+           * the equilibrium layout. */
+          cooldownTicks={300}
+          d3VelocityDecay={0.55}
         />
       ) : null}
     </div>
