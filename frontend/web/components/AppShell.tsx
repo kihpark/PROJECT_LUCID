@@ -352,6 +352,11 @@ export function AppShell({ children, userName, userEmail }: AppShellProps) {
   const nav: NavItem[] = [
     { href: '/home', label: '홈' },
     { href: '/recall', label: 'Recall' },
+    // B-62 — Stellar 3D view is a top-level navigation target so PO can
+    // jump in from anywhere without hand-typing the URL. No badge — there
+    // are no count semantics on the canvas (recall has search, stellar
+    // has the whole graph slice).
+    { href: '/stellar', label: 'Stellar' },
     { href: '/pending', label: '검증', count: pendingCount },
   ];
 
