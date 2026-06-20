@@ -24,6 +24,7 @@ function MockRenderer(props: {
   focusedId?: string | null;
   focusedNeighborIds?: Set<string>;
   selectedId?: string | null;
+  viewResetTick?: number;
 }) {
   lastRendererProps.current = props;
   return (
@@ -245,6 +246,55 @@ describe('StellarView', () => {
     });
     expect(lastRendererProps.current.focusedId).toBeNull();
     expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
+  });
+
+  // B-62-clear-focus-home-lookat — viewResetTick bumps on every
+  // explicit "back to overview" event but stays stable while the
+  // user is actively focusing nodes.
+  it('viewResetTick stays at 0 through a focus + relation-row click', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    expect(lastRendererProps.current.viewResetTick ?? 0).toBe(0);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    expect(lastRendererProps.current.viewResetTick ?? 0).toBe(0);
+    fireEvent.click(screen.getAllByTestId('stellar-focus-relation-row')[0]!);
+    expect(lastRendererProps.current.viewResetTick ?? 0).toBe(0);
+  });
+
+  it('× close button bumps viewResetTick (lookAt eases back to origin)', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    const before = lastRendererProps.current.viewResetTick ?? 0;
+    fireEvent.click(screen.getByTestId('stellar-drawer-close'));
+    expect((lastRendererProps.current.viewResetTick ?? 0)).toBe(before + 1);
+  });
+
+  it('Esc bumps viewResetTick (lookAt eases back to origin)', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    const before = lastRendererProps.current.viewResetTick ?? 0;
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect((lastRendererProps.current.viewResetTick ?? 0)).toBe(before + 1);
+  });
+
+  it('source toggle bumps viewResetTick (treated as back-to-overview)', async () => {
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [],
+      links: [],
+      clusters: [],
+    } satisfies StellarGraphData);
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    const before = lastRendererProps.current.viewResetTick ?? 0;
+    fireEvent.click(screen.getByTestId('stellar-source-real'));
+    await waitFor(() => expect(realLoader).toHaveBeenCalled());
+    expect((lastRendererProps.current.viewResetTick ?? 0)).toBe(before + 1);
   });
 
   it('edge legend shows the 4 relation types in synthetic mode', () => {
