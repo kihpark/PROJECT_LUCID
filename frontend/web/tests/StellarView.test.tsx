@@ -228,6 +228,44 @@ describe('StellarView', () => {
     expect(lastRendererProps.current.focusedId).toBeNull();
   });
 
+  // B-62-search-legibility — search bar tests.
+  it('search input renders at top-left and is empty by default', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    const input = screen.getByTestId('stellar-search-input') as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    expect(input.value).toBe('');
+    expect(screen.queryByTestId('stellar-search-results')).not.toBeInTheDocument();
+  });
+
+  it('search whitespace-only input is a no-op (no dropdown rendered)', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    const input = screen.getByTestId('stellar-search-input');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(screen.queryByTestId('stellar-search-results')).not.toBeInTheDocument();
+  });
+
+  it('search matches against subject (case-insensitive substring)', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    const input = screen.getByTestId('stellar-search-input');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '카네' } });
+    expect(screen.getByTestId('stellar-search-results')).toBeInTheDocument();
+    const rows = screen.getAllByTestId('stellar-search-result');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]!.textContent).toContain('카네기멜론');
+  });
+
+  it('search result selection enters focus mode for the chosen node', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    const input = screen.getByTestId('stellar-search-input');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '서울대' } });
+    const firstRow = screen.getAllByTestId('stellar-search-result')[0]!;
+    fireEvent.mouseDown(firstRow);
+    expect(lastRendererProps.current.focusedId).toBe('fake-2');
+  });
+
   it('honors persisted localStorage choice on next mount', async () => {
     window.localStorage.setItem('lucid.stellar.source', 'real');
     const realLoader = vi.fn().mockResolvedValue({
