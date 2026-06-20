@@ -238,6 +238,14 @@ export interface RecallResponse {
   facets?: RecallFacets;
 }
 
+// B-62 — facts listing envelope (GET /api/spaces/{id}/facts).
+// Mirrors backend/api/models/recall.py::FactsList.
+export interface FactsList {
+  facts: RecallFact[];
+  total: number;
+  truncated: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // B-48b — fact detail panel
 // ---------------------------------------------------------------------------

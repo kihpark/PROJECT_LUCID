@@ -226,6 +226,31 @@ class FactMutationResponse(LucidBaseModel):
 
 
 # ---------------------------------------------------------------------------
+# B-62 — facts listing for Stellar real-mode (and any future caller that
+# needs "every validated fact in this KS" without a kNN query).
+# ---------------------------------------------------------------------------
+
+class FactsList(LucidBaseModel):
+    """Bounded list of validated facts in one KS.
+
+    Returned by `GET /api/spaces/{space_id}/facts`. The endpoint is a
+    plain ES search (`match_all` + filter on KS + manual), NOT a kNN /
+    semantic query — so the user gets ALL their facts, not just the
+    ones a query happens to match.
+
+    `total` is the count of returned facts AFTER the `limit` truncation;
+    `truncated` flags whether the KS holds more than `limit` (in which
+    case the caller should narrow or paginate). The visualisation
+    layers don't currently paginate — they take the first batch and
+    show a hint when the dataset exceeds it.
+    """
+
+    facts: list[RecallFact] = Field(default_factory=list)
+    total: int = 0
+    truncated: bool = False
+
+
+# ---------------------------------------------------------------------------
 # B-55 — Home brief
 # ---------------------------------------------------------------------------
 
