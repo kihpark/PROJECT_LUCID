@@ -89,6 +89,13 @@ export interface StellarLink {
   source: string;
   target: string;
   type: EdgeType;
+  /** B-62-demo-clusters-edges — 0..1 corroboration score. Drives edge
+   *  brightness in the renderer (high = bright constellation, low =
+   *  dim background filament). For the demo we sample a heavy-tailed
+   *  distribution so most edges sit at low scores and a small minority
+   *  flare up. Real-mode edges leave this undefined; the renderer
+   *  falls back to a flat accent. */
+  corroborationScore?: number;
 }
 
 export interface StellarGraphData {
@@ -332,6 +339,24 @@ function pickEdgeType(rng: () => number): EdgeType {
   return 'contradicts';
 }
 
+/** B-62-demo-clusters-edges — heavy-tailed corroboration score sampler.
+ *
+ * PO directive: "데모는 mock 분포(대부분 낮고 일부 높음)". Distribution:
+ *   70% in [0.05, 0.30]   — background filaments
+ *   20% in [0.30, 0.65]   — moderate links
+ *   10% in [0.65, 1.00]   — bright constellation edges
+ *
+ * Drives both opacity (alpha = score) and a modest width ramp in the
+ * renderer, so the high-corroboration sub-graph visually pops out of
+ * the rest as a brighter star-pattern.
+ */
+function sampleCorroboration(rng: () => number): number {
+  const u = rng();
+  if (u < 0.70) return 0.05 + rng() * 0.25;
+  if (u < 0.90) return 0.30 + rng() * 0.35;
+  return 0.65 + rng() * 0.35;
+}
+
 /**
  * Generate the synthetic stellar graph.
  *
@@ -364,7 +389,11 @@ export function generateSyntheticGraph(
   }
 
   // Step 2: cluster centroids on a sphere (golden-angle Fibonacci spiral).
-  const R = 380;
+  // B-62-demo-clusters-edges — bumped 380 → 540 to push centroids apart;
+  // combined with the tighter halo σ below and the d3 charge tuning in
+  // StellarGraph, clusters now read as separated 성단 rather than one
+  // central blob.
+  const R = 540;
   const centroids: { x: number; y: number; z: number }[] = [];
   const phi = Math.PI * (3 - Math.sqrt(5)); // golden angle
   for (let c = 0; c < clusterCount; c += 1) {
@@ -397,7 +426,10 @@ export function generateSyntheticGraph(
   // Step 4: emit nodes.
   const nodes: StellarNode[] = [];
   const nodesByCluster: string[][] = Array.from({ length: clusterCount }, () => []);
-  const SIGMA = 55; // halo radius (Gaussian σ).
+  // B-62-demo-clusters-edges — halo σ tightened 55 → 32 so each cluster
+  // is a more compact ball (intra connections collapse onto it cleanly),
+  // and the gap between centroids reads as real space.
+  const SIGMA = 32;
 
   for (let c = 0; c < clusterCount; c += 1) {
     const centroid = centroids[c] as { x: number; y: number; z: number };
@@ -427,14 +459,17 @@ export function generateSyntheticGraph(
   }
 
   // Step 5: emit edges. Target ~2.6 edges per node on average → density that
-  // still feels like a galaxy without melting the GPU. 80% intra / 20% bridge.
+  // still feels like a galaxy without melting the GPU.
+  // B-62-demo-clusters-edges — intra ratio 80% → 92% so inter-cluster
+  // bridges sit under 10% (PO directive). Combined with the tighter
+  // halos this gives the modular topology the spec asks for.
   const edgeTarget = Math.round(nodes.length * 2.6);
   const links: StellarLink[] = [];
   const seen = new Set<string>();
 
   for (let e = 0; e < edgeTarget; e += 1) {
     const sourceNode = nodes[Math.floor(rng() * nodes.length)] as StellarNode;
-    const intra = rng() < 0.8;
+    const intra = rng() < 0.92;
     let targetCluster = sourceNode.cluster;
     if (!intra && clusterCount > 1) {
       // Pick a DIFFERENT cluster.
@@ -457,6 +492,7 @@ export function generateSyntheticGraph(
       source: sourceNode.id,
       target: targetId,
       type: pickEdgeType(rng),
+      corroborationScore: sampleCorroboration(rng),
     });
   }
 
