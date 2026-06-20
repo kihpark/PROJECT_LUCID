@@ -23,6 +23,7 @@ function MockRenderer(props: {
   onNodeClick?: (n: StellarNode) => void;
   focusedId?: string | null;
   focusedNeighborIds?: Set<string>;
+  selectedId?: string | null;
 }) {
   lastRendererProps.current = props;
   return (
@@ -169,23 +170,70 @@ describe('StellarView', () => {
     expect(rows.length).toBeGreaterThanOrEqual(1);
   });
 
+  // B-62-focus-select-actions — relation row click now selects without
+  // re-centring; the user must hit 중심으로 to push history.
   it('back button pops focus history; disabled at the root', () => {
     render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
-    // No focus yet → no panel.
     expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
-    // First focus.
     fireEvent.click(screen.getByTestId('mock-fire-click'));
     const back = screen.getByTestId('stellar-focus-back');
-    expect(back.hasAttribute('disabled')).toBe(true); // no history yet
-    // Chain-navigate: click the first relation row → push history.
+    expect(back.hasAttribute('disabled')).toBe(true);
     const firstRow = screen.getAllByTestId('stellar-focus-relation-row')[0]!;
     fireEvent.click(firstRow);
+    // Focus did NOT change — relation row is a select, not a re-centre.
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+    // Press 중심으로 to promote selected → new focus + history push.
+    fireEvent.click(screen.getByTestId('stellar-focus-center'));
     expect(lastRendererProps.current.focusedId).toBe('fake-2');
-    // Back button is now enabled.
     const backAfter = screen.getByTestId('stellar-focus-back');
     expect(backAfter.hasAttribute('disabled')).toBe(false);
     fireEvent.click(backAfter);
     expect(lastRendererProps.current.focusedId).toBe('fake-1');
+  });
+
+  it('relation row click sets selected (NO focus change, NO history push)', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+    expect(lastRendererProps.current.selectedId).toBe('fake-1');
+    const row = screen.getAllByTestId('stellar-focus-relation-row')[0]!;
+    fireEvent.click(row);
+    // Focus is the anchor; selected has moved.
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+    expect(lastRendererProps.current.selectedId).toBe('fake-2');
+    // Back is still disabled — no history was pushed.
+    expect(screen.getByTestId('stellar-focus-back').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('action footer appears only when selected differs from focused', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    // selected == focused on first canvas click → no footer.
+    expect(screen.queryByTestId('stellar-focus-actions')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByTestId('stellar-focus-relation-row')[0]!);
+    // Now selected != focused → footer with 펼치기 + 중심으로 is up.
+    expect(screen.getByTestId('stellar-focus-actions')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-focus-expand')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-focus-center')).toBeInTheDocument();
+  });
+
+  it('펼치기 keeps focus + selected but enlarges the neighbour set', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    const beforeNeighborSize =
+      (lastRendererProps.current.focusedNeighborIds as Set<string>).size;
+    fireEvent.click(screen.getAllByTestId('stellar-focus-relation-row')[0]!);
+    fireEvent.click(screen.getByTestId('stellar-focus-expand'));
+    // Focus + selected unchanged …
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+    expect(lastRendererProps.current.selectedId).toBe('fake-2');
+    // … and the highlight set grew (fake-2 + fake-2's neighbours added).
+    const afterNeighborSize =
+      (lastRendererProps.current.focusedNeighborIds as Set<string>).size;
+    expect(afterNeighborSize).toBeGreaterThanOrEqual(beforeNeighborSize);
+    expect(
+      (lastRendererProps.current.focusedNeighborIds as Set<string>).has('fake-2'),
+    ).toBe(true);
   });
 
   it('Esc clears focus entirely', () => {

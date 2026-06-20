@@ -80,9 +80,16 @@ export interface StellarGraphProps {
    *  When non-null, distant nodes dim and only focus-incident edges keep
    *  their typed colour. */
   focusedId?: string | null;
-  /** B-62-v1 — set of node ids that are 1-hop from `focusedId`. The parent
-   *  computes this from the link set once per focus change. */
+  /** B-62-v1 — set of node ids that are 1-hop from `focusedId`, PLUS any
+   *  ids the user added via the focus-panel 펼치기 action. The parent
+   *  unions these into one set. */
   focusedNeighborIds?: Set<string>;
+  /** B-62-focus-select-actions — id of the currently selected sub-node
+   *  inside the focus subgraph (clicked from the relations list). Acts
+   *  as a third visual tier between highlighted and focused — selected
+   *  sits clearly above highlighted but does NOT re-centre the camera.
+   *  When equal to focusedId, the tier collapses to "focused". */
+  selectedId?: string | null;
 }
 
 // B-62-v1 — colour helpers used by the renderer hooks.
@@ -215,6 +222,7 @@ export function StellarGraph(props: StellarGraphProps) {
     onNodeClick,
     focusedId = null,
     focusedNeighborIds,
+    selectedId = null,
   } = props;
   // Stable identity for the "no focus" case so the callback memo deps don't
   // churn when the parent hasn't sent a set yet.
@@ -591,6 +599,35 @@ export function StellarGraph(props: StellarGraphProps) {
     );
   }, [focusedId, data]);
 
+  // B-62-focus-select-actions — selected node gets a *gentle* lookAt
+  // ease, NOT a full re-centre. PO directive: "관계행 클릭 → 즉시 그
+  // 노드로 자동 re-center" was disorienting; users lost their place.
+  // Now: when selectedId changes (and is distinct from focusedId), we
+  // keep the camera's eye position fixed and rotate the lookAt target
+  // toward the selected node over 500ms. The visual brightness tier
+  // does the heavy lifting; the camera just nudges. Use the existing
+  // 중심으로 button to do a full re-centre.
+  useEffect(() => {
+    if (!selectedId) return;
+    if (selectedId === focusedId) return; // collapsed tier, nothing to ease
+    const node = data.nodes.find((n) => n.id === selectedId) as
+      | (StellarNode & { x?: number; y?: number; z?: number })
+      | undefined;
+    if (!node) return;
+    const tx = node.x ?? 0;
+    const ty = node.y ?? 0;
+    const tz = node.z ?? 0;
+    if (tx === 0 && ty === 0 && tz === 0) return;
+    const handle = fgRef.current;
+    const camera = handle?.camera?.();
+    if (!handle?.cameraPosition || !camera) return;
+    handle.cameraPosition(
+      { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      { x: tx, y: ty, z: tz },
+      500,
+    );
+  }, [selectedId, focusedId, data]);
+
   // B-62-fix4 — imperative zoom step. Reads the current camera
   // direction from the live ref so it composes correctly with autoRotate
   // and user orbit; only the distance along the eye→origin axis changes.
@@ -699,13 +736,23 @@ export function StellarGraph(props: StellarGraphProps) {
       const factor = Math.min(0.95, 0.7 + vs * 0.25);
       const lifted = lift(base, factor);
       if (focusedId === null) return lifted;
-      // Focused: slightly brighter than its neighbours, but still capped
-      // so the focal node never blows out under bloom.
+      // B-62-focus-select-actions — three-tier hierarchy inside the
+      // focus subgraph:
+      //   focused      → brightest (anchor, factor + 0.10, capped at 1.0)
+      //   selected     → between focused and highlighted
+      //                  (factor + 0.05, capped at 1.0). Distinct from
+      //                  highlighted so "지금 고른 게 이거" is unambiguous.
+      //   highlighted  → 1-hop ring at the normal lifted factor
+      //   distant      → mixToDim
+      // When selectedId === focusedId the tier collapses to focused.
       if (focusedId === node.id) return lift(base, Math.min(1.0, factor + 0.1));
+      if (selectedId !== null && selectedId === node.id) {
+        return lift(base, Math.min(1.0, factor + 0.05));
+      }
       if (neighborSet.has(node.id)) return lifted;
       return mixToDim(lifted, 0.18);
     },
-    [focusedId, neighborSet],
+    [focusedId, neighborSet, selectedId],
   );
 
   // B-62-v1-fix1 — node size derives from graph degree only. Hover scale
@@ -732,12 +779,17 @@ export function StellarGraph(props: StellarGraphProps) {
       // hard floor makes every fact a clearly visible disc, then the
       // sqrt(importance) ramp still gives important nodes presence.
       const base = Math.max(2.0, 0.9 + Math.sqrt(importance));
+      // B-62-focus-select-actions — size mirrors the brightness tiers:
+      //   focused 1.6 > selected 1.4 > highlighted 1.25 > distant 1.0
+      // Selected sits clearly above highlighted on the geometry channel
+      // too, matching the colour-tier shift in nodeColor.
       let scale = 1;
       if (focusedId === node.id) scale = 1.6;
+      else if (selectedId !== null && selectedId === node.id) scale = 1.4;
       else if (focusedId !== null && neighborSet.has(node.id)) scale = 1.25;
       return base * scale;
     },
-    [focusedId, neighborSet],
+    [focusedId, neighborSet, selectedId],
   );
 
   // B-62-v1-fix1 — straight forward to the parent. We no longer hold a
