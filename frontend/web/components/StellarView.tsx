@@ -798,6 +798,7 @@ export interface StellarViewProps {
     focusedId?: string | null;
     focusedNeighborIds?: Set<string>;
     selectedId?: string | null;
+    viewResetTick?: number;
   }) => React.ReactElement;
   /** Test-mode override for the real-data adapter. */
   realLoader?: () => Promise<StellarGraphData>;
@@ -824,6 +825,12 @@ export function StellarView(props: StellarViewProps = {}) {
   // the focus subgraph growing as the user explores without losing
   // the anchor. Reset on focus change / focus clear / mode toggle.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  // B-62-clear-focus-home-lookat — monotonic counter, bumped whenever
+  // the user explicitly leaves a focus subgraph (× close / Esc /
+  // source toggle). The renderer reads it as a token to ease the
+  // camera's lookAt target back to the scene origin while preserving
+  // the user's eye position + orbit + zoom.
+  const [viewResetTick, setViewResetTick] = useState(0);
   const [realData, setRealData] = useState<StellarGraphData | null>(null);
   const [realLoading, setRealLoading] = useState(false);
   const realLoadedRef = useRef(false);
@@ -878,6 +885,9 @@ export function StellarView(props: StellarViewProps = {}) {
     setFocusHistory([]);
     setSelected(null);
     setExpandedIds(new Set());
+    // B-62-clear-focus-home-lookat — mode flip is a hard "back to
+    // overview" event, so restore the home lookAt too.
+    setViewResetTick((t) => t + 1);
   }, []);
 
   const handleHover = useCallback((node: StellarNode | null) => {
@@ -941,6 +951,11 @@ export function StellarView(props: StellarViewProps = {}) {
     setFocusHistory([]);
     setSelected(null);
     setExpandedIds(new Set());
+    // B-62-clear-focus-home-lookat — bump the reset tick so the
+    // renderer eases lookAt back to the home origin while keeping
+    // the user's eye position + orbit + wheel zoom intact. Fires for
+    // both × close and Escape (Esc calls this same handler below).
+    setViewResetTick((t) => t + 1);
   }, []);
 
   // B-62-v1 — Esc clears focus. Convenient escape hatch from a deep
@@ -1071,6 +1086,7 @@ export function StellarView(props: StellarViewProps = {}) {
           focusedId={focused?.id ?? null}
           focusedNeighborIds={focusedNeighborIds}
           selectedId={selected?.id ?? null}
+          viewResetTick={viewResetTick}
         />
       </div>
 

@@ -90,6 +90,14 @@ export interface StellarGraphProps {
    *  sits clearly above highlighted but does NOT re-centre the camera.
    *  When equal to focusedId, the tier collapses to "focused". */
   selectedId?: string | null;
+  /** B-62-clear-focus-home-lookat — incremented by the parent on every
+   *  explicit "go back to overview" trigger (focus panel × close,
+   *  Escape, source toggle). Acts as an effect-trigger token: when
+   *  the value rises, the renderer eases the camera's lookAt target
+   *  back to the scene origin while preserving the user's current
+   *  eye position and orbit/zoom. The home view's 균형 잡힌 중심점
+   *  is restored without yanking the user's framing. */
+  viewResetTick?: number;
 }
 
 // B-62-v1 — colour helpers used by the renderer hooks.
@@ -285,6 +293,7 @@ export function StellarGraph(props: StellarGraphProps) {
     focusedId = null,
     focusedNeighborIds,
     selectedId = null,
+    viewResetTick = 0,
   } = props;
   // Stable identity for the "no focus" case so the callback memo deps don't
   // churn when the parent hasn't sent a set yet.
@@ -729,6 +738,32 @@ export function StellarGraph(props: StellarGraphProps) {
       500,
     );
   }, [selectedId, focusedId, data]);
+
+  // B-62-clear-focus-home-lookat — restore the home lookAt without
+  // touching the eye position.
+  //
+  // PO repro: closing the focus panel left the camera looking AT the
+  // last-focused node, so the next orbit/wheel spun around the wrong
+  // pivot — the user's exploration centre was secretly gone. Now,
+  // when the parent bumps `viewResetTick`, we ease the lookAt target
+  // back to the scene origin (0,0,0) over 800ms WHILE keeping the
+  // camera's eye position exactly where the user left it. Result: the
+  // user's wheel-zoom and orbit-drag survive the reset; only the
+  // 균형 잡힌 중심점 returns to the origin where the full graph sits.
+  //
+  // We skip the very first tick (0) so the initial mount doesn't
+  // re-trigger the engine-ready camera setup.
+  useEffect(() => {
+    if (viewResetTick === 0) return;
+    const handle = fgRef.current;
+    const camera = handle?.camera?.();
+    if (!handle?.cameraPosition || !camera) return;
+    handle.cameraPosition(
+      { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      { x: 0, y: 0, z: 0 },
+      800,
+    );
+  }, [viewResetTick]);
 
   // B-62-fix4 — imperative zoom step. Reads the current camera
   // direction from the live ref so it composes correctly with autoRotate
