@@ -174,6 +174,15 @@ export function StellarGraph(props: StellarGraphProps) {
   const [zoom, setZoom] = useState(1.0);
   const INITIAL_DIST = 900;
 
+  // B-62-fix5 — explicit hover-scale state. Without this the only hover
+  // visual was whatever react-force-graph-3d's default does (which,
+  // observed by PO, manifested as the node "growing wildly" — likely a
+  // mesh-rebuild loop or camera dolly). We take control: on hover, the
+  // node gets a fixed 1.4× multiplier in `nodeSize`; on hover-out the
+  // id resets to null and every node returns to its base size. No
+  // accumulation, no per-frame drift.
+  const [hoveredId, setHoveredId] = useState<string | number | null>(null);
+
   // Observe container size so the canvas fills the parent fullscreen layout.
   useEffect(() => {
     const node = containerRef.current;
@@ -243,9 +252,12 @@ export function StellarGraph(props: StellarGraphProps) {
     // bloom contributes a tight glow around each node instead of a wide
     // blur. Threshold relaxed 0.6 → 0.55 to keep mid-tone teal nodes
     // genuinely bright, not anaemic.
+    // B-62-fix5 — bloom strength floored per PO directive ("0.1로 최대로
+    // 낮춰줘"). The radius/threshold tuning from fix4 stays; the goal is
+    // visibly distinct nodes that do NOT glow into the canvas.
     const composer = handle.postProcessingComposer?.();
     if (composer && typeof composer.addPass === 'function') {
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.8, 0.25, 0.55);
+      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.1, 0.25, 0.55);
       composer.addPass(bloom);
       bloomRef.current = bloom as UnrealBloomPass & BloomTargets;
       composerRef.current = composer as unknown as ComposerTargets;
@@ -411,9 +423,31 @@ export function StellarGraph(props: StellarGraphProps) {
     return CLUSTER_PALETTE[c % CLUSTER_PALETTE.length] ?? ACCENT;
   }, []);
 
-  const nodeSize = useCallback((node: StellarNode): number => {
-    return 1.2 + Math.sqrt(node.weight ?? 1);
-  }, []);
+  // B-62-fix5 — fixed 1.4× scale on hover. Capped, non-accumulating,
+  // resets when hoveredId returns to null. The base function stays a
+  // pure function of node.weight; hover only multiplies the result by
+  // 1.4 when the id matches.
+  const nodeSize = useCallback(
+    (node: StellarNode): number => {
+      const base = 1.2 + Math.sqrt(node.weight ?? 1);
+      return hoveredId === node.id ? base * 1.4 : base;
+    },
+    [hoveredId],
+  );
+
+  // B-62-fix5 — wrap the parent's hover callback so we can track the
+  // hovered id locally AND forward the event to StellarView (which
+  // positions the tooltip and updates the side drawer). Defining this
+  // INLINE keeps every hover event through a single React state
+  // transition (setHoveredId + parent setHovered, in the same tick),
+  // so there's no chance of feedback loops.
+  const handleHoverInternal = useCallback(
+    (node: StellarNode | null) => {
+      setHoveredId(node?.id ?? null);
+      onNodeHover?.(node);
+    },
+    [onNodeHover],
+  );
 
   // Tooltip text — react-force-graph reads `nodeLabel` to render the default
   // hover hint. Our parent component overlays a richer tooltip on top.
@@ -462,7 +496,7 @@ export function StellarGraph(props: StellarGraphProps) {
           linkDirectionalParticleWidth={1.1}
           enableNodeDrag={false}
           showNavInfo={false}
-          onNodeHover={onNodeHover}
+          onNodeHover={handleHoverInternal}
           onNodeClick={onNodeClick}
           /* B-62-fix2 — let the d3-force simulation settle after ~300
            * ticks so node positions stop drifting. PO repro showed nodes
@@ -481,6 +515,13 @@ export function StellarGraph(props: StellarGraphProps) {
       <div
         data-testid="stellar-zoom-controls"
         style={{
+          /* B-62-fix5 — z-index lifted 5 → 1000. PO repro: with z-index
+           * 5, react-force-graph-3d's canvas (default z 0, but a fresh
+           * stacking context once the dynamic import hydrates) was
+           * sitting OVER the zoom box on some browsers. Lifting well
+           * above any of StellarView's UI ribbons (toggle / status pill
+           * / drawer all stay under 100) makes the controls
+           * unconditionally visible. */
           position: 'absolute',
           right: 20,
           bottom: 20,
@@ -489,15 +530,16 @@ export function StellarGraph(props: StellarGraphProps) {
           alignItems: 'stretch',
           gap: 4,
           padding: 6,
-          background: 'rgba(13,20,23,0.78)',
+          background: 'rgba(13,20,23,0.92)',
           border: '1px solid #1d2b2f',
           borderRadius: 12,
           backdropFilter: 'blur(8px)',
           fontFamily: 'JetBrains Mono, monospace',
           color: '#cdd9da',
           fontSize: 12,
-          zIndex: 5,
+          zIndex: 1000,
           userSelect: 'none',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.5)',
         }}
       >
         <button
