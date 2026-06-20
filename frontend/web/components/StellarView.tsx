@@ -485,15 +485,26 @@ function FocusPanel({
   focused,
   relations,
   historyDepth,
+  selected,
   onBack,
-  onJump,
+  onSelect,
+  onExpand,
+  onCenter,
   onClose,
 }: {
   focused: StellarNode | null;
   relations: FocusRelation[];
   historyDepth: number;
+  /** B-62-focus-select-actions — currently inspected sub-node. Drives
+   *  the row highlight + the action footer. */
+  selected: StellarNode | null;
   onBack: () => void;
-  onJump: (node: StellarNode) => void;
+  /** Row click — sets selected, NO camera re-centre. */
+  onSelect: (node: StellarNode) => void;
+  /** 펼치기 action — add the node's 1-hop to the highlight ring. */
+  onExpand: (node: StellarNode) => void;
+  /** 중심으로 action — promote selected to a new focus (history push). */
+  onCenter: (node: StellarNode) => void;
   onClose: () => void;
 }) {
   if (!focused) return null;
@@ -609,20 +620,28 @@ function FocusPanel({
             관계 · {relations.length}
           </div>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {relations.slice(0, 50).map((rel, i) => (
+            {relations.slice(0, 50).map((rel, i) => {
+              const isRowSelected =
+                selected?.id === rel.other.id && selected.id !== focused?.id;
+              return (
               <li key={`${rel.other.id}-${i}`}>
                 <button
                   type="button"
                   data-testid="stellar-focus-relation-row"
-                  onClick={() => onJump(rel.other)}
+                  data-row-selected={isRowSelected ? 'true' : 'false'}
+                  onClick={() => onSelect(rel.other)}
                   style={{
                     display: 'flex',
                     width: '100%',
                     alignItems: 'center',
                     gap: 8,
                     padding: '6px 8px',
-                    background: 'transparent',
-                    border: '1px solid transparent',
+                    background: isRowSelected
+                      ? 'rgba(63,224,198,0.14)'
+                      : 'transparent',
+                    border: `1px solid ${
+                      isRowSelected ? '#3fe0c6' : 'transparent'
+                    }`,
                     borderRadius: 6,
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -630,10 +649,12 @@ function FocusPanel({
                     fontSize: 12,
                   }}
                   onMouseEnter={(e) => {
+                    if (isRowSelected) return;
                     e.currentTarget.style.background = 'rgba(63,224,198,0.06)';
                     e.currentTarget.style.borderColor = '#244448';
                   }}
                   onMouseLeave={(e) => {
+                    if (isRowSelected) return;
                     e.currentTarget.style.background = 'transparent';
                     e.currentTarget.style.borderColor = 'transparent';
                   }}
@@ -663,7 +684,8 @@ function FocusPanel({
                   </span>
                 </button>
               </li>
-            ))}
+              );
+            })}
             {relations.length > 50 ? (
               <li style={{ color: TEXT_DIM, fontSize: 11, padding: '4px 8px' }}>
                 +{relations.length - 50}개 더 (스크롤)
@@ -676,6 +698,87 @@ function FocusPanel({
           이 사실은 다른 사실과 연결되지 않았습니다.
         </div>
       )}
+      {/* B-62-focus-select-actions — action footer. Only renders when
+       *  selected is set AND is distinct from focused; otherwise the
+       *  "selected" concept is collapsed into "focused" and the user
+       *  doesn't need separate verbs. */}
+      {selected && selected.id !== focused.id ? (
+        <div
+          data-testid="stellar-focus-actions"
+          style={{
+            marginTop: 14,
+            paddingTop: 12,
+            borderTop: `1px solid ${PANEL_BORDER}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: TEXT_DIM,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}
+          >
+            선택됨
+          </div>
+          <div
+            data-testid="stellar-focus-selected-summary"
+            style={{
+              fontSize: 12,
+              color: TEXT_PRIMARY,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {selected.subject}
+            <span style={{ color: TEXT_DIM, margin: '0 4px' }}>→</span>
+            {selected.object}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              data-testid="stellar-focus-expand"
+              onClick={() => onExpand(selected)}
+              style={{
+                flex: 1,
+                background: 'rgba(63,224,198,0.08)',
+                border: '1px solid #244448',
+                color: ACCENT,
+                borderRadius: 8,
+                padding: '8px 10px',
+                fontSize: 12,
+                cursor: 'pointer',
+                fontFamily: 'Pretendard, sans-serif',
+              }}
+            >
+              펼치기
+            </button>
+            <button
+              type="button"
+              data-testid="stellar-focus-center"
+              onClick={() => onCenter(selected)}
+              style={{
+                flex: 1,
+                background: ACCENT,
+                border: `1px solid ${ACCENT}`,
+                color: '#06080b',
+                borderRadius: 8,
+                padding: '8px 10px',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'Pretendard, sans-serif',
+              }}
+            >
+              중심으로
+            </button>
+          </div>
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -694,6 +797,7 @@ export interface StellarViewProps {
     onNodeClick?: (n: StellarNode) => void;
     focusedId?: string | null;
     focusedNeighborIds?: Set<string>;
+    selectedId?: string | null;
   }) => React.ReactElement;
   /** Test-mode override for the real-data adapter. */
   realLoader?: () => Promise<StellarGraphData>;
@@ -711,6 +815,15 @@ export function StellarView(props: StellarViewProps = {}) {
   //   3. pushes the previous focus onto a history stack so "back" works.
   const [focused, setFocused] = useState<StellarNode | null>(null);
   const [focusHistory, setFocusHistory] = useState<StellarNode[]>([]);
+  // B-62-focus-select-actions — sub-selection inside the focus subgraph.
+  // Relation-row click sets selected (NOT focused); the camera eases
+  // lookAt without re-centring. Selected can be promoted to a new
+  // focus via the 중심으로 action button.
+  const [selected, setSelected] = useState<StellarNode | null>(null);
+  // Extra ids added to the highlight set by the 펼치기 action. Keeps
+  // the focus subgraph growing as the user explores without losing
+  // the anchor. Reset on focus change / focus clear / mode toggle.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [realData, setRealData] = useState<StellarGraphData | null>(null);
   const [realLoading, setRealLoading] = useState(false);
   const realLoadedRef = useRef(false);
@@ -763,6 +876,8 @@ export function StellarView(props: StellarViewProps = {}) {
     setHovered(null);
     setFocused(null);
     setFocusHistory([]);
+    setSelected(null);
+    setExpandedIds(new Set());
   }, []);
 
   const handleHover = useCallback((node: StellarNode | null) => {
@@ -776,6 +891,9 @@ export function StellarView(props: StellarViewProps = {}) {
   // B-62-v1 — click is now FOCUS. The handler pushes the previous focus
   // onto the history stack (only if it's actually changing — clicking the
   // already-focused node is a no-op for history).
+  // B-62-focus-select-actions — focusing also resets selected to the
+  // new anchor and clears the expanded set, so the highlight surface
+  // matches the new anchor's 1-hop ring exactly.
   const handleClick = useCallback(
     (node: StellarNode) => {
       setFocused((prev) => {
@@ -784,9 +902,25 @@ export function StellarView(props: StellarViewProps = {}) {
         }
         return node;
       });
+      setSelected(node);
+      setExpandedIds(new Set());
     },
     [],
   );
+
+  // B-62-focus-select-actions — relation-row click: set selected only.
+  // The camera eases lookAt in StellarGraph; nothing else moves.
+  const handleSelect = useCallback((node: StellarNode) => {
+    setSelected(node);
+  }, []);
+
+  // B-62-focus-select-actions — 펼치기. Adds the given node's 1-hop
+  // ring to the expanded set. Held in closure to access the live
+  // neighbor index lazily (declared below via useMemo).
+  const expandRef = useRef<(node: StellarNode) => void>(() => {});
+  const handleExpand = useCallback((node: StellarNode) => {
+    expandRef.current(node);
+  }, []);
 
   // B-62-v1 — focus pop / clear handlers.
   const handleBack = useCallback(() => {
@@ -797,12 +931,16 @@ export function StellarView(props: StellarViewProps = {}) {
       }
       const next = h.slice(0, -1);
       setFocused(h[h.length - 1] ?? null);
+      setSelected(h[h.length - 1] ?? null);
+      setExpandedIds(new Set());
       return next;
     });
   }, []);
   const handleClearFocus = useCallback(() => {
     setFocused(null);
     setFocusHistory([]);
+    setSelected(null);
+    setExpandedIds(new Set());
   }, []);
 
   // B-62-v1 — Esc clears focus. Convenient escape hatch from a deep
@@ -854,10 +992,33 @@ export function StellarView(props: StellarViewProps = {}) {
   // B-62-v1 — 1-hop relations for the focused node, materialised for the
   // side panel. Each relation carries the edge type (colour) + the other-
   // end node (clickable to chain-navigate). Empty when nothing is focused.
-  const focusedNeighborIds = useMemo<Set<string>>(
-    () => (focused ? neighborIndex.get(focused.id) ?? new Set() : new Set()),
-    [focused, neighborIndex],
-  );
+  // B-62-focus-select-actions — union the 1-hop ring with anything the
+  // user has 펼치기-ed so the highlight grows incrementally.
+  const focusedNeighborIds = useMemo<Set<string>>(() => {
+    if (!focused) return new Set();
+    const base = neighborIndex.get(focused.id) ?? new Set<string>();
+    if (expandedIds.size === 0) return base;
+    const out = new Set<string>(base);
+    for (const id of expandedIds) out.add(id);
+    return out;
+  }, [focused, neighborIndex, expandedIds]);
+
+  // B-62-focus-select-actions — bind the lazy expand closure now that
+  // we have the live neighborIndex. The 펼치기 button calls handleExpand
+  // → expandRef.current → this, which unions the node's 1-hop into the
+  // expanded set without disturbing focus.
+  useEffect(() => {
+    expandRef.current = (node: StellarNode) => {
+      const ring = neighborIndex.get(node.id);
+      if (!ring || ring.size === 0) return;
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        next.add(node.id);
+        for (const id of ring) next.add(id);
+        return next;
+      });
+    };
+  }, [neighborIndex]);
   const focusRelations = useMemo<FocusRelation[]>(() => {
     if (!focused) return [];
     const out: FocusRelation[] = [];
@@ -909,6 +1070,7 @@ export function StellarView(props: StellarViewProps = {}) {
           onNodeClick={handleClick}
           focusedId={focused?.id ?? null}
           focusedNeighborIds={focusedNeighborIds}
+          selectedId={selected?.id ?? null}
         />
       </div>
 
@@ -933,8 +1095,11 @@ export function StellarView(props: StellarViewProps = {}) {
         focused={focused}
         relations={focusRelations}
         historyDepth={focusHistory.length}
+        selected={selected}
         onBack={handleBack}
-        onJump={handleClick}
+        onSelect={handleSelect}
+        onExpand={handleExpand}
+        onCenter={handleClick}
         onClose={handleClearFocus}
       />
     </div>
