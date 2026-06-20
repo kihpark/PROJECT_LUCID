@@ -49,6 +49,19 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             "validation_method": {"type": "keyword"},
             "validator_id": {"type": "keyword"},
             "source_uids": {"type": "keyword"},
+            # B-62 data bedrock — OPL controlled-vocabulary predicate
+            # code. NULL on legacy facts captured before the OPL layer
+            # landed; new captures fill it via the canonical_key util.
+            "predicate_code": {"type": "keyword"},
+            # B-62 data bedrock — raw user surface text (the literal
+            # claim the user typed / pasted before normalization).
+            # Indexed with korean_analyzer so morpheme search hits the
+            # original phrasing even after `claim` is normalized.
+            "original_surface": {"type": "text", "analyzer": "korean_analyzer"},
+            # B-62 data bedrock — ISO 639-1 language code of the
+            # capture (e.g. "ko", "en"). Drives downstream cross-
+            # lingual fact collapse at the canonical-entity layer.
+            "capture_lang": {"type": "keyword"},
             "tags": {"type": "keyword"},
             "aliases": {"type": "text", "analyzer": "korean_analyzer"},
             "override_warning": {"type": "boolean"},
@@ -117,6 +130,22 @@ LUCID_OBJECTS_MAPPING: dict[str, Any] = {
                 "fields": {"keyword": {"type": "keyword"}},
             },
             "name_en": {"type": "text", "analyzer": "standard"},
+            # B-62 data bedrock — canonical primary label (additive
+            # alongside `name`). text + keyword sub-field so the
+            # Stellar-View renderer can do morpheme search AND exact
+            # dedup on the canonical surface. NULL on legacy objects.
+            "primary_label": {
+                "type": "text",
+                "analyzer": "korean_analyzer",
+                "fields": {"keyword": {"type": "keyword"}},
+            },
+            # B-62 data bedrock — ISO 639-1 language of `primary_label`.
+            # Drives cross-lingual canonical-entity collapse.
+            "primary_lang": {"type": "keyword"},
+            # B-62 data bedrock — canonical entity type (additive
+            # alongside `class`). NULL on legacy objects; the OPL
+            # vocabulary supplies the controlled value set later.
+            "entity_type": {"type": "keyword"},
             # B-52: surface-form aliases so a Korean query matches an
             # entity normalized into English (or vice versa). text with
             # korean_analyzer for substring / morpheme matching, plus a
