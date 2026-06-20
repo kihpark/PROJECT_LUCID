@@ -309,15 +309,21 @@ export function StellarGraph(props: StellarGraphProps) {
     // their pixel luminance over threshold 0.5 and bloom; weakly
     // validated facts (vs ~0.35) sit at base palette luminance and stay
     // as sharp points. radius 0.25 keeps the halo tight.
+    // B-62-fix-glow-clamp — bloom strength further reduced (0.4 → 0.3)
+    // and threshold raised (0.5 → 0.55). PO repro on v1: dense core
+    // nodes escalated to pure white during camera moves. With the
+    // ACESFilmic tone-mapping added on the renderer below, any residual
+    // bloom contribution rolls off softly instead of clipping — so the
+    // peaks stay identifiable even under accumulation pressure.
     const composer = handle.postProcessingComposer?.();
     if (composer && typeof composer.addPass === 'function') {
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.4, 0.25, 0.5);
+      const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 1024), 0.3, 0.25, 0.55);
       composer.addPass(bloom);
       bloomRef.current = bloom as UnrealBloomPass & BloomTargets;
       composerRef.current = composer as unknown as ComposerTargets;
     }
-    // Renderer reference for the per-frame buffer clear, the auto-clear
-    // guarantee, and the fix4 pixelRatio bump.
+    // Renderer setup — autoClear (existing), pixelRatio (existing), and
+    // ACESFilmic tone mapping (NEW in fix-glow-clamp).
     const renderer = handle.renderer?.();
     if (renderer) {
       renderer.autoClear = true;
@@ -329,6 +335,15 @@ export function StellarGraph(props: StellarGraphProps) {
       // Cap at 2 so we don't pay for 3× supersampling on phones.
       const dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
       renderer.setPixelRatio(Math.min(dpr, 2));
+      // B-62-fix-glow-clamp — ACESFilmic tone mapping. This is the load-
+      // bearing fix for PO's "흰색 포화" complaint. Without tone mapping
+      // every fragment > 1 in any channel clamps to 1 and we lose detail
+      // forever; with ACESFilmic, the curve rolls off so brightness
+      // peaks compress into the high-mid range, preserving local
+      // contrast even at peak bloom. Exposure 1.0 = neutral; we tune
+      // brightness via bloom strength and the lift cap, not exposure.
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
       rendererRef.current = renderer;
     }
 
@@ -443,6 +458,25 @@ export function StellarGraph(props: StellarGraphProps) {
     stars.visible = mode === 'synthetic';
   }, [mode]);
 
+  // B-62-fix-glow-clamp — keep the zoom readout in sync with the actual
+  // camera distance. The +/- buttons drive this directly via applyZoom,
+  // but the user can ALSO zoom with the mouse wheel (OrbitControls dolly)
+  // — that bypasses applyZoom, so the displayed scale stayed stuck. We
+  // poll the camera at 150ms (≈ 6Hz, fast enough to feel live, slow
+  // enough to avoid spamming setState during autoRotate). Only commits
+  // when the change exceeds 2% so React doesn't re-render every tick.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const camera = fgRef.current?.camera?.();
+      if (!camera) return;
+      const dist = camera.position.length();
+      if (!Number.isFinite(dist) || dist < 1) return;
+      const actualZoom = INITIAL_DIST / dist;
+      setZoom((prev) => (Math.abs(actualZoom - prev) > 0.02 ? actualZoom : prev));
+    }, 150);
+    return () => window.clearInterval(id);
+  }, []);
+
   // B-62-fix4 — imperative zoom step. Reads the current camera
   // direction from the live ref so it composes correctly with autoRotate
   // and user orbit; only the distance along the eye→origin axis changes.
@@ -498,16 +532,27 @@ export function StellarGraph(props: StellarGraphProps) {
   //      while thin facts stay as sharp but un-bloomed points.
   //   3. focus dim — when the user has focused a node, distant nodes
   //      blend toward the dark background so the 1-hop subgraph stands out.
+  // B-62-fix-glow-clamp — emissive lift now CAPPED.
+  // Previous (v1): `lift(base, 0.6 + vs * 0.5)` → max factor 1.1, which
+  // pushed luminance peaks above 1.0 and clipped to white once the bloom
+  // pass added on top. New formula: `min(0.95, 0.5 + vs * 0.35)` → max
+  // factor 0.85 for a fully validated fact. The cluster colour stays the
+  // dominant signal; the validation channel just brightens it modestly.
+  // Combined with ACESFilmic tone mapping, no single pixel can saturate
+  // to (1,1,1) — peaks roll off, peaks stay identifiable.
   const nodeColor = useCallback(
     (node: StellarNode): string => {
       const base =
         CLUSTER_PALETTE[(node.cluster ?? 0) % CLUSTER_PALETTE.length] ?? ACCENT;
       const vs = node.validationStrength ?? 0.5;
-      const lifted = lift(base, 0.6 + vs * 0.5);
+      const factor = Math.min(0.95, 0.5 + vs * 0.35);
+      const lifted = lift(base, factor);
       if (focusedId === null) return lifted;
-      if (focusedId === node.id) return lift(base, 1.05); // focused = brightest
-      if (neighborSet.has(node.id)) return lifted;        // neighbour = full
-      return mixToDim(lifted, 0.18);                       // distant = dim
+      // Focused: slightly brighter than its neighbours, but still capped
+      // so the focal node never blows out under bloom.
+      if (focusedId === node.id) return lift(base, Math.min(1.0, factor + 0.1));
+      if (neighborSet.has(node.id)) return lifted;
+      return mixToDim(lifted, 0.18);
     },
     [focusedId, neighborSet],
   );
