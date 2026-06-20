@@ -227,13 +227,11 @@ export function StellarGraph(props: StellarGraphProps) {
   const INITIAL_DIST = 900;
 
   // B-62-fix5 — explicit hover-scale state. Without this the only hover
-  // visual was whatever react-force-graph-3d's default does (which,
-  // observed by PO, manifested as the node "growing wildly" — likely a
-  // mesh-rebuild loop or camera dolly). We take control: on hover, the
-  // node gets a fixed 1.4× multiplier in `nodeSize`; on hover-out the
-  // id resets to null and every node returns to its base size. No
-  // accumulation, no per-frame drift.
-  const [hoveredId, setHoveredId] = useState<string | number | null>(null);
+  // B-62-v1-fix1 — hoveredId state was removed because keeping it caused
+  // the nodeSize callback's deps to churn every hover (see nodeSize
+  // comment further down). The hover visual now lives only in the parent
+  // tooltip; the renderer is hover-agnostic. The parent still gets the
+  // hover signal through onNodeHover.
 
   // Observe container size so the canvas fills the parent fullscreen layout.
   useEffect(() => {
@@ -514,11 +512,22 @@ export function StellarGraph(props: StellarGraphProps) {
     [focusedId, neighborSet],
   );
 
-  // B-62-v1 — node size derives from graph degree (connection count), per
-  // the spec ("노드 크기 = 중요도"). Falls back to legacy `weight` for
-  // backward compatibility with any test fixture that hasn't been
-  // re-baked. Hover/focus add a fixed multiplier on top — capped,
-  // non-accumulating, resets when state clears.
+  // B-62-v1-fix1 — node size derives from graph degree only. Hover scale
+  // is REMOVED from this callback path.
+  //
+  // PO repro: hovering different nodes made the entire canvas "zoom in"
+  // continuously. Root cause: this callback's dep list included
+  // `hoveredId`, so the function reference churned every hover. The
+  // underlying react-force-graph-3d wrapper treats nodeVal as a stable
+  // signal — when its reference changes, three.js re-feeds the d3-force
+  // simulation. Each reheat re-spreads the cluster slightly outward
+  // while the camera holds, producing the apparent zoom-in.
+  //
+  // The hover visual now lives entirely in the cursor tooltip (HoverTooltip
+  // in StellarView), which matches the v1 spec "hover = 가벼운 미리보기".
+  // Focus signals stay in the deps — focus changes are rare and
+  // intentional (click only), so the reheat there is acceptable and
+  // actually helps re-balance the focal subgraph.
   const nodeSize = useCallback(
     (node: StellarNode): number => {
       const importance = node.degree ?? node.weight ?? 1;
@@ -526,25 +535,15 @@ export function StellarGraph(props: StellarGraphProps) {
       let scale = 1;
       if (focusedId === node.id) scale = 1.6;
       else if (focusedId !== null && neighborSet.has(node.id)) scale = 1.25;
-      if (hoveredId === node.id) scale = Math.max(scale, 1.4);
       return base * scale;
     },
-    [hoveredId, focusedId, neighborSet],
+    [focusedId, neighborSet],
   );
 
-  // B-62-fix5 — wrap the parent's hover callback so we can track the
-  // hovered id locally AND forward the event to StellarView (which
-  // positions the tooltip and updates the side drawer). Defining this
-  // INLINE keeps every hover event through a single React state
-  // transition (setHoveredId + parent setHovered, in the same tick),
-  // so there's no chance of feedback loops.
-  const handleHoverInternal = useCallback(
-    (node: StellarNode | null) => {
-      setHoveredId(node?.id ?? null);
-      onNodeHover?.(node);
-    },
-    [onNodeHover],
-  );
+  // B-62-v1-fix1 — straight forward to the parent. We no longer hold a
+  // local hover id; the renderer is hover-agnostic and only StellarView's
+  // HoverTooltip reacts to onNodeHover events.
+  const handleHoverInternal = onNodeHover ?? undefined;
 
   // Tooltip text — react-force-graph reads `nodeLabel` to render the default
   // hover hint. Our parent component overlays a richer tooltip on top.
@@ -612,14 +611,16 @@ export function StellarGraph(props: StellarGraphProps) {
       <div
         data-testid="stellar-zoom-controls"
         style={{
-          /* B-62-fix5 — z-index lifted 5 → 1000. PO repro: with z-index
-           * 5, react-force-graph-3d's canvas (default z 0, but a fresh
-           * stacking context once the dynamic import hydrates) was
-           * sitting OVER the zoom box on some browsers. Lifting well
-           * above any of StellarView's UI ribbons (toggle / status pill
-           * / drawer all stay under 100) makes the controls
-           * unconditionally visible. */
-          position: 'absolute',
+          /* B-62-v1-fix1 — viewport-fixed positioning (was absolute
+           * inside the graph container). PO repro: still invisible
+           * after fix5's z-index 1000 lift — the dynamic-imported
+           * ForceGraph3D wrapper creates its own stacking context that
+           * the parent's absolute child can't reliably escape. `fixed`
+           * leaves the entire stacking-context graph and pins to the
+           * viewport. z-index lifted further (1000 → 10000) so even
+           * AppShell ribbons and any modal-portal layers cannot cover
+           * it. Visually identical to before — same right:20, bottom:20. */
+          position: 'fixed',
           right: 20,
           bottom: 20,
           display: 'flex',
@@ -634,7 +635,7 @@ export function StellarGraph(props: StellarGraphProps) {
           fontFamily: 'JetBrains Mono, monospace',
           color: '#cdd9da',
           fontSize: 12,
-          zIndex: 1000,
+          zIndex: 10000,
           userSelect: 'none',
           boxShadow: '0 6px 18px rgba(0,0,0,0.5)',
         }}
