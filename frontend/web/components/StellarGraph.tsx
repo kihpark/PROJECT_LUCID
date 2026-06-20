@@ -225,6 +225,17 @@ export function StellarGraph(props: StellarGraphProps) {
   // so the user can't dolly past the cluster or out into the starfield.
   const [zoom, setZoom] = useState(1.0);
   const INITIAL_DIST = 900;
+  // B-62-fix-zoom-reset — single-shot guard for handleEngineReady. PO
+  // repro: wheel zoom snapped back to ~1.0× within ~150ms. Root cause:
+  // the ForceGraph3D `ref` was an INLINE arrow, so React re-evaluated
+  // it every render. Every time the wheel-poll `setInterval` below
+  // committed a new `zoom` value (which happens whenever the user
+  // dollies), React detached the old ref (fgRef ← null) and attached
+  // the new one (fgRef ← node, then `if (node) handleEngineReady()`).
+  // That re-invocation contained `cameraPosition({z:900})` and reset
+  // the camera, erasing the user's dolly. The guard makes the engine-
+  // ready setup truly idempotent — it runs once per mount.
+  const initializedRef = useRef(false);
 
   // B-62-fix5 — explicit hover-scale state. Without this the only hover
   // B-62-v1-fix1 — hoveredId state was removed because keeping it caused
@@ -248,9 +259,15 @@ export function StellarGraph(props: StellarGraphProps) {
   }, []);
 
   // One-time scene wiring: bloom pass + starfield + camera config.
+  // B-62-fix-zoom-reset — early-return when already initialised so
+  // subsequent ref re-attaches (caused by ANY React re-render under
+  // the inline ref callback pattern below) do NOT reset the camera or
+  // double-add the bloom pass.
   const handleEngineReady = useCallback(() => {
     const handle = fgRef.current;
     if (!handle) return;
+    if (initializedRef.current) return;
+    initializedRef.current = true;
 
     // B-62-fix2 — bloom tuning + reference capture.
     //
@@ -594,6 +611,21 @@ export function StellarGraph(props: StellarGraphProps) {
   // hover hint. Our parent component overlays a richer tooltip on top.
   const labelOf = useCallback((node: StellarNode): string => node.label, []);
 
+  // B-62-fix-zoom-reset — stable ref callback. Even with the
+  // single-shot guard inside handleEngineReady, an inline arrow as
+  // `ref={...}` makes React detach/attach the ref every render, which
+  // briefly sets `fgRef.current = null`. That null window broke the
+  // wheel-poll interval (it sees no camera for one tick) and triggered
+  // visual flicker in the focus subgraph. Memoising the callback
+  // eliminates the detach/attach churn entirely.
+  const attachRef = useCallback(
+    (node: unknown) => {
+      fgRef.current = node as ForceGraphRefHandle | null;
+      if (node) handleEngineReady();
+    },
+    [handleEngineReady],
+  );
+
   // The component is too tall to be useful without an explicit height — fill parent.
   return (
     <div
@@ -609,10 +641,7 @@ export function StellarGraph(props: StellarGraphProps) {
     >
       {size.w > 0 && size.h > 0 ? (
         <ForceGraph3D
-          ref={(node: unknown) => {
-            fgRef.current = node as ForceGraphRefHandle | null;
-            if (node) handleEngineReady();
-          }}
+          ref={attachRef}
           graphData={data}
           width={size.w}
           height={size.h}
