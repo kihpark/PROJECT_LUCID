@@ -229,7 +229,22 @@ export function StellarGraph(props: StellarGraphProps) {
   // (900 in scene units). >1 = closer, <1 = farther. Clamped to [0.25, 4]
   // so the user can't dolly past the cluster or out into the starfield.
   const [zoom, setZoom] = useState(1.0);
-  const INITIAL_DIST = 900;
+  // B-62-search-legibility — INITIAL_DIST is now data-aware. A 65-node
+  // real graph at fixed 900 looked like a dust speck. Smooth ramp from
+  // 180 (cold start) up to 900 (full 3k synthetic galaxy) so the camera
+  // auto-fits to whatever's there. Held in a ref so the zoom-poll +
+  // applyZoom paths see the latest value without forcing re-renders.
+  const initialDistRef = useRef(900);
+  // Derive the dist once per data swap and stash in the ref. The
+  // handleEngineReady single-shot guard means this only affects the
+  // camera at first mount; subsequent toggles/refetches update the
+  // zoom-readout reference frame but do not snap the camera.
+  useEffect(() => {
+    const n = data.nodes.length;
+    initialDistRef.current = Math.round(
+      Math.max(180, Math.min(900, 30 + 18 * Math.sqrt(n))),
+    );
+  }, [data]);
   // B-62-fix-zoom-reset — single-shot guard for handleEngineReady. PO
   // repro: wheel zoom snapped back to ~1.0× within ~150ms. Root cause:
   // the ForceGraph3D `ref` was an INLINE arrow, so React re-evaluated
@@ -407,8 +422,13 @@ export function StellarGraph(props: StellarGraphProps) {
       controls.dampingFactor = 0.08;
     }
 
-    // Initial camera pull-back so the user sees the whole galaxy on first paint.
-    handle.cameraPosition?.({ x: 0, y: 0, z: 900 }, { x: 0, y: 0, z: 0 }, 0);
+    // B-62-search-legibility — pull-back uses data-aware initial dist
+    // so a 65-node real graph doesn't open as dust at z=900.
+    handle.cameraPosition?.(
+      { x: 0, y: 0, z: initialDistRef.current },
+      { x: 0, y: 0, z: 0 },
+      0,
+    );
   }, []);
 
   // Per-frame tick. Two duties:
@@ -506,11 +526,42 @@ export function StellarGraph(props: StellarGraphProps) {
       if (!camera) return;
       const dist = camera.position.length();
       if (!Number.isFinite(dist) || dist < 1) return;
-      const actualZoom = INITIAL_DIST / dist;
+      const actualZoom = initialDistRef.current / dist;
       setZoom((prev) => (Math.abs(actualZoom - prev) > 0.02 ? actualZoom : prev));
     }, 150);
     return () => window.clearInterval(id);
   }, []);
+
+  // B-62-search-legibility — fly camera to the focused node. Triggers
+  // on focus changes from both click AND the new search bar. The
+  // simulation may not have settled when this fires, in which case
+  // node.x/y/z default to 0; we guard against the all-zero case so
+  // the camera stays put rather than teleporting to the origin.
+  useEffect(() => {
+    if (!focusedId) return;
+    const node = data.nodes.find((n) => n.id === focusedId) as
+      | (StellarNode & { x?: number; y?: number; z?: number })
+      | undefined;
+    if (!node) return;
+    const x = node.x ?? 0;
+    const y = node.y ?? 0;
+    const z = node.z ?? 0;
+    if (x === 0 && y === 0 && z === 0) return;
+    const handle = fgRef.current;
+    if (!handle?.cameraPosition) return;
+    // Pull back along the node's outward direction so the focal node
+    // sits in the centre of the view with its 1-hop neighbours visible.
+    // Use a distance scaled to the data so small graphs don't dolly too
+    // far. 1.2× node-radius from origin gives a tight but workable frame.
+    const len = Math.sqrt(x * x + y * y + z * z) || 1;
+    const dollyOut = 90;
+    const k = (len + dollyOut) / len;
+    handle.cameraPosition(
+      { x: x * k, y: y * k, z: z * k },
+      { x, y, z },
+      900,
+    );
+  }, [focusedId, data]);
 
   // B-62-fix4 — imperative zoom step. Reads the current camera
   // direction from the live ref so it composes correctly with autoRotate
@@ -524,7 +575,7 @@ export function StellarGraph(props: StellarGraphProps) {
     const dir = camera.position.clone();
     if (dir.lengthSq() === 0) dir.set(0, 0, 1);
     dir.normalize();
-    const newDist = INITIAL_DIST / clamped;
+    const newDist = initialDistRef.current / clamped;
     const target = dir.multiplyScalar(newDist);
     handle.cameraPosition(
       { x: target.x, y: target.y, z: target.z },
@@ -580,7 +631,14 @@ export function StellarGraph(props: StellarGraphProps) {
       const base =
         CLUSTER_PALETTE[(node.cluster ?? 0) % CLUSTER_PALETTE.length] ?? ACCENT;
       const vs = node.validationStrength ?? 0.5;
-      const factor = Math.min(0.95, 0.5 + vs * 0.35);
+      // B-62-search-legibility — brightness floor 0.7. PO directive:
+      // node luminance should sit clearly above the background-star
+      // floor (~0.108) and close to the bloom threshold (0.55) so even
+      // dim facts read as "validated star" not "noise". Min factor
+      // 0.725 × teal-luminance 0.73 ≈ 0.53 (right at threshold for a
+      // hint of glow). Max stays 0.95 to keep the ACES + emissive cap
+      // safety net intact (PO: tone mapping, glow cap unchanged).
+      const factor = Math.min(0.95, 0.7 + vs * 0.25);
       const lifted = lift(base, factor);
       if (focusedId === null) return lifted;
       // Focused: slightly brighter than its neighbours, but still capped
@@ -611,7 +669,11 @@ export function StellarGraph(props: StellarGraphProps) {
   const nodeSize = useCallback(
     (node: StellarNode): number => {
       const importance = node.degree ?? node.weight ?? 1;
-      const base = 0.9 + Math.sqrt(importance);
+      // B-62-search-legibility — size floor 2.0. Sparse-degree real
+      // facts (degree 0–2) were sub-pixel against the starfield; a
+      // hard floor makes every fact a clearly visible disc, then the
+      // sqrt(importance) ramp still gives important nodes presence.
+      const base = Math.max(2.0, 0.9 + Math.sqrt(importance));
       let scale = 1;
       if (focusedId === node.id) scale = 1.6;
       else if (focusedId !== null && neighborSet.has(node.id)) scale = 1.25;

@@ -273,13 +273,150 @@ const EDGE_LABEL_KO: Record<EdgeType, string> = {
   contradicts: '반박',
 };
 
+// ---------------------------------------------------------------------------
+// B-62-search-legibility — top-left search bar.
+//
+// Matches against node.label + node.subject + node.object (substring,
+// case-insensitive). Selecting a result calls onSelect(node), which the
+// parent wires into the existing focus handler so the camera flies to
+// the node and the side panel opens. Empty input → no-op.
+// ---------------------------------------------------------------------------
+
+function SearchBar({
+  data,
+  onSelect,
+}: {
+  data: StellarGraphData;
+  onSelect: (node: StellarNode) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const matches = useMemo<StellarNode[]>(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const seen = new Set<string>();
+    const out: StellarNode[] = [];
+    for (const node of data.nodes) {
+      if (out.length >= 10) break;
+      const hay = `${node.label} ${node.subject} ${node.object}`.toLowerCase();
+      if (!hay.includes(q)) continue;
+      if (seen.has(node.id)) continue;
+      seen.add(node.id);
+      out.push(node);
+    }
+    return out;
+  }, [query, data]);
+
+  return (
+    <div
+      data-testid="stellar-search"
+      style={{
+        position: 'absolute',
+        top: 16,
+        left: 16,
+        zIndex: 30,
+        width: 280,
+        fontFamily: 'Pretendard, sans-serif',
+      }}
+    >
+      <input
+        data-testid="stellar-search-input"
+        type="search"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="노드 검색 (subject · object)"
+        style={{
+          width: '100%',
+          padding: '8px 10px',
+          background: 'rgba(13,20,23,0.85)',
+          border: `1px solid ${PANEL_BORDER}`,
+          borderRadius: 8,
+          color: TEXT_PRIMARY,
+          fontSize: 13,
+          outline: 'none',
+        }}
+      />
+      {open && matches.length > 0 ? (
+        <ul
+          data-testid="stellar-search-results"
+          style={{
+            listStyle: 'none',
+            padding: 4,
+            margin: '6px 0 0',
+            background: PANEL_BG,
+            border: `1px solid ${PANEL_BORDER}`,
+            borderRadius: 8,
+            maxHeight: 320,
+            overflowY: 'auto',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          {matches.map((node) => (
+            <li key={node.id}>
+              <button
+                type="button"
+                data-testid="stellar-search-result"
+                onMouseDown={(e) => {
+                  // onMouseDown so the click registers before the input
+                  // blur handler closes the dropdown.
+                  e.preventDefault();
+                  onSelect(node);
+                  setQuery('');
+                  setOpen(false);
+                }}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  background: 'transparent',
+                  border: '1px solid transparent',
+                  borderRadius: 6,
+                  padding: '6px 8px',
+                  cursor: 'pointer',
+                  color: TEXT_BODY,
+                  fontSize: 12,
+                  display: 'block',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(63,224,198,0.08)';
+                  e.currentTarget.style.borderColor = '#244448';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = 'transparent';
+                }}
+              >
+                <span style={{ color: ACCENT, fontWeight: 600 }}>
+                  {node.subject}
+                </span>
+                <span style={{ color: TEXT_DIM, margin: '0 4px' }}>·</span>
+                <span>{node.object}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function EdgeLegend({ mode }: { mode: StellarSource }) {
   return (
     <div
       data-testid="stellar-edge-legend"
       style={{
         position: 'absolute',
-        top: 16,
+        // B-62-search-legibility — bumped down so the new SearchBar at
+        // top:16 left:16 has clearance. Same column, just stacks below.
+        top: 80,
         left: 16,
         zIndex: 10,
         padding: '10px 12px',
@@ -515,8 +652,14 @@ function FocusPanel({
                   <span style={{ color: TEXT_DIM, fontSize: 10, width: 24 }}>
                     {rel.direction === 'out' ? '→' : '←'}
                   </span>
+                  {/* B-62-search-legibility — show subject → object so
+                   *  "국방부 → 국방부" rows become distinguishable (each
+                   *  fact's object_value is different). Display-only
+                   *  (canonicalization tracked separately under DR-086). */}
                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {rel.other.subject}
+                    <span style={{ color: TEXT_DIM, margin: '0 4px' }}>→</span>
+                    {rel.other.object}
                   </span>
                 </button>
               </li>
@@ -770,6 +913,10 @@ export function StellarView(props: StellarViewProps = {}) {
       </div>
 
       <SourceToggle source={source} onChange={handleToggle} />
+      {/* B-62-search-legibility — search wires straight into handleClick
+       *  so selection enters the existing focus mode (camera fly-to from
+       *  StellarGraph + 1-hop dim + side panel + relations chain). */}
+      <SearchBar data={activeData} onSelect={handleClick} />
       <EdgeLegend mode={source} />
 
       {realIsEmpty ? <ColdStartHint /> : null}
