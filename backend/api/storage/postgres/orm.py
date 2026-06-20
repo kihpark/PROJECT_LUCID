@@ -437,6 +437,9 @@ __all__ = [
     "NegationLog",
     "ContradictionLog",
     "SourceJobORM",
+    "Predicate",
+    "Tag",
+    "FactRelation",
 ]
 
 
@@ -572,4 +575,91 @@ class ValidationLog(Base):
     )
     decision_metadata: Mapped[dict | None] = mapped_column(
         JSONB, nullable=True,
+    )
+
+
+class Predicate(Base):
+    """B-62 data bedrock — OPL controlled-vocabulary predicate.
+
+    The Object-Predicate-Literal (OPL) layer constrains every fact's
+    predicate to a stable code from this table so multilingual labels
+    (`label_ko`, `label_en`) and canonical S-P-O keys remain stable
+    across surface forms. `sort_order` drives Stellar-View predicate
+    grouping; new codes append with a higher sort_order rather than
+    re-shuffling existing rows.
+    """
+
+    __tablename__ = "predicates"
+
+    code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    label_ko: Mapped[str] = mapped_column(String(120), nullable=False)
+    label_en: Mapped[str] = mapped_column(String(120), nullable=False)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+
+class Tag(Base):
+    """B-62 data bedrock — hashtag taxonomy (facet / cluster / nebula axis).
+
+    Tags are user-mintable labels attached to facts; the Stellar-View
+    nebula renderer groups facts by tag and the recall facet filter
+    surfaces them as multi-select chips. `color` is optional (hex
+    triplet or alias) so the UI can theme rendered tag pills.
+    """
+
+    __tablename__ = "tags"
+
+    tag_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    label: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+
+class FactRelation(Base):
+    """B-62 data bedrock / B-54 scaffold — typed edges between facts.
+
+    Schema-only in this PR; no call-site populates the table yet.
+    `relation_type` is one of SUPPORTS / CONTRADICTS / CAUSES /
+    ELABORATES (validated at the API layer, not as a CHECK constraint,
+    so B-54 can extend the vocabulary without a migration).
+    Corroboration counters drive the future "trusted edge" UI:
+    `source_count` is the number of independent source captures,
+    `source_diversity` is the number of distinct domains.
+    """
+
+    __tablename__ = "fact_relations"
+
+    relation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    from_fact_uid: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True,
+    )
+    to_fact_uid: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True,
+    )
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    corroboration_source_count: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False,
+    )
+    corroboration_source_diversity: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
     )
