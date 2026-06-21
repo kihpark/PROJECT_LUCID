@@ -360,6 +360,21 @@ def _coerce_fact_to_factnode(
         fact_type = FactType(raw_type)
     except ValueError:
         fact_type = FactType.PROPOSITION
+    # B-62 structure-resolve: surface canonical fields onto the FactNode
+    # so the persisted ES doc carries predicate_code / original_surface
+    # / capture_lang / object_canonical / canonical_key / needs_review.
+    # When the structure stage did not annotate these (legacy paths),
+    # the fields stay None and the recall display path keeps reading
+    # the surface fields exactly as before.
+    canonical_kwargs: dict[str, Any] = {}
+    for canon_field in (
+        "predicate_code", "original_surface", "capture_lang",
+        "object_canonical", "canonical_key",
+    ):
+        if meta.get(canon_field):
+            canonical_kwargs[canon_field] = meta[canon_field]
+    if meta.get("needs_review"):
+        canonical_kwargs["needs_review"] = bool(meta["needs_review"])
     return FactNode(
         fact_uid=meta["fact_uid"] if "fact_uid" in meta else meta["uid"],
         claim=claim,
@@ -373,6 +388,7 @@ def _coerce_fact_to_factnode(
         source_uids=[source_uid] if source_uid else [],
         negation_flag=bool(meta.get("negation_flag", False)),
         negation_scope=meta.get("negation_scope"),
+        **canonical_kwargs,
     )
 
 

@@ -50,9 +50,11 @@ from api.storage.elasticsearch.embeddings import get_embedding
 from api.storage.postgres.orm import SourceJobORM
 from api.storage.postgres.session import make_sessionmaker
 from api.structure.decomposer import decompose
+from api.structure.entity_resolver import _detect_lang
 from api.structure.link_creator import LinkCreationResult, create_links
 from api.structure.models import StructureFact, StructureObject, StructureResult
 from api.structure.object_matcher import MatchResult, match_or_create_object
+from api.structure.predicate_mapper import map_predicate_to_opl
 
 logger = logging.getLogger("lucid.structure.processor")
 
@@ -279,6 +281,22 @@ def _serialize_struct_fact(
             and obj_val in uid_map
         ):
             d["object_value"] = uid_map[obj_val]
+    # B-62 structure-resolve: enrich the JSONB fact with canonical
+    # fields so validate.py persists them via insert_or_dedup_fact.
+    raw_predicate = d.get("predicate") or ""
+    opl_code, needs_review = map_predicate_to_opl(raw_predicate)
+    d["predicate_code"] = opl_code
+    d["original_surface"] = raw_predicate
+    d["needs_review"] = bool(needs_review)
+    # capture_lang is a per-fact best-effort guess; the processor
+    # overrides it with a job-level detected lang in the metadata
+    # stamp. We seed it here so older readers see a non-null value.
+    d.setdefault(
+        "capture_lang", _detect_lang(d.get("claim") or d.get("object_value") or ""),
+    )
+    # tags carries the LLM's tags_suggested when present (we don't
+    # synthesize tags in this PR; real tagging is a later ticket).
+    d.setdefault("tags", list(d.get("tags_suggested") or []))
     return d
 
 
