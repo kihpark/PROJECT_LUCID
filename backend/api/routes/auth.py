@@ -1,7 +1,9 @@
-"""POST /api/auth/{register, login, logout} + GET /api/auth/me — Sprint 1B / B-61.
+"""POST /api/auth/{login, logout} + GET /api/auth/me — Sprint 1B / B-61.
 
-Register creates User + Personal KnowledgeSpace + UserSettings in
-one Postgres transaction and returns a JWT for the new user.
+Public self-register was removed in B-61-fix-admission. New accounts
+are provisioned by an admin via /api/admin/applications/{id}/approve
+(see api/routes/admin_applications.py). Login + logout + /me still
+live here and serve the same shape they always have.
 
 Logout is a stateless client-side discard in beta. The endpoint
 exists so the frontend has a target to call, but the server cannot
@@ -18,24 +20,19 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from api.models.auth import (
     LoginRequest,
     MeResponse,
-    RegisterRequest,
-    RegisterResponse,
     TokenResponse,
-    UserPublic,
 )
 from api.security import (
     create_access_token,
     get_current_user,
-    hash_password,
     verify_password,
 )
 from api.storage.elasticsearch.facts import count_active_facts
-from api.storage.postgres.orm import KnowledgeSpace, User, UserSettings
+from api.storage.postgres.orm import KnowledgeSpace, User
 from api.storage.postgres.session import make_sessionmaker
 
 logger = logging.getLogger("lucid.routes.auth")
@@ -53,64 +50,6 @@ def _expires_in_seconds() -> int:
         return int(raw) * 60
     except ValueError:
         return 43200 * 60
-
-
-@router.post(
-    "/register",
-    response_model=RegisterResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def register(req: RegisterRequest) -> RegisterResponse:
-    """Create a User + Personal KnowledgeSpace + default UserSettings.
-
-    Returns 409 if the email is already registered.
-    """
-    session = _new_session()
-    try:
-        user = User(
-            email=str(req.email),
-            name=req.name,
-            password_hash=hash_password(req.password),
-        )
-        session.add(user)
-        try:
-            session.flush()
-        except IntegrityError as exc:
-            session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="email_already_registered",
-            ) from exc
-
-        space = KnowledgeSpace(
-            user_id=user.id,
-            type="personal",
-            name=req.name or "Personal",
-        )
-        session.add(space)
-
-        settings = UserSettings(
-            user_id=user.id,
-            validation_mode="quick",
-            surface_on_by_default=True,
-        )
-        session.add(settings)
-
-        session.commit()
-        session.refresh(user)
-        session.refresh(space)
-
-        token = create_access_token(user.id)
-        return RegisterResponse(
-            user=UserPublic(
-                id=str(user.id), email=user.email, name=user.name
-            ),
-            space_id=str(space.id),
-            access_token=token,
-            expires_in=_expires_in_seconds(),
-        )
-    finally:
-        session.close()
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -167,7 +106,7 @@ def get_me(user: User = Depends(get_current_user)) -> MeResponse:
 
     - `default_space_id`: the user's first personal KnowledgeSpace
       (ordered by created_at). Always present in practice because
-      /register auto-creates one; we still return `None` for safety.
+      admin admission auto-creates one; we still return `None` for safety.
     - `is_new_user`: True when the user was created within the last
       7 days AND their default space holds zero non-retracted facts.
       The frontend uses this to gate the personalised welcome line
@@ -220,6 +159,7 @@ def get_me(user: User = Depends(get_current_user)) -> MeResponse:
             display_name=user.name,
             default_space_id=default_space_id_str,
             is_new_user=is_new_user,
+            is_admin=user.is_admin,
         )
     finally:
         session.close()

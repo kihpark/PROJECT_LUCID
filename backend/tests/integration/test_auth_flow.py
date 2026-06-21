@@ -1,9 +1,14 @@
-"""Integration: full Sprint 1B HTTP flow against a live Postgres."""
+"""Integration: full Sprint 1B HTTP flow against a live Postgres.
+
+B-61-fix-admission: the public /api/auth/register endpoint was
+removed. Bootstrap users via the ORM helper (see conftest.create_user_via_orm)
+and exercise the login / logout / settings path.
+"""
 from __future__ import annotations
 
-import os
-
 import pytest
+
+from tests.integration.conftest import create_user_via_orm
 
 pytestmark = pytest.mark.integration
 
@@ -47,25 +52,37 @@ def fresh_email():
     return f"user-{uuid.uuid4().hex[:8]}@lucid.example"
 
 
-def test_register_creates_personal_space_and_returns_token(client, fresh_email):
+def _bootstrap_and_login(client, pg_engine, email, password, name=None):
+    """Helper: create user via ORM + log in. Returns (user_id, token, space_id)."""
+    user_id, space_id = create_user_via_orm(pg_engine, email, password, name=name)
     resp = client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "longerthan8chars!", "name": "Alice"},
+        "/api/auth/login",
+        json={"email": email, "password": password},
     )
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["user"]["email"] == fresh_email
-    assert body["user"]["name"] == "Alice"
-    assert body["space_id"]
-    assert body["access_token"]
-    assert body["token_type"] == "bearer"
+    assert resp.status_code == 200, resp.text
+    return user_id, resp.json()["access_token"], space_id
 
 
-def test_register_then_login_returns_jwt(client, fresh_email):
-    client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "longerthan8chars!"},
+def test_orm_bootstrap_creates_personal_space(client, fresh_email, pg_engine):
+    """Direct ORM bootstrap creates a User + Personal KnowledgeSpace; login
+    against it returns a JWT (the replacement of the deleted /register flow)."""
+    user_id, token, space_id = _bootstrap_and_login(
+        client, pg_engine, fresh_email, "longerthan8chars!", name="Alice",
     )
+    assert user_id
+    assert space_id
+    assert token
+    me = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+    assert me["email"] == fresh_email
+    assert me["display_name"] == "Alice"
+    assert me["default_space_id"] == space_id
+
+
+def test_login_returns_jwt(client, fresh_email, pg_engine):
+    create_user_via_orm(pg_engine, fresh_email, "longerthan8chars!")
     login = client.post(
         "/api/auth/login",
         json={"email": fresh_email, "password": "longerthan8chars!"},
@@ -77,11 +94,8 @@ def test_register_then_login_returns_jwt(client, fresh_email):
     assert body["expires_in"] > 0
 
 
-def test_login_wrong_password_returns_401(client, fresh_email):
-    client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "longerthan8chars!"},
-    )
+def test_login_wrong_password_returns_401(client, fresh_email, pg_engine):
+    create_user_via_orm(pg_engine, fresh_email, "longerthan8chars!")
     bad = client.post(
         "/api/auth/login",
         json={"email": fresh_email, "password": "wrongpassword!"},
@@ -89,52 +103,46 @@ def test_login_wrong_password_returns_401(client, fresh_email):
     assert bad.status_code == 401
 
 
-def test_register_conflict_on_duplicate_email(client, fresh_email):
-    client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "longerthan8chars!"},
+def test_login_unknown_email_returns_401(client, fresh_email):
+    """No user exists for this email — login must 401, not 404 / 500."""
+    bad = client.post(
+        "/api/auth/login",
+        json={"email": fresh_email, "password": "anything-here!"},
     )
-    dupe = client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "anotherpassword!"},
-    )
-    assert dupe.status_code == 409
+    assert bad.status_code == 401
 
 
-def test_protected_endpoint_requires_jwt(client, fresh_email):
+def test_protected_endpoint_requires_jwt(client, fresh_email, pg_engine):
     no_token = client.get("/api/spaces/me")
     assert no_token.status_code == 401
 
-    reg = client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "longerthan8chars!"},
-    ).json()
-    headers = {"Authorization": f"Bearer {reg['access_token']}"}
+    _user_id, token, space_id = _bootstrap_and_login(
+        client, pg_engine, fresh_email, "longerthan8chars!",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
     with_token = client.get("/api/spaces/me", headers=headers)
     assert with_token.status_code == 200
     spaces = with_token.json()
     assert len(spaces) == 1
     assert spaces[0]["type"] == "personal"
-    assert spaces[0]["id"] == reg["space_id"]
+    assert spaces[0]["id"] == space_id
 
 
-def test_settings_get_returns_defaults_after_register(client, fresh_email):
-    reg = client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "longerthan8chars!"},
-    ).json()
-    headers = {"Authorization": f"Bearer {reg['access_token']}"}
+def test_settings_get_returns_defaults(client, fresh_email, pg_engine):
+    _user_id, token, _space_id = _bootstrap_and_login(
+        client, pg_engine, fresh_email, "longerthan8chars!",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
     settings = client.get("/api/users/me/settings", headers=headers).json()
     assert settings["validation_mode"] == "quick"
     assert settings["surface_on_by_default"] is True
 
 
-def test_settings_patch_persists(client, fresh_email):
-    reg = client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "longerthan8chars!"},
-    ).json()
-    headers = {"Authorization": f"Bearer {reg['access_token']}"}
+def test_settings_patch_persists(client, fresh_email, pg_engine):
+    _user_id, token, _space_id = _bootstrap_and_login(
+        client, pg_engine, fresh_email, "longerthan8chars!",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
     patched = client.patch(
         "/api/users/me/settings",
         json={"validation_mode": "strict", "surface_on_by_default": False},
@@ -146,12 +154,11 @@ def test_settings_patch_persists(client, fresh_email):
     assert re["surface_on_by_default"] is False
 
 
-def test_logout_with_valid_jwt_returns_204(client, fresh_email):
-    reg = client.post(
-        "/api/auth/register",
-        json={"email": fresh_email, "password": "longerthan8chars!"},
-    ).json()
-    headers = {"Authorization": f"Bearer {reg['access_token']}"}
+def test_logout_with_valid_jwt_returns_204(client, fresh_email, pg_engine):
+    _user_id, token, _space_id = _bootstrap_and_login(
+        client, pg_engine, fresh_email, "longerthan8chars!",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
     out = client.post("/api/auth/logout", headers=headers)
     assert out.status_code == 204
 

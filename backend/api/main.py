@@ -13,6 +13,7 @@ from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import (
+    admin_applications,
     applications,
     auth,
     capture,
@@ -158,5 +159,6 @@ for _router in (
     home.router,
     validation_api.router,
     applications.router,
+    admin_applications.router,
 ):
     app.include_router(_router)

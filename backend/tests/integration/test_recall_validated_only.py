@@ -23,6 +23,8 @@ from datetime import UTC, datetime, timezone
 import pytest
 from sqlalchemy.orm import sessionmaker
 
+from tests.integration.conftest import create_user_via_orm
+
 pytestmark = pytest.mark.integration
 
 
@@ -72,29 +74,17 @@ def client(pg_engine, alembic_upgrade):
 
 
 @pytest.fixture
-def auth_ctx(client):
-    """Register a user and return (headers, user_id, space_id)."""
+def auth_ctx(client, pg_engine):
+    """Bootstrap a user via ORM, log in, and return (headers, user_id, space_id)."""
     email = f"recall-{uuid.uuid4().hex[:8]}@lucid.example"
-    reg = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "longerthan8chars!"},
+    password = "longerthan8chars!"
+    user_id, space_id = create_user_via_orm(pg_engine, email, password)
+    login = client.post(
+        "/api/auth/login", json={"email": email, "password": password},
     )
-    assert reg.status_code == 201, reg.text
-    body = reg.json()
-    headers = {"Authorization": f"Bearer {body['access_token']}"}
-    from sqlalchemy import select
-
-    from api.security import dependencies as sec_deps
-    from api.storage.postgres.orm import KnowledgeSpace, User
-    sm = sec_deps._session_factory
-    with sm() as s:
-        user = s.scalars(
-            select(User).where(User.email == email).limit(1)
-        ).first()
-        ks = s.scalars(
-            select(KnowledgeSpace).where(KnowledgeSpace.user_id == user.id).limit(1)
-        ).first()
-        return headers, user.id, ks.id
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    return headers, uuid.UUID(user_id), uuid.UUID(space_id)
 
 
 def _index_fact(

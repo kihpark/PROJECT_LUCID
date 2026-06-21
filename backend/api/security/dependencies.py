@@ -77,3 +77,15 @@ def get_current_user(
         return user
     finally:
         session.close()
+
+
+def require_admin(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Gate for admin-only endpoints. 403 for non-admin."""
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="admin_only",
+        )
+    return user
