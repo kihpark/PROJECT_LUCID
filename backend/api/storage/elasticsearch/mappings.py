@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from api.storage.elasticsearch.client import (
+    LUCID_APPLICATIONS,
     LUCID_FACTS,
     LUCID_OBJECTS,
     LUCID_SOURCES,
@@ -226,6 +227,31 @@ LUCID_SOURCES_MAPPING: dict[str, Any] = {
 }
 
 
+# B-62 landing-integration: public beta-applicant intake from the
+# v8.2 landing page. strict_dynamic mapping; no Korean analyzer
+# (q1/q2 free-text is short, mixed-language is fine on standard).
+LUCID_APPLICATIONS_MAPPING: dict[str, Any] = {
+    "mappings": {
+        "dynamic": "strict",
+        "properties": {
+            "application_id": {"type": "keyword"},
+            "email": {"type": "keyword"},
+            "email_lower": {"type": "keyword"},
+            "display_name": {"type": "text"},
+            "lang": {"type": "keyword"},
+            "survey_q1_key": {"type": "keyword"},
+            "survey_q1_value": {"type": "text"},
+            "survey_q2_key": {"type": "keyword"},
+            "survey_q2_value": {"type": "text"},
+            "status": {"type": "keyword"},
+            "submitted_at": {"type": "date"},
+            "submitter_ip_hash": {"type": "keyword"},
+            "user_agent": {"type": "text"},
+        },
+    },
+}
+
+
 INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
     # B-38: keys reflect the LUCID_INDEX_PREFIX in effect at import,
     # so create_indexes() / delete_indexes() looking up by prefixed
@@ -233,4 +259,5 @@ INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
     LUCID_FACTS: LUCID_FACTS_MAPPING,
     LUCID_OBJECTS: LUCID_OBJECTS_MAPPING,
     LUCID_SOURCES: LUCID_SOURCES_MAPPING,
+    LUCID_APPLICATIONS: LUCID_APPLICATIONS_MAPPING,
 }
