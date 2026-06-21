@@ -34,10 +34,27 @@ vi.mock('next/link', () => ({
   },
 }));
 
-// Mock the api module — only getHomeBrief is exercised by the shell, but
-// vitest will throw on import-time JWT side-effects otherwise.
+// Mock the api module — getHomeBrief drives the badge, logoutUser is
+// invoked by the new B-61 logout flow.
 vi.mock('@/lib/api', () => ({
   getHomeBrief: vi.fn(),
+  logoutUser: vi.fn(),
+}));
+
+// B-61 — useAuthMe hook drives the AppShell identity. Default is "no
+// authenticated me" so the existing tests keep the design-mock defaults.
+// Individual tests override via useAuthMeMock.mockReturnValue(...).
+const useAuthMeMock = vi.fn(() => ({ me: null, loading: false, error: null }));
+vi.mock('@/lib/useAuthMe', () => ({
+  useAuthMe: () => useAuthMeMock(),
+}));
+
+// B-61 — auth.ts helpers are called during logout. Observe them.
+const clearTokenMock = vi.fn();
+const clearCurrentSpaceMock = vi.fn();
+vi.mock('@/lib/auth', () => ({
+  clearToken: () => clearTokenMock(),
+  clearCurrentSpace: () => clearCurrentSpaceMock(),
 }));
 
 import * as api from '@/lib/api';
@@ -56,10 +73,22 @@ function mockBrief(pending: number) {
 beforeEach(() => {
   pathnameRef.current = '/';
   (api.getHomeBrief as ReturnType<typeof vi.fn>).mockReset();
+  (api.logoutUser as ReturnType<typeof vi.fn>).mockReset();
+  (api.logoutUser as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   // Default: fail-soft (no brief). Individual tests can override.
   (api.getHomeBrief as ReturnType<typeof vi.fn>).mockRejectedValue(
     new Error('not wired'),
   );
+  useAuthMeMock.mockReset();
+  useAuthMeMock.mockReturnValue({ me: null, loading: false, error: null });
+  clearTokenMock.mockReset();
+  clearCurrentSpaceMock.mockReset();
+  // Pin window.location.href so the logout redirect doesn't navigate
+  // the jsdom window mid-test.
+  // @ts-expect-error — jsdom Location is rebindable here.
+  delete (window as { location?: Location }).location;
+  // @ts-expect-error — minimal Location stub.
+  window.location = { href: '' } as Location;
 });
 
 afterEach(() => {
@@ -198,5 +227,58 @@ describe('AppShell', () => {
     ).not.toBeInTheDocument();
     const pendingNav = screen.getByTestId('app-shell-nav-pending');
     expect(pendingNav.textContent).toBe('검증');
+  });
+
+  // -------------------------------------------------------------------------
+  // B-61 — multi-user gate
+  // -------------------------------------------------------------------------
+
+  it('B-61 — 로그아웃 click calls logoutUser + clearToken + clearCurrentSpace + redirects', async () => {
+    render(
+      <AppShell>
+        <div>child</div>
+      </AppShell>,
+    );
+    fireEvent.click(screen.getByTestId('app-shell-profile-trigger'));
+    const logoutBtn = screen.getByTestId('app-shell-logout');
+    fireEvent.click(logoutBtn);
+
+    await waitFor(() =>
+      expect(api.logoutUser).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => expect(clearTokenMock).toHaveBeenCalledTimes(1));
+    expect(clearCurrentSpaceMock).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(window.location.href).toBe('/login'),
+    );
+  });
+
+  it('B-61 — renders me.email when useAuthMe returns a me object', async () => {
+    useAuthMeMock.mockReturnValue({
+      me: {
+        user_id: 'u-1',
+        email: 'kihpark85@gmail.com',
+        display_name: 'Kih Park',
+        default_space_id: 's-1',
+        is_new_user: false,
+      },
+      loading: false,
+      error: null,
+    });
+
+    render(
+      <AppShell>
+        <div>child</div>
+      </AppShell>,
+    );
+
+    // Open the dropdown so the email is in the DOM.
+    fireEvent.click(screen.getByTestId('app-shell-profile-trigger'));
+    const menu = screen.getByTestId('app-shell-profile-menu');
+    expect(menu).toHaveTextContent('kihpark85@gmail.com');
+    // The default literal MUST NOT leak when an authenticated identity
+    // is available.
+    expect(menu).not.toHaveTextContent('kihpark85@lucid.kr');
+    expect(menu).not.toHaveTextContent('kihung@lucid.kr');
   });
 });

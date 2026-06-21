@@ -58,3 +58,24 @@ class UserSettingsResponse(LucidBaseModel):
 class UpdateUserSettingsRequest(LucidBaseModel):
     validation_mode: Literal["quick", "strict", "hybrid"] | None = None
     surface_on_by_default: bool | None = None
+
+
+class MeResponse(LucidBaseModel):
+    """B-61 — identity + cold-start signal for the SPA.
+
+    `display_name` is the User.name column (the schema has no separate
+    `display_name`; the FE falls back to the local part of the email
+    when null). `default_space_id` is the user's first personal
+    KnowledgeSpace (ordered by created_at) — never null in practice
+    because /register auto-creates one, but the contract is
+    `UID | None` for safety. `is_new_user` is True when the user was
+    created within the last 7 days AND the default space holds zero
+    non-retracted facts. Used to decide whether the FE shows the
+    personalised welcome line above the cold-start 3-step card.
+    """
+
+    user_id: UID
+    email: EmailStr
+    display_name: str | None = None
+    default_space_id: UID | None = None
+    is_new_user: bool = False

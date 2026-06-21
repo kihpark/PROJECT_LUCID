@@ -19,6 +19,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { clearToken, clearCurrentSpace } from '@/lib/auth';
+import { logoutUser } from '@/lib/api';
+import { useAuthMe } from '@/lib/useAuthMe';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 
 const ACCENT = '#3fe0c6';
@@ -50,16 +52,23 @@ interface AppShellProps {
 
 function defaultUserName(): string {
   // Until login wiring is done, default to the design-mock identity.
-  // A later ticket will swap this for a real auth-derived name.
+  // B-61 prefers useAuthMe().me when present; this fallback only fires
+  // for logged-out pages or while the /me fetch is in flight.
   return '박기흥';
 }
 
 function defaultUserEmail(): string {
-  return 'kihung@lucid.kr';
+  // B-61 — switched literal from kihung@lucid.kr to PO's preferred
+  // address so the design mock matches the registered identity.
+  return 'kihpark85@lucid.kr';
 }
 
-function logout(): void {
-  // Reuse the existing auth.ts helpers so we don't fork token logic.
+async function logout(): Promise<void> {
+  // B-61 — best-effort call to the backend so the server logs the
+  // event (and any future denylist gets the JTI). Network failures
+  // are swallowed inside logoutUser() so we always proceed to
+  // clearing local state.
+  await logoutUser();
   clearToken();
   clearCurrentSpace();
   if (typeof window !== 'undefined') {
@@ -274,9 +283,9 @@ function ProfileMenu({
             type="button"
             role="menuitem"
             data-testid="app-shell-logout"
-            onClick={() => {
+            onClick={async () => {
               setOpen(false);
-              logout();
+              await logout();
             }}
             style={{
               display: 'block',
@@ -346,8 +355,15 @@ function NavLink({
 export function AppShell({ children, userName, userEmail }: AppShellProps) {
   const pathname = usePathname() ?? '/';
   const { pendingCount } = useHomeBrief();
-  const name = userName ?? defaultUserName();
-  const email = userEmail ?? defaultUserEmail();
+  // B-61 — prefer the authenticated identity from /api/auth/me when
+  // available. Falls back to the prop overrides (tests) and finally
+  // to the hardcoded design-mock defaults for the logged-out shell.
+  const { me } = useAuthMe();
+  const meName = me
+    ? (me.display_name?.trim() || me.email.split('@')[0] || me.email)
+    : null;
+  const name = userName ?? meName ?? defaultUserName();
+  const email = userEmail ?? me?.email ?? defaultUserEmail();
 
   const nav: NavItem[] = [
     { href: '/home', label: '홈' },

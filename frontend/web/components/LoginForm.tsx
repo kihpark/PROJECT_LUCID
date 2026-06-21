@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ActionButton } from './ActionButton';
 import { loginUser, getMySpaces, ApiError } from '@/lib/api';
@@ -76,6 +77,16 @@ export function LoginForm() {
       <ActionButton type="submit" variant="primary" disabled={busy} className="w-full">
         {busy ? 'Signing in...' : 'Sign in'}
       </ActionButton>
+      <p className="text-xs text-text-secondary text-center pt-2">
+        처음이신가요?{' '}
+        <Link
+          href="/register"
+          data-testid="login-to-register-link"
+          className="underline"
+        >
+          가입하기
+        </Link>
+      </p>
     </form>
   );
 }

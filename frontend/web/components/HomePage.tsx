@@ -32,7 +32,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { useHomeBrief } from '@/lib/useHomeBrief';
+import { useAuthMe } from '@/lib/useAuthMe';
 import type { HomeBrief } from '@/lib/types';
+import type { MeResponse } from '@/lib/api';
 
 const ACCENT = '#3fe0c6';
 const BG = '#06080b';
@@ -936,7 +938,39 @@ function GettingStartedCard() {
   );
 }
 
-function HomeColdStart() {
+/**
+ * B-61 — personalised welcome line.
+ *
+ * Rendered above the cold-start 3-step card when the caller is a
+ * newly registered user (`is_new_user=true` from /api/auth/me). When
+ * `displayName` is null (e.g. user registered without a name), we
+ * fall back to "게스트" so the copy is still warm and the test
+ * contract stays deterministic.
+ */
+function WelcomeLine({ displayName }: { displayName: string | null }) {
+  const name = displayName?.trim() || '게스트';
+  return (
+    <div
+      data-testid="home-welcome-line"
+      style={{
+        fontSize: 13,
+        opacity: 0.8,
+        marginBottom: 16,
+        color: TEXT_BODY,
+        textAlign: 'center',
+      }}
+    >
+      환영합니다, {name}님. 첫 사실을 캡처하면 여기서 살아납니다.
+    </div>
+  );
+}
+
+function HomeColdStart({ me }: { me: MeResponse | null }) {
+  // Only show the personalised welcome line for genuinely new users.
+  // Returning users with an empty graph (deleted all their facts, or
+  // never captured anything in 7+ days) get the generic cold-start
+  // copy without the welcome ribbon.
+  const showWelcome = me?.is_new_user === true;
   return (
     <div
       data-testid="home-empty"
@@ -947,6 +981,9 @@ function HomeColdStart() {
         width: '100%',
       }}
     >
+      {showWelcome ? (
+        <WelcomeLine displayName={me?.display_name ?? null} />
+      ) : null}
       <ColdEmptyLine />
       <ColdCTA />
       <DisabledRecallInput />
@@ -1023,6 +1060,9 @@ function HomeShellCommon({
  * mirrors AppShell's mock identity "박기흥". */
 export function HomePage({ userName = '박기흥' }: { userName?: string }) {
   const { brief } = useHomeBrief();
+  // B-61 — pull identity/cold-start signal so the welcome line can
+  // appear above the 3-step card for genuinely new users.
+  const { me } = useAuthMe();
 
   // The enum + switch is the contract: a follow-up ticket can wire
   // 'unknown' without re-architecting this component.
@@ -1035,9 +1075,17 @@ export function HomePage({ userName = '박기흥' }: { userName?: string }) {
         ? 'LUCID · 경계 밖'
         : 'LUCID · 대기 중';
 
+  // Prefer the authenticated display name when available — keeps the
+  // greeting in sync with the AppShell. Falls back to the prop (test
+  // pinning) and finally to the design-mock literal.
+  const meName = me
+    ? (me.display_name?.trim() || me.email.split('@')[0] || me.email)
+    : null;
+  const greetingName = meName ?? userName;
+
   return (
-    <HomeShellCommon statusLabel={statusLabel} userName={userName}>
-      {renderArm(view, brief)}
+    <HomeShellCommon statusLabel={statusLabel} userName={greetingName}>
+      {renderArm(view, brief, me)}
       {/* Keep TEXT_LABEL referenced so the design-token contract is
           visible without an unused-var warning. The token is reserved
           for the future 'unknown' arm's primary button label color. */}
@@ -1046,13 +1094,17 @@ export function HomePage({ userName = '박기흥' }: { userName?: string }) {
   );
 }
 
-function renderArm(view: HomeViewState, brief: HomeBrief | null) {
+function renderArm(
+  view: HomeViewState,
+  brief: HomeBrief | null,
+  me: MeResponse | null,
+) {
   switch (view) {
     case 'populated':
       // selectViewState() guarantees brief != null && !is_empty here.
       return <HomePopulated brief={brief as HomeBrief} />;
     case 'empty':
-      return <HomeColdStart />;
+      return <HomeColdStart me={me} />;
     case 'unknown':
       // Reserved for the next ticket — explicit `null` so the switch
       // exhaustively covers the enum.

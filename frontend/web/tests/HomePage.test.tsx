@@ -45,6 +45,14 @@ vi.mock('@/lib/useHomeBrief', () => ({
   useHomeBrief: () => useHomeBriefMock(),
 }));
 
+// B-61 — useAuthMe drives the personalised welcome line. Default to
+// "no authenticated me" so existing tests keep their userName prop
+// pinning and the welcome line does NOT appear.
+const useAuthMeMock = vi.fn(() => ({ me: null, loading: false, error: null }));
+vi.mock('@/lib/useAuthMe', () => ({
+  useAuthMe: () => useAuthMeMock(),
+}));
+
 import { HomePage, greetingFor, selectViewState } from '@/components/HomePage';
 
 const POPULATED: HomeBrief = {
@@ -75,6 +83,8 @@ const EMPTY: HomeBrief = {
 beforeEach(() => {
   pushMock.mockReset();
   useHomeBriefMock.mockReset();
+  useAuthMeMock.mockReset();
+  useAuthMeMock.mockReturnValue({ me: null, loading: false, error: null });
 });
 
 afterEach(() => {
@@ -177,6 +187,76 @@ describe('HomePage', () => {
 
     // Greeting still renders (shared between arms).
     expect(screen.getByTestId('home-greeting')).toHaveTextContent('박기흥');
+  });
+
+  // -------------------------------------------------------------------------
+  // B-61 — personalised cold-start welcome line
+  // -------------------------------------------------------------------------
+
+  it('B-61 — welcome line renders when is_new_user=true + display_name set, above the 3-step card', () => {
+    useHomeBriefMock.mockReturnValue({ brief: EMPTY, pendingCount: 0 });
+    useAuthMeMock.mockReturnValue({
+      me: {
+        user_id: 'u-1',
+        email: 'alice@example.com',
+        display_name: 'Alice',
+        default_space_id: 's-1',
+        is_new_user: true,
+      },
+      loading: false,
+      error: null,
+    });
+
+    render(<HomePage userName="박기흥" />);
+
+    const welcome = screen.getByTestId('home-welcome-line');
+    expect(welcome).toBeInTheDocument();
+    expect(welcome).toHaveTextContent('Alice');
+    expect(welcome).toHaveTextContent(
+      '환영합니다, Alice님. 첫 사실을 캡처하면 여기서 살아납니다.',
+    );
+
+    // The 3-step card is still rendered (step 1/2/3).
+    const step1 = screen.getByTestId('home-empty-step-1');
+    expect(step1).toBeInTheDocument();
+    // The welcome line appears BEFORE the first cold-start step in DOM order.
+    const empty = screen.getByTestId('home-empty');
+    const order = Array.from(empty.querySelectorAll('[data-testid]'))
+      .map((n) => n.getAttribute('data-testid'));
+    const welcomeIdx = order.indexOf('home-welcome-line');
+    const step1Idx = order.indexOf('home-empty-step-1');
+    expect(welcomeIdx).toBeGreaterThanOrEqual(0);
+    expect(step1Idx).toBeGreaterThanOrEqual(0);
+    expect(welcomeIdx).toBeLessThan(step1Idx);
+  });
+
+  it('B-61 — welcome line is hidden when is_new_user=false (returning user)', () => {
+    useHomeBriefMock.mockReturnValue({ brief: EMPTY, pendingCount: 0 });
+    useAuthMeMock.mockReturnValue({
+      me: {
+        user_id: 'u-2',
+        email: 'returning@example.com',
+        display_name: 'Bob',
+        default_space_id: 's-2',
+        is_new_user: false,
+      },
+      loading: false,
+      error: null,
+    });
+
+    render(<HomePage userName="박기흥" />);
+
+    expect(screen.queryByTestId('home-welcome-line')).not.toBeInTheDocument();
+    expect(screen.getByTestId('home-empty-step-1')).toBeInTheDocument();
+  });
+
+  it('B-61 — welcome line is hidden when there is no me (logged-out / no token)', () => {
+    useHomeBriefMock.mockReturnValue({ brief: EMPTY, pendingCount: 0 });
+    // default useAuthMe → { me: null }
+    render(<HomePage userName="박기흥" />);
+
+    expect(screen.queryByTestId('home-welcome-line')).not.toBeInTheDocument();
+    expect(screen.getByTestId('home-empty-step-1')).toBeInTheDocument();
   });
 
   it('recall input on populated submits to /recall?q=<encoded>', () => {
