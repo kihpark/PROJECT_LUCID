@@ -125,6 +125,55 @@ export function getMySpaces(): Promise<KnowledgeSpacePublic[]> {
   return request<KnowledgeSpacePublic[]>('/api/spaces/me');
 }
 
+// ---------------------------------------------------------------------------
+// B-61 — multi-user gate: register, logout, /me
+// ---------------------------------------------------------------------------
+
+export type RegisterRequest = {
+  email: string;
+  password: string;
+  name?: string | null;
+};
+
+export type RegisterResponse = {
+  user: { id: string; email: string; name?: string | null };
+  space_id: string;
+  access_token: string;
+  token_type: 'bearer';
+  expires_in: number;
+};
+
+export function registerUser(payload: RegisterRequest): Promise<RegisterResponse> {
+  return request<RegisterResponse>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function logoutUser(): Promise<void> {
+  // Best-effort: JWT is stateless, so a network failure or 401 here is
+  // fine — the SPA still clears the local token via clearToken(). The
+  // backend call exists so the server can log the event and so the
+  // future denylist (Phase 1+) has a place to record the JTI.
+  try {
+    await request<void>('/api/auth/logout', { method: 'POST' });
+  } catch {
+    // swallow — never let logout fail to clear local state.
+  }
+}
+
+export type MeResponse = {
+  user_id: string;
+  email: string;
+  display_name?: string | null;
+  default_space_id?: string | null;
+  is_new_user: boolean;
+};
+
+export function getMe(): Promise<MeResponse> {
+  return request<MeResponse>('/api/auth/me', { method: 'GET' });
+}
+
 function buildPendingQuery(filters: PendingListFilters): string {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(filters)) {

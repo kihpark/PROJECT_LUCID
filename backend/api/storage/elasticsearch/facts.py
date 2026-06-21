@@ -187,6 +187,43 @@ def attach_source_to_fact(fact_uid: str, source_uid: str) -> bool:
     return True
 
 
+def count_active_facts(
+    es: Any | None = None, *, knowledge_space_id: str,
+) -> int:
+    """B-61 cold-start signal — count non-retracted facts in a space.
+
+    Used by GET /api/auth/me to decide whether the FE shows the
+    personalised welcome line above the cold-start 3-step card. A fact
+    counts as "active" when `retracted_at` is not set (mirrors the
+    recall route filter at recall.py:145).
+
+    Best-effort: failures (ES down, index missing, count API hiccup)
+    return 0 rather than raising — /me must stay 200 even when ES is
+    unreachable so the SPA can still render.
+    """
+    client = es if es is not None else get_client()
+    try:
+        res = client.count(
+            index=LUCID_FACTS,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"knowledge_space_id": knowledge_space_id}},
+                        ],
+                        "must_not": [
+                            {"exists": {"field": "retracted_at"}},
+                        ],
+                    }
+                }
+            },
+        )
+        return int(res.get("count", 0))
+    except Exception as exc:  # noqa: BLE001 — count is best-effort
+        logger.warning("count_active_facts failed for %s: %s", knowledge_space_id, exc)
+        return 0
+
+
 def bulk_create_facts(facts: list[FactNode], with_embedding: bool = True) -> list[str]:
     """ES bulk API insert. Returns the list of created fact_uids.
 
