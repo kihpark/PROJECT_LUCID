@@ -274,7 +274,11 @@ function attachAccentStarfield(scene: THREE.Scene): THREE.Points {
     size: 1.4,
     sizeAttenuation: true,
     transparent: true,
-    opacity: 0.55,
+    // B-62-starfield-presence-plus10 — PO: "+10% 존재감".
+    // 0.55 → 0.605. Effective brightness 0.43 × 0.605 ≈ 0.26, still
+    // well under the bloom threshold (0.55) so the accent layer stays
+    // crisp points and does NOT bloom-bleed.
+    opacity: 0.605,
     depthWrite: false,
   });
   const stars = new THREE.Points(geometry, material);
@@ -646,7 +650,10 @@ export function StellarGraph(props: StellarGraphProps) {
       const mat = stars.material as THREE.PointsMaterial;
       if (mode === 'synthetic') {
         mat.color.setHex(0x5e7488);
-        mat.opacity = 0.7;
+        // B-62-starfield-presence-plus10 — PO: "+10% 존재감".
+        // 0.7 → 0.77. Effective brightness 0.42 × 0.77 ≈ 0.32, still
+        // safely under the bloom threshold (0.55).
+        mat.opacity = 0.77;
         mat.size = 0.85;
       } else {
         mat.color.setHex(0x3a4858);
