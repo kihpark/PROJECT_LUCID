@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lucid — Be Lucid. Own what you know.</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:       #06060a;
+      --bg-card:  #0e0e14;
+      --bg-elev:  #131319;
+      --text-1:   #eeeef2;
+      --text-2:   #9090a8;
+      --text-3:   #555568;
+      --teal:     #6dd9cc;
+      --teal-dim: rgba(109,217,204,.07);
+      --teal-bdr: rgba(109,217,204,.20);
+      --red:      #e05c5c;
+      --border:   #1e1e28;
+      --mono:     'IBM Plex Mono', monospace;
+      --sans:     'IBM Plex Sans KR', 'IBM Plex Sans', sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--sans); background: var(--bg); color: var(--text-1); line-height: 1.75; -webkit-font-smoothing: antialiased; word-break: keep-all; overflow-wrap: break-word; }
+
+    .wrap { max-width: 700px; margin: 0 auto; padding: 100px 28px 80px; }
+
+    /* lang toggle */
+    .lang { position: fixed; top: 22px; right: 22px; display: flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; font-family: var(--mono); font-size: 10px; letter-spacing: 1.5px; z-index: 99; background: var(--bg); }
+    .lang button { background: none; border: none; cursor: pointer; padding: 7px 13px; color: var(--text-3); font-family: inherit; font-size: inherit; letter-spacing: inherit; transition: all .15s; }
+    .lang button.on { background: var(--teal); color: var(--bg); font-weight: 600; }
+
+    /* brand */
+    .brand { font-family: var(--mono); font-size: 12px; letter-spacing: 5px; color: var(--teal); text-align: center; margin-bottom: 80px; }
+
+    /* hero */
+    .hero { text-align: center; margin-bottom: 64px; }
+    h1 { font-size: 56px; line-height: 1.1; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 36px; }
+    .hero-sub {
+      font-size: 26px; color: var(--text-1);
+      font-weight: 600; letter-spacing: -0.025em;
+      line-height: 1.35; margin-bottom: 36px;
+      text-align: center;
+    }
+        .hero-body { font-size: 18px; color: var(--text-2); line-height: 1.85; max-width: 580px; margin: 0 auto; text-align: center; }
+    .hero-body .para { display: block; margin-bottom: 1.2em; }
+    .hero-body .para:last-child { margin-bottom: 0; }
+    .hero-body strong { color: var(--text-1); font-weight: 500; }
+
+    /* philosophy */
+    .phil { text-align: center; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 40px 0; margin-bottom: 72px; }
+    .phil-hanzi { font-family: var(--mono); font-size: 18px; color: var(--teal); letter-spacing: 6px; margin-bottom: 14px; }
+    .phil-trans { font-size: 16px; color: var(--text-2); line-height: 1.75; max-width: 440px; margin: 0 auto 10px; }
+    .phil-source { font-family: var(--mono); font-size: 11px; color: var(--text-3); letter-spacing: 1.5px; }
+
+    /* section label */
+    .sec-tag { font-family: var(--mono); font-size: 12px; color: var(--text-2); letter-spacing: 2.5px; text-align: center; margin-bottom: 28px; }
+
+    section { margin-bottom: 80px; }
+    h2 { font-size: 24px; line-height: 1.4; font-weight: 600; margin-bottom: 18px; letter-spacing: -.01em; }
+    p { font-size: 16px; color: var(--text-2); margin-bottom: 14px; line-height: 1.85; }
+    p strong { color: var(--text-1); font-weight: 500; }
+
+    /* demo */
+    .demo { margin-bottom: 80px; }
+    .demo-label { font-family: var(--mono); font-size: 12px; color: var(--text-2); letter-spacing: 2.5px; text-align: center; margin-bottom: 20px; }
+    .demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+    .demo-panel { background: var(--bg-card); padding: 22px 20px; display: flex; flex-direction: column; }
+    .demo-tag { font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px; margin-bottom: 12px; padding: 4px 9px; display: inline-block; border-radius: 2px; }
+    .demo-tag.bad  { color: var(--text-3); background: var(--bg-elev); }
+    .demo-tag.good { color: var(--teal);   background: var(--teal-dim); }
+    .demo-q { font-family: var(--mono); font-size: 13px; color: var(--text-2); margin-bottom: 12px; line-height: 1.6; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    .demo-a { font-size: 14px; line-height: 1.75; color: var(--text-2); flex: 1; overflow-y: auto; max-height: 360px; }
+    .demo-a::-webkit-scrollbar { width: 3px; }
+    .demo-a::-webkit-scrollbar-track { background: transparent; }
+    .demo-a::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* chatgpt style */
+    .chat-summary { color: var(--text-2); margin-bottom: 10px; font-style: italic; }
+    .chat-section { margin-bottom: 10px; }
+    .chat-section-title { color: var(--text-1); font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+    .chat-li { padding-left: 12px; color: var(--text-2); margin-bottom: 3px; position: relative; }
+    .chat-li::before { content: "·"; position: absolute; left: 0; color: var(--text-3); }
+    .chat-footer { color: var(--text-3); font-style: italic; font-size: 12px; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+
+    /* lucid facts */
+    .fact-line { display: flex; flex-direction: column; margin-bottom: 10px; padding-left: 12px; border-left: 2px solid var(--teal-bdr); }
+    .fact-text { color: var(--text-1); font-size: 14px; font-weight: 500; margin-bottom: 2px; }
+    .fact-meta { font-family: var(--mono); font-size: 11px; color: var(--text-3); letter-spacing: .4px; }
+    .no-fact { font-family: var(--mono); font-size: 11px; color: var(--text-3); margin-top: 10px; letter-spacing: .3px; }
+
+    /* who */
+    .who-list { list-style: none; margin: 0 0 18px; }
+    .who-list li { padding: 12px 0; font-size: 16px; color: var(--text-2); border-bottom: 1px solid var(--border); line-height: 1.7; }
+    .who-list li::before { content: "—  "; font-family: var(--mono); color: var(--teal); }
+
+    /* BE LUCID moat section */
+    .belucid { margin-bottom: 80px; }
+    .belucid-header { text-align: center; margin-bottom: 32px; }
+    .belucid-eyebrow { font-family: var(--mono); font-size: 12px; color: var(--teal); letter-spacing: 4px; text-transform: uppercase; margin-bottom: 16px; }
+    .belucid-headline { font-size: 30px; font-weight: 700; line-height: 1.25; letter-spacing: -.02em; margin-bottom: 0; }
+    .belucid-body {
+      background: var(--bg-card); border: 1px solid var(--teal-bdr);
+      border-radius: 3px; padding: 32px 36px;
+    }
+    .belucid-subtitle {
+      font-size: 18px; font-weight: 600;
+      color: var(--text-1); letter-spacing: -0.015em;
+      margin-bottom: 22px; line-height: 1.5;
+    }
+    .belucid-p { font-size: 16px; color: var(--text-2); line-height: 1.9; margin-bottom: 20px; }
+    .belucid-p:last-child { margin-bottom: 0; }
+    .belucid-p strong { color: var(--text-1); font-weight: 500; }
+    .belucid-marker {
+      display: block; font-family: var(--mono); font-size: 11px;
+      color: var(--teal); letter-spacing: 2px; margin-bottom: 6px;
+    }
+    .belucid-divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+    /* founder */
+    .founder { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 3px; padding: 32px; }
+    .founder-name { font-size: 20px; font-weight: 600; margin-bottom: 3px; }
+    .founder-role { font-family: var(--mono); font-size: 12px; color: var(--teal); letter-spacing: 1px; margin-bottom: 20px; }
+    .founder-why { font-size: 16px; color: var(--text-2); line-height: 1.85; margin-bottom: 20px; padding: 16px 18px; background: var(--teal-dim); border-left: 2px solid var(--teal); border-radius: 0 2px 2px 0; }
+    .founder-why strong { color: var(--text-1); font-weight: 500; }
+    .founder-creds { list-style: none; border-top: 1px solid var(--border); padding-top: 14px; }
+    .founder-creds li { font-size: 13px; color: var(--text-3); padding: 3px 0; line-height: 1.6; font-family: var(--mono); letter-spacing: .3px; }
+    .founder-creds li::before { content: "·  "; }
+
+    /* form */
+    .form-wrap { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 3px; padding: 36px; }
+    .form-header { text-align: center; margin-bottom: 28px; }
+    .scarcity { font-family: var(--mono); font-size: 14px; color: var(--red); letter-spacing: 1px; margin-bottom: 6px; }
+    .form-meta { font-family: var(--mono); font-size: 12px; color: var(--text-3); letter-spacing: 1px; line-height: 1.6; }
+    .field { margin-bottom: 22px; }
+    .field-label { display: block; font-family: var(--mono); font-size: 13px; color: var(--text-2); letter-spacing: 1.5px; margin-bottom: 7px; text-transform: uppercase; }
+    .field-q { font-size: 16px; color: var(--text-1); line-height: 1.7; margin-bottom: 8px; }
+    input, textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 2px; color: var(--text-1); font-family: var(--sans); font-size: 16px; padding: 12px 14px; transition: border-color .15s; }
+    input:focus, textarea:focus { outline: none; border-color: var(--teal); }
+    textarea { min-height: 96px; resize: vertical; line-height: 1.65; }
+    .btn-wrap { text-align: center; margin-top: 8px; }
+    .btn { display: inline-block; background: var(--teal); color: var(--bg); padding: 14px 40px; font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: 1.5px; border: none; border-radius: 2px; cursor: pointer; transition: opacity .15s; }
+    .btn:hover { opacity: .85; }
+    .btn-note { margin-top: 11px; font-family: var(--mono); font-size: 12px; color: var(--text-3); letter-spacing: 1px; }
+
+    /* sig */
+    .sig { text-align: center; padding-top: 48px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 13px; color: var(--text-3); letter-spacing: 2px; }
+
+    /* responsive */
+    @media (max-width: 600px) {
+      .wrap { padding: 72px 18px 60px; }
+      h1 { font-size: 38px; }
+      .demo-grid { grid-template-columns: 1fr; }
+      h2 { font-size: 20px; }
+      .form-wrap { padding: 22px; }
+      .founder { padding: 22px; }
+      .belucid-body { padding: 22px; }
+      .belucid-headline { font-size: 23px; }
+    }
+
+    /* bilingual */
+    [data-en] { display: none; }
+    .lang-en [data-ko] { display: none; }
+    .lang-en [data-en] { display: block; }
+    .lang-en span[data-en] { display: inline; }
+    .lang-en li[data-en]   { display: list-item; }
+  </style>
+</head>
+<body class="lang-ko">
+
+<div class="lang">
+  <button id="btn-ko" class="on" onclick="setLang('ko')">KR</button>
+  <button id="btn-en"           onclick="setLang('en')">EN</button>
+</div>
+
+<div class="wrap">
+
+  <!-- brand -->
+  <div class="brand">LUCID</div>
+
+  <!-- hero -->
+  <div class="hero">
+    <h1>Be Lucid.</h1>
+
+    <p class="hero-sub" data-ko>아는 것과 모르는 것의 경계를 선명히 하라.</p>
+    <p class="hero-sub" data-en>Bring clarity to the edge of your knowledge.</p>
+
+    <div class="hero-body" data-ko>
+      <span class="para">AI는 답하지만 책임지지 않습니다.<br>인터넷 검색은 출처를 보여주지만 신뢰를 보증하지 않습니다.<br>노트는 기억과 사실, 추측을 한곳에 저장하지만 구분하지는 않습니다.</span>
+      <span class="para">중요한 판단의 순간에 필요한 것은 더 많은 정보가 아닙니다.<br><strong>무엇이 검증되었고, 무엇이 추론이며, 무엇을 아직 모르는지에 대한 명료함입니다.</strong></span>
+      <span class="para">Lucid는 당신이 직접 검증한 사실만 저장하는 개인 지식 그래프입니다.<br>출처 없는 기억, AI의 추론, 아직 모르는 것을 검증된 사실과 분리합니다.</span>
+      <span class="para"><strong>이 경계가 선명해질 때, 지식은 단순한 저장물이 아니라 판단의 인프라가 됩니다.</strong></span>
+    </div>
+    <div class="hero-body" data-en>
+      <span class="para">AI gives answers, but takes no responsibility.<br>Search shows sources, but does not guarantee trust.<br>Notes store memories, facts, and assumptions — but do not distinguish between them.</span>
+      <span class="para">At the moment of judgment, what you need is not more information.<br><strong>It is clarity about what has been verified, what is inferred, and what remains unknown.</strong></span>
+      <span class="para">Lucid is a personal knowledge graph that stores only the facts you have personally verified.<br>It separates unsourced memory, AI inference, and the unknown from verified facts.</span>
+      <span class="para"><strong>When this boundary becomes clear, knowledge stops being mere storage. It becomes infrastructure for judgment.</strong></span>
+    </div>
+    <div class="hero-close">Be Lucid.<br>Own what you know.</div>
+  </div>
+
+  <!-- philosophy — immediately after hero -->
+  <div class="phil">
+    <div class="phil-hanzi">知之為知之　不知為不知　是知也</div>
+    <p class="phil-trans" data-ko>아는 것을 안다 하고, 모르는 것을 모른다 하라.<br>그것이 진정한 앎이다.</p>
+    <p class="phil-trans" data-en>To know what you know, and to know what you do not know.<br>That is true knowledge.</p>
+    <div class="phil-source">論語 為政篇 · Analects of Confucius · 500 BC</div>
+  </div>
+
+  <!-- demo -->
+  <div class="demo">
+    <div class="demo-label" data-ko>— 같은 질문, 다른 답 —</div>
+    <div class="demo-label" data-en>— SAME QUESTION · DIFFERENT ANSWER —</div>
+    <div class="demo-grid">
+
+      <!-- ChatGPT panel -->
+      <div class="demo-panel">
+        <span class="demo-tag bad">ChatGPT</span>
+        <div class="demo-q" data-ko>Q. 단백질 섭취 타이밍 언제가 맞아?</div>
+        <div class="demo-q" data-en>Q. When should I take protein for muscle growth?</div>
+        <div class="demo-a">
+          <p class="chat-summary" data-ko>섭취 타이밍보다 하루 총 단백질량과 끼니별 분배가 더 중요합니다. 다만 운동 목적이면 타이밍도 약간 도움이 됩니다.</p>
+          <p class="chat-summary" data-en>Total daily protein and meal distribution matter more than timing. However, timing provides modest benefits if you're training.</p>
+
+          <div class="chat-section">
+            <div class="chat-section-title" data-ko>1. 하루 총 단백질량</div>
+            <div class="chat-section-title" data-en>1. Total Daily Protein</div>
+            <div class="chat-li" data-ko>근육 증가·운동 중이면 체중 1kg당 1.6–2.2g/일</div>
+            <div class="chat-li" data-en>For muscle gain: 1.6–2.2g per kg bodyweight/day</div>
+            <div class="chat-li" data-ko>일반 건강 유지라면 이보다 낮아도 됩니다</div>
+            <div class="chat-li" data-en>General health maintenance requires less</div>
+          </div>
+
+          <div class="chat-section">
+            <div class="chat-section-title" data-ko>2. 끼니별 분배</div>
+            <div class="chat-section-title" data-en>2. Meal Distribution</div>
+            <div class="chat-li" data-ko>한 번에 몰아먹기보다 끼니마다 20–40g이 좋습니다</div>
+            <div class="chat-li" data-en>Spread across meals at 20–40g per serving</div>
+            <div class="chat-li" data-ko>ISSN 기준 0.25g/kg 또는 20–40g을 1회 섭취량으로 제시</div>
+            <div class="chat-li" data-en>ISSN recommends 0.25g/kg or 20–40g high-quality protein per meal</div>
+          </div>
+
+          <div class="chat-section">
+            <div class="chat-section-title" data-ko>3. 운동 주변 타이밍</div>
+            <div class="chat-section-title" data-en>3. Peri-workout Timing</div>
+            <div class="chat-li" data-ko>운동 직후 30분 "기회의 창"은 과장된 편</div>
+            <div class="chat-li" data-en>The 30-min post-workout "anabolic window" is overstated</div>
+            <div class="chat-li" data-ko>운동 전 1–3시간 내 식사했다면 직후 쉐이크는 불필요</div>
+            <div class="chat-li" data-en>If you ate 1–3 hrs pre-workout, immediate post-workout shake is unnecessary</div>
+            <div class="chat-li" data-ko>공복 운동이면 운동 후 1–2시간 내 단백질 20–40g 권장</div>
+            <div class="chat-li" data-en>Fasted training: consume 20–40g within 1–2 hours post-workout</div>
+            <div class="chat-li" data-ko>최근 리뷰들도 타이밍보다 총량이 더 중요하다고 봄</div>
+            <div class="chat-li" data-en>Recent reviews confirm total intake outweighs timing for lean mass</div>
+          </div>
+
+          <div class="chat-footer" data-ko>출처: 학습 데이터 기반 일반 지식 · 당신이 검토했습니까?</div>
+          <div class="chat-footer" data-en>Source: general training data · Did you personally verify any of this?</div>
+        </div>
+      </div>
+
+      <!-- Lucid panel -->
+      <div class="demo-panel">
+        <span class="demo-tag good">LUCID</span>
+        <div class="demo-q" data-ko>Q. 단백질 섭취 타이밍 언제가 맞아?</div>
+        <div class="demo-q" data-en>Q. When should I take protein for muscle growth?</div>
+        <div class="demo-a">
+          <div class="fact-line">
+            <span class="fact-text" data-ko>하루 총량이 타이밍보다 결정적</span>
+            <span class="fact-text" data-en>Total daily intake beats timing</span>
+            <span class="fact-meta">Schoenfeld 2017 · 2025-03-15 · ✓ 나</span>
+          </div>
+          <div class="fact-line">
+            <span class="fact-text" data-ko>'운동 후 30분 안에 먹어야' 규칙 — 과학적 근거 없음</span>
+            <span class="fact-text" data-en>'Must eat within 30 min' rule — not supported by evidence</span>
+            <span class="fact-meta">Areta 2013 · 2025-05-02 · ✓ 나</span>
+          </div>
+          <div class="fact-line">
+            <span class="fact-text" data-ko>끼니당 20–40g, 3–4회 분산</span>
+            <span class="fact-text" data-en>20–40g per meal, distributed 3–4 times daily</span>
+            <span class="fact-meta">ISSN Position Stand 2017 · 2025-06-10 · ✓ 나</span>
+          </div>
+          <span class="no-fact" data-ko>이 주제에 대해 당신이 검증한 것은 이것이 전부입니다.</span>
+          <span class="no-fact" data-en>This is everything you have verified on this topic.</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- who -->
+  <section>
+    <div class="sec-tag" data-ko>— 누구를 위한 베타입니까 —</div>
+    <div class="sec-tag" data-en>— WHO THIS IS FOR —</div>
+
+    <ul class="who-list" data-ko>
+      <li>'읽었다'와 '안다'가 다르다는 것을 느끼는 분</li>
+      <li>서로 다른 출처와 시점의 정보가 충돌하여 판단이 흔들렸던 경험이 있는 분</li>
+      <li>파편화된 사실들 사이의 거시적 패턴과 통찰을 얻고 싶은 분</li>
+      <li>출처·검증 날짜가 콘텐츠 자체만큼 중요하다고 생각하는 분</li>
+      <li>자신이 아는 것의 경계를 완벽하게 통제하고 싶은 분</li>
+    </ul>
+    <ul class="who-list" data-en>
+      <li>You feel the difference between having read something and actually knowing it</li>
+      <li>You have had your conclusions shaken by contradictions between sources gathered at different times</li>
+      <li>You want macro patterns and insights from the fragmented facts you cannot hold in memory at once</li>
+      <li>Source and verification date matter to you as much as content</li>
+      <li>You want absolute command over the edges of what you know</li>
+    </ul>
+  </section>
+
+  <!-- BE LUCID — moat section -->
+  <div class="belucid">
+    <div class="belucid-header">
+      <div class="belucid-eyebrow" data-ko>Lucid를 어떻게 쓰나요</div>
+    <div class="belucid-eyebrow" data-en>How Lucid Works</div>
+      <div class="belucid-headline" data-ko>당신만의 검증된<br>두 번째 뇌를 가져보세요.</div>
+      <div class="belucid-headline" data-en>Build your own<br>verified second brain.</div>
+    </div>
+
+    <div class="belucid-body">
+      <p class="belucid-subtitle" data-ko>검증한 사실만 남기고, 필요한 순간 다시 씁니다.</p>
+      <p class="belucid-subtitle" data-en>Only what you've verified stays. Ready when you need to write.</p>
+
+      <p class="belucid-p" data-ko>Lucid는 매일 읽는 정보의 파편을 주어·술어·객체가 분명한 원자적 사실로 분해합니다. 당신은 각 사실을 직접 검토하고 수락·수정·폐기를 결정합니다. 당신이 수락한 것만이 개인 지식 그래프에 진입합니다.</p>
+      <p class="belucid-p" data-en>Lucid breaks down every information fragment you read into atomic facts — each with a clear subject, predicate, and object. You review each one and decide: accept, edit, or discard. Only what you accept enters your personal knowledge graph.</p>
+
+      <p class="belucid-p" data-ko>수락된 사실은 출처, 검증일, 검증자와 함께 영구히 기록됩니다. 검증되지 않은 기억, AI의 추론, 출처 없는 문장은 그래프 밖에 남습니다. 아는 것과 모르는 것 사이의 경계가 비로소 선명해집니다.</p>
+      <p class="belucid-p" data-en>Accepted facts are permanently recorded with source, verification date, and verifier. Unverified memory, AI inference, and unsourced claims remain outside. For the first time, the boundary between what you know and what you don't becomes clear.</p>
+
+      <hr class="belucid-divider">
+
+      <p class="belucid-p" data-ko>시간이 지날수록, 이 그래프는 당신의 판단을 돕기 시작합니다.</p>
+      <p class="belucid-p" data-en>Over time, this graph begins to support your judgment.</p>
+
+      <p class="belucid-p" data-ko>글을 쓰는 순간, 과거에 검증한 사실과 정확한 출처가 검색 없이 자동으로 떠오릅니다. 서로 다른 시점과 출처에서 수집한 사실이 충돌하면, 당신이 놓치기 쉬운 논리적 모순을 자동으로 알려줍니다. 검증된 사실이 충분히 쌓이면, 개별 문서에서는 볼 수 없었던 거시적 패턴과 통찰을 드러냅니다.</p>
+      <p class="belucid-p" data-en>When you write, verified facts and exact sources surface automatically — no searching required. When facts from different times or sources conflict, the easy-to-miss contradiction is flagged before it becomes a mistake. When enough facts accumulate, macro patterns and insights emerge that no single document could show.</p>
+
+      <hr class="belucid-divider">
+
+      <p class="belucid-p" data-ko><strong>Lucid는 정보를 더 많이 쌓게 하지 않습니다.<br>판단에 사용할 수 있는 지식만 선명하게 남깁니다.</strong></p>
+      <p class="belucid-p" data-en><strong>Lucid does not help you accumulate more information.<br>It keeps only the knowledge that is clear enough to act on.</strong></p>
+    </div>
+  </div>
+
+  <!-- founder -->
+  <section>
+    <div class="sec-tag" data-ko>— 누가 만듭니까 —</div>
+    <div class="sec-tag" data-en>— FOUNDER —</div>
+    <div class="founder">
+      <div class="founder-name">Kiheung Park · 박기흥</div>
+      <div class="founder-role">Founder · Lucid</div>
+      <div class="founder-why" data-ko>
+        저는 <strong>검증된 판단이 AI 시대의 가장 희소한 자원</strong>이 될 것이라고 믿습니다.<br>
+        무한히 생성되는 정보 속에서, 직접 검토하고 결정한 지식만이 진짜입니다.<br>
+        그 지식을 개인이 소유할 수 있는 인프라를 만드는 것이 제가 하는 일입니다.
+      </div>
+      <div class="founder-why" data-en>
+        I believe <strong>verified judgment is the scarcest resource of the AI era.</strong><br>
+        In a world of infinite generated content, only the knowledge you have personally reviewed and decided to trust is real.<br>
+        Building the infrastructure for individuals to own that knowledge is what I do.
+      </div>
+      <ul class="founder-creds">
+        <li>Carnegie Mellon University · MSIT · LTI/CASOS</li>
+        <li>World Customs Organization · Data Analytics · Brussels</li>
+        <li>Sungkyunkwan University · Applied AI · PhD candidate</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- form -->
+  <section id="apply">
+    <div class="sec-tag" data-ko>— 베타 신청 —</div>
+    <div class="sec-tag" data-en>— APPLY —</div>
+
+    <div class="form-wrap">
+      <div class="form-header">
+        <div class="scarcity" data-ko>잔여 자리: 23 / 30</div>
+        <div class="scarcity" data-en>Remaining spots: 23 / 30</div>
+        <div class="form-meta" data-ko>2026년 7월 시작 · 8주 · Chrome 확장 + 웹앱<br>Phase 1 출시 시 평생 무료</div>
+        <div class="form-meta" data-en>Starting July 2026 · 8 weeks · Chrome extension + web app<br>Lifetime free at Phase 1 launch</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label" data-ko>이메일</label>
+        <label class="field-label" data-en>Email</label>
+        <input type="email" placeholder="your@email.com" required>
+      </div>
+
+      <div class="field">
+        <label class="field-label" data-ko>직무 / 분야</label>
+        <label class="field-label" data-en>Profession / Field</label>
+        <input type="text" id="prof-input"
+          data-placeholder-ko="예. 정책 연구원 / AI 거버넌스"
+          data-placeholder-en="e.g. policy researcher / AI governance"
+          placeholder="예. 정책 연구원 / AI 거버넌스" required>
+      </div>
+
+      <div class="field">
+        <label class="field-label" data-ko>질문 1</label>
+        <label class="field-label" data-en>Question 1</label>
+        <p class="field-q" data-ko>
+          중요한 문서(논문, 보고서, 계약서 등)를 읽다가 나중에 인용하거나 근거로 삼을 핵심 팩트를 발견했을 때, 단순한 스크랩을 넘어 그 사실의 출처와 정확성을 따로 기록하고 확인하기 위해 현재 어떤 방식을 사용합니까? 그 과정에서 가장 귀찮거나 피로한 지점은 어디입니까?
+        </p>
+        <p class="field-q" data-en>
+          When you find a core fact in a critical document that you must quote or reference later, how do you currently record and verify its specific source and accuracy beyond simple bookmarking? What is the most tedious friction point in that verification process?
+        </p>
+        <textarea id="q1-input"
+          data-placeholder-ko="현재 방식과 가장 피로한 지점 (2–4문장)"
+          data-placeholder-en="Your current method and where it breaks down (2–4 sentences)"
+          placeholder="현재 방식과 가장 피로한 지점 (2–4문장)" required></textarea>
+      </div>
+
+      <div class="field">
+        <label class="field-label" data-ko>질문 2</label>
+        <label class="field-label" data-en>Question 2</label>
+        <p class="field-q" data-ko>
+          중요한 결과물(의견서, 보고서, 논문 등)을 작성할 때, 과거에 분명히 읽고 확인했던 사실인데 정작 쓸 시점이 되면 정확한 수치·출처·원본 맥락이 흐릿해져서 다시 찾느라 시간을 낭비하거나 리스크를 느꼈던 구체적인 경험을 들려주세요.
+        </p>
+        <p class="field-q" data-en>
+          When drafting a high-stakes deliverable, describe a specific experience where a fact you previously reviewed became blurry at the moment of writing — forgotten metrics, lost source URLs, faded context — forcing you to waste time re-searching or accept professional risk.
+        </p>
+        <textarea id="q2-input"
+          data-placeholder-ko="구체적인 상황 (2–4문장)"
+          data-placeholder-en="A specific situation (2–4 sentences)"
+          placeholder="구체적인 상황 (2–4문장)" required></textarea>
+      </div>
+
+      <div class="btn-wrap">
+        <button type="button" class="btn" data-ko>신청 제출</button>
+        <button type="button" class="btn" data-en>Submit application</button>
+        <p class="btn-note" data-ko>스크리닝 후 7일 이내 개별 연락드립니다.</p>
+        <p class="btn-note" data-en>Individual response within 7 days after screening.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="sig">Be Lucid. · Own what you know.</div>
+
+</div>
+
+<script>
+  function setLang(l) {
+    document.body.className = 'lang-' + l;
+    document.getElementById('btn-ko').className = l==='ko' ? 'on' : '';
+    document.getElementById('btn-en').className = l==='en' ? 'on' : '';
+    ['prof-input','q1-input','q2-input'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.placeholder = el.dataset['placeholder'+(l==='ko'?'Ko':'En')] || '';
+    });
+    localStorage.setItem('lucid-lang', l);
+  }
+  if (localStorage.getItem('lucid-lang') === 'en') setLang('en');
+
+  // B-62 landing-integration: form wiring -> POST /api/applications
+  (function() {
+    var submitButtons = document.querySelectorAll('#apply .btn-wrap .btn');
+    if (!submitButtons.length) return;
+
+    var formWrap = document.querySelector('#apply .form-wrap');
+    var emailInput = formWrap && formWrap.querySelector('input[type=email]');
+    var profInput = document.getElementById('prof-input');
+    var q1Input = document.getElementById('q1-input');
+    var q2Input = document.getElementById('q2-input');
+
+    var STRINGS = {
+      ko: {
+        success_title: '접수됨',
+        success_body: '신청이 접수되었습니다. 스크리닝 후 7일 이내에 개별 연락드립니다.',
+        error_missing: '모든 필드를 입력해주세요.',
+        error_email: '올바른 이메일 주소를 입력해주세요.',
+        error_server: '제출에 실패했습니다. 잠시 후 다시 시도해주세요.',
+      },
+      en: {
+        success_title: 'Application received',
+        success_body: 'Your application has been received. Individual response within 7 days after screening.',
+        error_missing: 'Please fill in every field.',
+        error_email: 'Please enter a valid email address.',
+        error_server: 'Submission failed. Please try again shortly.',
+      },
+    };
+
+    function activeLang() {
+      return document.body.className.indexOf('lang-en') !== -1 ? 'en' : 'ko';
+    }
+
+    function showError(msg) {
+      var existing = document.getElementById('b62-form-error');
+      if (existing) existing.remove();
+      var div = document.createElement('div');
+      div.id = 'b62-form-error';
+      div.style.cssText = 'margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--red);letter-spacing:1px;text-align:center;';
+      div.textContent = msg;
+      var btnWrap = formWrap.querySelector('.btn-wrap');
+      btnWrap.appendChild(div);
+    }
+
+    function clearError() {
+      var existing = document.getElementById('b62-form-error');
+      if (existing) existing.remove();
+    }
+
+    function showSuccess() {
+      formWrap.style.display = 'none';
+      var section = document.getElementById('apply');
+      if (document.getElementById('b62-success')) return;
+      var box = document.createElement('div');
+      box.id = 'b62-success';
+      box.className = 'form-wrap';
+      box.style.cssText = 'text-align:center;';
+      var lang = activeLang();
+      var s = STRINGS[lang];
+      var h = document.createElement('div');
+      h.className = 'scarcity';
+      h.style.color = 'var(--teal)';
+      h.textContent = s.success_title;
+      var p = document.createElement('div');
+      p.className = 'form-meta';
+      p.style.marginTop = '12px';
+      p.textContent = s.success_body;
+      box.appendChild(h);
+      box.appendChild(p);
+      section.appendChild(box);
+    }
+
+    function setButtonsDisabled(disabled) {
+      submitButtons.forEach(function(b) {
+        b.disabled = disabled;
+        b.style.opacity = disabled ? '0.5' : '';
+        b.style.cursor = disabled ? 'not-allowed' : '';
+      });
+    }
+
+    function emailValid(v) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+    }
+
+    function handleSubmit() {
+      var lang = activeLang();
+      var s = STRINGS[lang];
+      clearError();
+
+      var email = (emailInput && emailInput.value || '').trim();
+      var prof = (profInput && profInput.value || '').trim();
+      var q1 = (q1Input && q1Input.value || '').trim();
+      var q2 = (q2Input && q2Input.value || '').trim();
+
+      if (!email || !prof || !q1 || !q2) {
+        showError(s.error_missing);
+        return;
+      }
+      if (!emailValid(email)) {
+        showError(s.error_email);
+        return;
+      }
+
+      setButtonsDisabled(true);
+
+      var body = {
+        email: email,
+        display_name: prof,
+        lang: lang,
+        survey_q1_key: 'verification_method_friction',
+        survey_q1_value: q1,
+        survey_q2_key: 'blurry_fact_recall_experience',
+        survey_q2_value: q2,
+      };
+
+      fetch('/api/applications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(function(resp) {
+        if (resp.ok || resp.status === 201) {
+          return resp.json().then(function() { showSuccess(); });
+        }
+        return resp.json().catch(function() { return {}; }).then(function() {
+          showError(s.error_server);
+          setButtonsDisabled(false);
+        });
+      }).catch(function() {
+        showError(s.error_server);
+        setButtonsDisabled(false);
+      });
+    }
+
+    submitButtons.forEach(function(b) {
+      b.addEventListener('click', handleSubmit);
+    });
+  })();
+</script>
+</body>
+</html>

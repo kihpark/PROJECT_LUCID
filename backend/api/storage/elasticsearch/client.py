@@ -23,6 +23,9 @@ _INDEX_PREFIX = os.getenv("LUCID_INDEX_PREFIX", "")
 LUCID_FACTS = f"{_INDEX_PREFIX}lucid_facts"
 LUCID_OBJECTS = f"{_INDEX_PREFIX}lucid_objects"
 LUCID_SOURCES = f"{_INDEX_PREFIX}lucid_sources"
+# B-62 landing-integration: public, pre-account beta-applicant intake
+# from the v8.2 landing page. ES-only (no alembic migration).
+LUCID_APPLICATIONS = f"{_INDEX_PREFIX}lucid_applications"
 
 _client: Elasticsearch | None = None
 _client_lock = Lock()

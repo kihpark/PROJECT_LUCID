@@ -13,9 +13,14 @@ from api.storage.elasticsearch.mappings import (
 def test_three_indexes_defined():
     """B-38: keys now reflect the LUCID_INDEX_PREFIX in effect. We
     assert the SUFFIXES match the canonical names so the test passes
-    both under prod (no prefix) and integration (test_ prefix)."""
+    both under prod (no prefix) and integration (test_ prefix).
+
+    B-62 landing-integration: `applications` joins the set as a
+    public, pre-account intake index. The smoke contract is still
+    facts / objects / sources (asserted separately by the smoke check).
+    """
     suffixes = {k.split("lucid_")[-1] for k in INDEX_MAPPINGS}
-    assert suffixes == {"facts", "objects", "sources"}
+    assert suffixes == {"facts", "objects", "sources", "applications"}
 
 
 def test_lucid_facts_uses_nori_for_korean_and_aliases():

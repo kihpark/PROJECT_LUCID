@@ -10,6 +10,7 @@ import logging
 from collections.abc import Iterable
 
 from api.storage.elasticsearch.client import (
+    LUCID_APPLICATIONS,
     LUCID_FACTS,
     LUCID_OBJECTS,
     LUCID_SOURCES,
@@ -21,8 +22,14 @@ logger = logging.getLogger("lucid.es.indexes")
 
 
 def _ordered_index_names() -> list[str]:
-    """Stable order for creation/deletion (matches INDEX_MAPPINGS keys)."""
-    return [LUCID_FACTS, LUCID_OBJECTS, LUCID_SOURCES]
+    """Stable order for creation/deletion (matches INDEX_MAPPINGS keys).
+
+    B-62 landing-integration: LUCID_APPLICATIONS appended at the end so
+    create_indexes() covers it on app boot. The 3-index smoke contract
+    (facts / objects / sources) is unchanged — the smoke check does not
+    iterate over this list.
+    """
+    return [LUCID_FACTS, LUCID_OBJECTS, LUCID_SOURCES, LUCID_APPLICATIONS]
 
 
 def create_indexes(names: Iterable[str] | None = None) -> dict[str, str]:
