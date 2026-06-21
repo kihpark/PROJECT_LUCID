@@ -227,9 +227,23 @@ LUCID_SOURCES_MAPPING: dict[str, Any] = {
 }
 
 
-# B-62 landing-integration: public beta-applicant intake from the
-# v8.2 landing page. strict_dynamic mapping; no Korean analyzer
-# (q1/q2 free-text is short, mixed-language is fine on standard).
+# B-62 landing-integration + feat/landing-fix-spec: public beta
+# applicant intake from the v8.2 landing page. strict_dynamic
+# mapping; no Korean analyzer (q1/q2 free-text is short, mixed
+# language is fine on standard).
+#
+# Shape (PO final): flat 4-field form (email, profession, q1, q2)
+# plus server-set meta (source / status / created_at /
+# submitter_ip_hash / user_agent / lang).
+#
+# Migrated from landing-integration:
+#   - dropped: display_name, survey_q1_key, survey_q1_value,
+#     survey_q2_key, survey_q2_value
+#   - added:   profession (text), q1 (text), q2 (text),
+#              source (keyword)
+#   - renamed: submitted_at -> created_at
+# fix-admission depends on `status` (keyword), `source` (keyword),
+# `created_at` (date) so the review queue can filter cleanly.
 LUCID_APPLICATIONS_MAPPING: dict[str, Any] = {
     "mappings": {
         "dynamic": "strict",
@@ -237,14 +251,13 @@ LUCID_APPLICATIONS_MAPPING: dict[str, Any] = {
             "application_id": {"type": "keyword"},
             "email": {"type": "keyword"},
             "email_lower": {"type": "keyword"},
-            "display_name": {"type": "text"},
+            "profession": {"type": "text"},
+            "q1": {"type": "text"},
+            "q2": {"type": "text"},
             "lang": {"type": "keyword"},
-            "survey_q1_key": {"type": "keyword"},
-            "survey_q1_value": {"type": "text"},
-            "survey_q2_key": {"type": "keyword"},
-            "survey_q2_value": {"type": "text"},
+            "source": {"type": "keyword"},
             "status": {"type": "keyword"},
-            "submitted_at": {"type": "date"},
+            "created_at": {"type": "date"},
             "submitter_ip_hash": {"type": "keyword"},
             "user_agent": {"type": "text"},
         },

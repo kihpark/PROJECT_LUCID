@@ -559,12 +559,10 @@
 
       var body = {
         email: email,
-        display_name: prof,
+        profession: prof,
+        q1: q1,
+        q2: q2,
         lang: lang,
-        survey_q1_key: 'verification_method_friction',
-        survey_q1_value: q1,
-        survey_q2_key: 'blurry_fact_recall_experience',
-        survey_q2_value: q2,
       };
 
       fetch('/api/applications', {

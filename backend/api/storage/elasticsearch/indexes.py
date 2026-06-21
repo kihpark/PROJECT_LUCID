@@ -32,6 +32,53 @@ def _ordered_index_names() -> list[str]:
     return [LUCID_FACTS, LUCID_OBJECTS, LUCID_SOURCES, LUCID_APPLICATIONS]
 
 
+# feat/landing-fix-spec: applications-only mapping reconciler. The
+# v8.2 landing form schema flipped from {display_name, survey_q1_*,
+# survey_q2_*} to flat {profession, q1, q2} + server meta
+# (source / status / created_at). On dev clusters that already have
+# the legacy mapping baked in, ES rejects the new strict_dynamic
+# writes with `strict_dynamic_mapping_exception`. Recreating is safe
+# because no production applicants exist yet — this index ships
+# fresh with the PO-final shape.
+_LEGACY_APPLICATION_KEYS = {
+    "display_name",
+    "survey_q1_key", "survey_q1_value",
+    "survey_q2_key", "survey_q2_value",
+    "submitted_at",
+}
+_REQUIRED_APPLICATION_KEYS = {"profession", "q1", "q2", "source", "created_at"}
+
+
+def _applications_mapping_needs_recreate(client, index_name: str) -> bool:
+    """True if `lucid_applications` is on the pre-fix-spec mapping.
+
+    Triggers a destructive recreate when ANY legacy key is present OR
+    ANY required new key is absent. Other indexes use the no-op
+    'exists' path in create_indexes() — this helper is wired only
+    for LUCID_APPLICATIONS.
+    """
+    if not client.indices.exists(index=index_name):
+        return False
+    try:
+        mapping = client.indices.get_mapping(index=index_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "applications mapping inspect failed for %s: %s — leaving as-is",
+            index_name, exc,
+        )
+        return False
+    props = (
+        mapping.get(index_name, {})
+        .get("mappings", {})
+        .get("properties", {})
+    )
+    present = set(props.keys())
+    legacy_hits = present & _LEGACY_APPLICATION_KEYS
+    missing_required = _REQUIRED_APPLICATION_KEYS - present
+    return bool(legacy_hits) or bool(missing_required)
+
+
+
 def create_indexes(names: Iterable[str] | None = None) -> dict[str, str]:
     """Create the requested indexes (or all three by default).
 
@@ -44,6 +91,15 @@ def create_indexes(names: Iterable[str] | None = None) -> dict[str, str]:
     for name in names:
         if name not in INDEX_MAPPINGS:
             raise ValueError(f"Unknown index: {name}")
+        # feat/landing-fix-spec: applications-only legacy-mapping check.
+        if (
+            name == LUCID_APPLICATIONS
+            and _applications_mapping_needs_recreate(client, name)
+        ):
+            logger.warning(
+                "Index %s has legacy/incomplete mapping — recreating", name,
+            )
+            client.indices.delete(index=name)
         if client.indices.exists(index=name):
             result[name] = "exists"
             logger.info("Index %s already present, skipping", name)
