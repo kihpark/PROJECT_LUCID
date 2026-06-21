@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API client — wraps fetch with the JWT Authorization header.
  */
 import { getToken, clearToken } from './auth';
@@ -352,4 +352,18 @@ export function approveApplication(id: string): Promise<ApproveResponse> {
     `/api/admin/applications/${encodeURIComponent(id)}/approve`,
     { method: 'POST' },
   );
+}
+
+// ---------------------------------------------------------------------------
+// M4a — assistant brief
+// ---------------------------------------------------------------------------
+
+export function postAssistantBrief(
+  query: string,
+  spaceId: string,
+): Promise<import('./types').AssistantBriefResponse> {
+  return request<import('./types').AssistantBriefResponse>('/api/assistant/brief', {
+    method: 'POST',
+    body: JSON.stringify({ query, space_id: spaceId }),
+  });
 }

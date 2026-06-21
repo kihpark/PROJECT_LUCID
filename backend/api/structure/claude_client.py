@@ -1,4 +1,4 @@
-"""Anthropic Claude client for the Structure stage (Sprint 3 PR-3-1).
+﻿"""Anthropic Claude client for the Structure stage (Sprint 3 PR-3-1).
 
 Wraps `anthropic.Anthropic().messages.create` with:
   - Default model: claude-sonnet-4-5 (PO directive 2026-05-21 [변경 5])
@@ -220,3 +220,45 @@ def _build_result(
     result.latency_ms = latency_ms
     result.model_used = model_name
     return result
+
+def call_claude_structured(
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 600,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Thin wrapper for a single Claude call that expects JSON output.
+
+    Returns the parsed JSON dict. Raises RuntimeError on any failure
+    (missing key, bad JSON, API error) so the caller can handle
+    degradation uniformly.
+    """
+    if not _api_key_present():
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+    try:
+        from anthropic import Anthropic
+    except ImportError as exc:
+        raise RuntimeError("anthropic package not installed") from exc
+
+    chosen_model = model or "claude-sonnet-4-6"
+    client = Anthropic()
+    try:
+        response = client.messages.create(
+            model=chosen_model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Claude API call failed: {exc}") from exc
+
+    text_blocks: list[str] = []
+    for block in response.content:
+        if getattr(block, "type", "") == "text":
+            text_blocks.append(getattr(block, "text", "") or "")
+    raw = "\n".join(text_blocks).strip()
+
+    parsed = _parse_json_safely(raw)
+    if parsed is None:
+        raise RuntimeError(f"Claude returned non-JSON: {raw[:200]}")
+    return parsed

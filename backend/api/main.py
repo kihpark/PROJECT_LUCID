@@ -1,4 +1,4 @@
-"""Lucid API - FastAPI application entry point.
+﻿"""Lucid API - FastAPI application entry point.
 
 Validation infrastructure for the post-AI internet.
 Sprint 1A PR-1A-1: v2 stack (Postgres + Elasticsearch) replaces Neo4j + FAISS.
@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import (
     admin_applications,
     applications,
+    assistant,
     auth,
     capture,
     graph,
@@ -160,5 +161,7 @@ for _router in (
     validation_api.router,
     applications.router,
     admin_applications.router,
+    assistant.router,
 ):
     app.include_router(_router)
+
