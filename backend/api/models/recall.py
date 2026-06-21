@@ -47,6 +47,11 @@ class RecallFact(LucidBaseModel):
     # back to the raw object_value, which is the literal).
     subject_label: str | None = None
     object_label: str | None = None
+    # B-62 natural-spo-display: natural-English predicate gloss for
+    # the recall card. None on legacy facts captured before the OPL
+    # layer landed; the frontend falls back to the canonical predicate
+    # surface in that case.
+    predicate_label: str | None = None
 
 
 class RecallResponse(LucidBaseModel):

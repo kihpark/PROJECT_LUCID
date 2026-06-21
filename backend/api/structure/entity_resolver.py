@@ -19,11 +19,22 @@ appended to the existing canonical entity's aliases.
 
 Constraints (PO directive 2026-06-21):
   - primary_label preserves the user's CAPTURE SURFACE (no translation,
-    no paraphrase).
+    no paraphrase). The LLM-supplied `name` (when present) is treated
+    as the canonical *natural* surface — pick_natural_primary prefers
+    it without forcing English.
   - primary_lang records the detected language code.
   - entity_type is left None in this PR (later ticket).
   - When no co-mention hint exists and the surface differs, the two
     stay separate - that is the honest "we do not know" answer.
+
+B-62 natural-spo-display additions (2026-06-21):
+  - `pick_natural_primary(llm_name, llm_name_en, surface, surface_lang)`
+    chooses the primary label without language coercion. When the LLM
+    gives `name` we trust it as the natural form. `name_en` becomes an
+    alias rather than overriding a Korean primary label.
+  - `resolve_entity(...)` accepts an optional `llm_name` kwarg and
+    seeds aliases from EVERY non-empty unique input surface that is
+    not the primary.
 """
 from __future__ import annotations
 
@@ -48,9 +59,60 @@ def _detect_lang(text: str) -> str:
         return "en"
     for ch in text:
         # Hangul Syllables block + Jamo blocks.
-        if "\uAC00" <= ch <= "\uD7A3" or "\u1100" <= ch <= "\u11FF" or "\u3130" <= ch <= "\u318F":
+        if "가" <= ch <= "힣" or "ᄀ" <= ch <= "ᇿ" or "㄰" <= ch <= "㆏":
             return "ko"
     return "en"
+
+
+def pick_natural_primary(
+    llm_name: str | None,
+    llm_name_en: str | None,
+    surface: str,
+    surface_lang: str,
+) -> tuple[str, str]:
+    """Pick the (primary_label, primary_lang) for a new canonical entity.
+
+    Precedence (B-62 natural-spo-display):
+      1. `llm_name` when non-empty. We trust the LLM's "natural" surface
+         and re-detect its language — Korean stays Korean, English
+         stays English. We NEVER force English just because `name_en`
+         exists alongside.
+      2. Else: the capture surface and its declared lang.
+
+    `llm_name_en` is intentionally consulted ONLY as alias material in
+    `resolve_entity`'s create path. Promoting it to primary_label would
+    silently translate the user's Korean capture into English — the
+    exact regression PO called out.
+    """
+    candidate = (llm_name or "").strip()
+    if candidate:
+        return candidate, _detect_lang(candidate)
+    return surface, surface_lang
+
+
+def _build_alias_seed(
+    primary: str,
+    surface: str,
+    llm_name: str | None,
+    llm_name_en: str | None,
+) -> list[str]:
+    """Collect every non-empty unique surface in {surface, llm_name,
+    llm_name_en} that is NOT the chosen primary. Case-insensitive
+    de-dup. Order preserved roughly as: surface, llm_name, llm_name_en."""
+    primary_lc = primary.strip().lower()
+    seen: set[str] = {primary_lc}
+    out: list[str] = []
+    for candidate in (surface, llm_name, llm_name_en):
+        if not candidate:
+            continue
+        c = str(candidate).strip()
+        if not c:
+            continue
+        if c.lower() in seen:
+            continue
+        seen.add(c.lower())
+        out.append(c)
+    return out
 
 
 def _lookup_by_field(
@@ -91,6 +153,8 @@ def _create_entity(
     knowledge_space_id: str,
     aliases: list[str] | None = None,
     name_en: str | None = None,
+    primary_label: str | None = None,
+    primary_lang: str | None = None,
 ) -> str:
     """Insert a fresh canonical entity. Returns its object_uid.
 
@@ -98,8 +162,15 @@ def _create_entity(
     working) AND the new canonical `primary_label` / `primary_lang` /
     `aliases` fields. `class` defaults to "concept" - the canonical
     entity_type ontology is a separate later ticket.
+
+    B-62 natural-spo-display: when `primary_label` is supplied the
+    canonical surface picks up that value (the LLM's natural name);
+    otherwise we fall back to the legacy "primary = surface" path so
+    existing call sites still get the right shape.
     """
     object_uid = new_uid()
+    chosen_primary = primary_label or surface
+    chosen_lang = primary_lang or lang
     # B-62 data bedrock: lucid_objects mapping has dynamic=strict, so we
     # only write fields it knows about. Skip embedding for now (the
     # processor will compute it on the object_matcher path; entity
@@ -107,9 +178,11 @@ def _create_entity(
     body: dict[str, Any] = {
         "object_uid": object_uid,
         "class": "concept",
-        "name": surface,
-        "primary_label": surface,
-        "primary_lang": lang,
+        # `name` carries the canonical natural surface so the recall
+        # display path keeps working unchanged.
+        "name": chosen_primary,
+        "primary_label": chosen_primary,
+        "primary_lang": chosen_lang,
         "aliases": list(aliases or []),
         "properties": {},
         "fact_uids": [],
@@ -170,6 +243,7 @@ def resolve_entity(
     *,
     space_id: str,
     co_mention_en: str | None = None,
+    llm_name: str | None = None,
     es_client: Any | None = None,
 ) -> tuple[str, bool]:
     """Resolve a (surface, lang) entity reference to a canonical entity_id.
@@ -183,7 +257,17 @@ def resolve_entity(
          the English form. On hit, APPEND the Korean (or other) surface
          to that entity's aliases - this is the SpaceX <-> 스페이스X
          convergence path the PO called out.
-      6. create_new with primary_label = surface, primary_lang = lang.
+      6. create_new with primary_label picked via pick_natural_primary.
+
+    B-62 natural-spo-display:
+      - `llm_name` carries the LLM-emitted natural surface for the
+        entity. When present, the CREATE path uses
+        pick_natural_primary(llm_name, co_mention_en, surface,
+        surface_lang) for primary_label and primary_lang. The chosen
+        primary is excluded from aliases; every other non-empty input
+        surface is preserved as an alias.
+      - The LOOKUP path is unchanged so existing exact/alias matches
+        keep landing on the same object.
 
     Returns (entity_id, was_created).
     """
@@ -221,18 +305,29 @@ def resolve_entity(
                     _append_alias(client, object_uid=uid, new_alias=surface)
                     return uid, False
 
-    # Nothing matched - mint a fresh canonical entity.
+    # Nothing matched - mint a fresh canonical entity using the
+    # natural-primary picker so a Korean capture stays Korean.
+    primary_label, primary_lang = pick_natural_primary(
+        llm_name, co_mention_en, surface, lang,
+    )
+    aliases = _build_alias_seed(
+        primary_label, surface, llm_name, co_mention_en,
+    )
     object_uid = _create_entity(
         client,
         surface=surface,
         lang=lang,
         knowledge_space_id=space_id,
-        name_en=co_mention_en if co_mention_en and co_mention_en != surface else None,
+        aliases=aliases,
+        name_en=co_mention_en if co_mention_en and co_mention_en != primary_label else None,
+        primary_label=primary_label,
+        primary_lang=primary_lang,
     )
     return object_uid, True
 
 
 __all__ = [
     "resolve_entity",
+    "pick_natural_primary",
     "_detect_lang",
 ]

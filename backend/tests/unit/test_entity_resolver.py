@@ -1,11 +1,11 @@
-"""B-62 structure-resolve - entity_resolver unit tests."""
+"""B-62 structure-resolve + natural-spo-display - entity_resolver tests."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 import pytest
 
-from api.structure.entity_resolver import resolve_entity
+from api.structure.entity_resolver import pick_natural_primary, resolve_entity
 
 
 def _hit(uid: str, **extra) -> dict:
@@ -164,3 +164,142 @@ def test_cross_language_without_co_mention_creates_separate_entities() -> None:
     assert created1 is True
     assert created2 is True
     assert uid1 != uid2
+
+
+# --- B-62 natural-spo-display: pick_natural_primary -----------------------
+
+
+def test_pick_natural_primary_uses_llm_name_when_present_english() -> None:
+    """SpaceX captured with the same llm_name → primary = SpaceX / en."""
+    label, lang = pick_natural_primary(
+        llm_name="SpaceX",
+        llm_name_en=None,
+        surface="SpaceX",
+        surface_lang="en",
+    )
+    assert label == "SpaceX"
+    assert lang == "en"
+
+
+def test_pick_natural_primary_uses_llm_name_when_present_korean() -> None:
+    """The LLM name is Korean — we trust it as the natural form. We do
+    NOT promote name_en to override a Korean primary."""
+    label, lang = pick_natural_primary(
+        llm_name="삼성전자",
+        llm_name_en="Samsung Electronics",
+        surface="삼성전자",
+        surface_lang="ko",
+    )
+    assert label == "삼성전자"
+    assert lang == "ko"
+
+
+def test_pick_natural_primary_falls_back_to_surface_when_llm_name_absent() -> None:
+    label, lang = pick_natural_primary(
+        llm_name=None,
+        llm_name_en=None,
+        surface="스페이스X",
+        surface_lang="ko",
+    )
+    assert label == "스페이스X"
+    assert lang == "ko"
+
+
+def test_pick_natural_primary_falls_back_to_surface_when_llm_name_blank() -> None:
+    label, lang = pick_natural_primary(
+        llm_name="   ",  # whitespace-only -> treat as absent
+        llm_name_en="Whatever",
+        surface="회사채",
+        surface_lang="ko",
+    )
+    assert label == "회사채"
+    assert lang == "ko"
+
+
+# --- B-62 natural-spo-display: resolve_entity create-path uses LLM name ---
+
+
+def test_korean_capture_without_llm_name_creates_korean_primary() -> None:
+    """`회사채` Korean capture, no llm_name -> primary_label = `회사채`,
+    primary_lang = `ko`."""
+    client = MagicMock()
+    client.search.return_value = _no_hit()
+    uid, was_created = resolve_entity(
+        "회사채", "ko", space_id="ks-1", es_client=client,
+    )
+    assert was_created is True
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "회사채"
+    assert body["primary_lang"] == "ko"
+
+
+def test_english_capture_without_llm_name_creates_english_primary() -> None:
+    """`SpaceX` English capture -> primary_label = `SpaceX`,
+    primary_lang = `en`."""
+    client = MagicMock()
+    client.search.return_value = _no_hit()
+    uid, was_created = resolve_entity(
+        "SpaceX", "en", space_id="ks-1", es_client=client,
+    )
+    assert was_created is True
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "SpaceX"
+    assert body["primary_lang"] == "en"
+
+
+def test_korean_capture_with_english_llm_name_keeps_english_primary() -> None:
+    """`스페이스X` Korean capture WITH llm_name='SpaceX' -> primary
+    becomes the LLM-provided 'SpaceX' / 'en'; the Korean surface lands
+    in aliases tagged 'ko'."""
+    client = MagicMock()
+    client.search.return_value = _no_hit()
+    uid, was_created = resolve_entity(
+        "스페이스X", "ko",
+        space_id="ks-1",
+        llm_name="SpaceX",
+        es_client=client,
+    )
+    assert was_created is True
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "SpaceX"
+    assert body["primary_lang"] == "en"
+    # The Korean capture surface MUST be preserved as an alias.
+    assert "스페이스X" in body["aliases"]
+
+
+def test_resolve_entity_aliases_preserve_every_input_surface() -> None:
+    """All non-empty unique surfaces (other than the chosen primary)
+    must land in aliases regardless of language."""
+    client = MagicMock()
+    client.search.return_value = _no_hit()
+    uid, _ = resolve_entity(
+        "스페이스X", "ko",
+        space_id="ks-1",
+        llm_name="SpaceX",
+        co_mention_en="SpaceX Inc.",
+        es_client=client,
+    )
+    body = client.index.call_args.kwargs["document"]
+    # primary = SpaceX. Aliases should include the Korean surface and
+    # the co_mention_en value (SpaceX Inc.).
+    assert body["primary_label"] == "SpaceX"
+    aliases_lc = [a.lower() for a in body["aliases"]]
+    assert "스페이스x" in aliases_lc
+    assert "spacex inc." in aliases_lc
+    # The chosen primary is NOT included as an alias.
+    assert "spacex" not in aliases_lc
+
+
+def test_resolve_entity_llm_name_only_no_redundant_alias() -> None:
+    """When llm_name == surface, no duplicate alias is created."""
+    client = MagicMock()
+    client.search.return_value = _no_hit()
+    uid, _ = resolve_entity(
+        "SpaceX", "en",
+        space_id="ks-1",
+        llm_name="SpaceX",
+        es_client=client,
+    )
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "SpaceX"
+    assert body["aliases"] == []

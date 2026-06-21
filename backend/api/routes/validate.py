@@ -369,7 +369,7 @@ def _coerce_fact_to_factnode(
     canonical_kwargs: dict[str, Any] = {}
     for canon_field in (
         "predicate_code", "original_surface", "capture_lang",
-        "object_canonical", "canonical_key",
+        "object_canonical", "canonical_key", "predicate_label",
     ):
         if meta.get(canon_field):
             canonical_kwargs[canon_field] = meta[canon_field]

@@ -97,13 +97,23 @@ export const PREDICATE_LABELS: Record<string, PredicateLabelEntry> = {
 };
 
 /**
- * Return the Korean display label for a canonical predicate.
+ * Return the display label for a canonical predicate.
  *
- * Contract:
- *   - If the predicate is in PREDICATE_LABELS, return its `ko` label.
+ * Contract (B-62 natural-spo-display):
+ *   - If `predicate_label` is a non-empty string, return it verbatim.
+ *     This is the server-resolved natural-English gloss from the OPL
+ *     pipeline and wins over the static seed below.
+ *   - Else if `canonicalOrLabel` is in PREDICATE_LABELS, return its
+ *     `ko` label (curated Korean reading-friendly text).
  *   - Otherwise, return the input string unchanged (fallback).
  *   - Empty string in → empty string out (never throws).
  */
-export function predicateLabel(canonical: string): string {
-  return PREDICATE_LABELS[canonical]?.ko ?? canonical;
+export function predicateLabel(
+  canonicalOrLabel: string,
+  predicate_label?: string | null,
+): string {
+  if (typeof predicate_label === 'string' && predicate_label.length > 0) {
+    return predicate_label;
+  }
+  return PREDICATE_LABELS[canonicalOrLabel]?.ko ?? canonicalOrLabel;
 }

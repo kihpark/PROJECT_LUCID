@@ -293,6 +293,10 @@ def _hit_to_fact(hit: dict[str, Any]) -> RecallFact | None:
             negation_flag=bool(source.get("negation_flag", False)),
             negation_scope=source.get("negation_scope"),
             score=float(hit.get("_score") or 0.0),
+            # B-62 natural-spo-display: surface the natural english
+            # predicate gloss when the ES doc carries it. Legacy facts
+            # leave it None and the frontend falls back to predicate.
+            predicate_label=source.get("predicate_label"),
         )
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning("recall: malformed fact source dropped: %s", exc)
