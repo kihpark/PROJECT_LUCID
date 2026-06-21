@@ -1,11 +1,16 @@
-"""B-62 landing-integration: POST /api/applications integration tests."""
+"""POST /api/applications integration tests.
+
+feat/landing-fix-spec: 4-field shape (email + profession + q1 + q2 + lang)
+with server-set source / status / created_at and email_lower-based
+upsert (same email -> same application_id, last-write-wins).
+"""
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
-from api.storage.elasticsearch.client import LUCID_APPLICATIONS, get_client
+from api.storage.elasticsearch.client import LUCID_APPLICATIONS
 
 
 @pytest.fixture()
@@ -30,24 +35,24 @@ def _clear_applications_index(es_client):
 def _payload(**overrides):
     base = {
         "email": "applicant@example.com",
-        "display_name": "policy researcher",
+        "profession": "policy researcher / AI governance",
+        "q1": "I currently bookmark URLs in Notion but the source context blurs.",
+        "q2": "Last quarter I cited a stat from a paper I had read but could not relocate.",
         "lang": "ko",
-        "survey_q1_key": "verification_method_friction",
-        "survey_q1_value": "I currently bookmark URLs in Notion but the source context blurs.",
-        "survey_q2_key": "blurry_fact_recall_experience",
-        "survey_q2_value": "Last quarter I cited a stat from a paper I had read but could not relocate.",
     }
     base.update(overrides)
     return base
 
 
-def test_valid_application_returns_201_and_persists(client, _clear_applications_index, es_client):
+def test_valid_application_returns_201_and_persists(
+    client, _clear_applications_index, es_client
+):
     resp = client.post("/api/applications", json=_payload())
     assert resp.status_code == 201
     body = resp.json()
-    assert body["status"] == "received"
-    assert body["duplicate"] is False
+    assert body["status"] == "pending"
     assert body["application_id"]
+    assert "duplicate" not in body
 
     es_client.indices.refresh(index=LUCID_APPLICATIONS)
     hits = es_client.search(
@@ -58,26 +63,92 @@ def test_valid_application_returns_201_and_persists(client, _clear_applications_
     src = hits[0]["_source"]
     assert src["email"] == "applicant@example.com"
     assert src["email_lower"] == "applicant@example.com"
-    assert src["status"] == "received"
+    assert src["profession"] == "policy researcher / AI governance"
+    assert src["q1"]
+    assert src["q2"]
     assert src["lang"] == "ko"
 
 
-def test_duplicate_email_returns_existing_application_id(client, _clear_applications_index):
-    first = client.post("/api/applications", json=_payload(email="dup@example.com"))
+def test_server_side_meta_is_written(
+    client, _clear_applications_index, es_client
+):
+    """source / status / created_at are added by the server, not the client."""
+    resp = client.post("/api/applications", json=_payload(email="meta@example.com"))
+    assert resp.status_code == 201
+    es_client.indices.refresh(index=LUCID_APPLICATIONS)
+    src = es_client.search(
+        index=LUCID_APPLICATIONS,
+        query={"term": {"email_lower": "meta@example.com"}},
+    )["hits"]["hits"][0]["_source"]
+    assert src["source"] == "landing-v82"
+    assert src["status"] == "pending"
+    assert src["created_at"]
+    assert "display_name" not in src
+    assert "survey_q1_key" not in src
+    assert "survey_q1_value" not in src
+    assert "survey_q2_key" not in src
+    assert "survey_q2_value" not in src
+    assert "submitted_at" not in src
+
+
+def test_upsert_reuses_application_id_and_overwrites_fields(
+    client, _clear_applications_index, es_client
+):
+    """Same email -> same application_id; second submission overwrites."""
+    first = client.post(
+        "/api/applications",
+        json=_payload(
+            email="upsert@example.com",
+            profession="initial profession",
+            q1="initial q1 text",
+            q2="initial q2 text",
+        ),
+    )
     assert first.status_code == 201
     first_id = first.json()["application_id"]
 
-    second = client.post("/api/applications", json=_payload(email="DUP@example.com"))
+    second = client.post(
+        "/api/applications",
+        json=_payload(
+            email="UPSERT@example.com",
+            profession="updated profession",
+            q1="updated q1 text",
+            q2="updated q2 text",
+            lang="en",
+        ),
+    )
     assert second.status_code == 201
     body = second.json()
-    assert body["duplicate"] is True
     assert body["application_id"] == first_id
-    assert body["status"] == "received"
+    assert body["status"] == "pending"
+
+    es_client.indices.refresh(index=LUCID_APPLICATIONS)
+    hits = es_client.search(
+        index=LUCID_APPLICATIONS,
+        query={"term": {"email_lower": "upsert@example.com"}},
+    )["hits"]["hits"]
+    assert len(hits) == 1
+    src = hits[0]["_source"]
+    assert src["profession"] == "updated profession"
+    assert src["q1"] == "updated q1 text"
+    assert src["q2"] == "updated q2 text"
+    assert src["lang"] == "en"
 
 
-def test_missing_required_field_returns_422(client, _clear_applications_index):
+def test_missing_required_field_returns_422(
+    client, _clear_applications_index
+):
     payload = _payload()
-    del payload["survey_q1_value"]
+    del payload["q1"]
+    resp = client.post("/api/applications", json=payload)
+    assert resp.status_code == 422
+
+
+def test_missing_profession_returns_422(
+    client, _clear_applications_index
+):
+    payload = _payload()
+    del payload["profession"]
     resp = client.post("/api/applications", json=payload)
     assert resp.status_code == 422
 
@@ -92,7 +163,9 @@ def test_unsupported_lang_returns_422(client, _clear_applications_index):
     assert resp.status_code == 422
 
 
-def test_ip_hash_is_16_char_hex(client, _clear_applications_index, es_client):
+def test_ip_hash_is_16_char_hex(
+    client, _clear_applications_index, es_client
+):
     resp = client.post("/api/applications", json=_payload(email="iphash@example.com"))
     assert resp.status_code == 201
     es_client.indices.refresh(index=LUCID_APPLICATIONS)
@@ -103,15 +176,20 @@ def test_ip_hash_is_16_char_hex(client, _clear_applications_index, es_client):
     assert "submitter_ip_hash" in src
     h = src["submitter_ip_hash"]
     assert isinstance(h, str)
-    # The TestClient may produce empty host; if non-empty must be 16 hex.
     if h:
         assert len(h) == 16
-        int(h, 16)  # raises if not hex
+        int(h, 16)
 
 
-def test_ko_and_en_both_accepted(client, _clear_applications_index, es_client):
-    r_ko = client.post("/api/applications", json=_payload(email="ko@example.com", lang="ko"))
-    r_en = client.post("/api/applications", json=_payload(email="en@example.com", lang="en"))
+def test_ko_and_en_both_accepted(
+    client, _clear_applications_index, es_client
+):
+    r_ko = client.post(
+        "/api/applications", json=_payload(email="ko@example.com", lang="ko")
+    )
+    r_en = client.post(
+        "/api/applications", json=_payload(email="en@example.com", lang="en")
+    )
     assert r_ko.status_code == 201
     assert r_en.status_code == 201
 
@@ -121,14 +199,18 @@ def test_ko_and_en_both_accepted(client, _clear_applications_index, es_client):
         for h in es_client.search(
             index=LUCID_APPLICATIONS,
             size=100,
-            query={"terms": {"email_lower": ["ko@example.com", "en@example.com"]}},
+            query={
+                "terms": {"email_lower": ["ko@example.com", "en@example.com"]}
+            },
         )["hits"]["hits"]
     }
     assert docs["ko@example.com"]["lang"] == "ko"
     assert docs["en@example.com"]["lang"] == "en"
 
 
-def test_es_write_failure_returns_503(client, _clear_applications_index, monkeypatch):
+def test_es_write_failure_returns_503(
+    client, _clear_applications_index, monkeypatch
+):
     """When the ES `index` call raises, the endpoint surfaces 503."""
     from api.routes import applications as apps_route
 
@@ -136,7 +218,6 @@ def test_es_write_failure_returns_503(client, _clear_applications_index, monkeyp
 
     class FailingClient:
         def search(self, *a, **kw):
-            # dup-check should be empty, so simulate "no docs" cleanly
             return {"hits": {"hits": []}}
 
         def index(self, *a, **kw):
@@ -144,7 +225,9 @@ def test_es_write_failure_returns_503(client, _clear_applications_index, monkeyp
 
     monkeypatch.setattr(apps_route, "get_client", lambda: FailingClient())
     try:
-        resp = client.post("/api/applications", json=_payload(email="fail@example.com"))
+        resp = client.post(
+            "/api/applications", json=_payload(email="fail@example.com")
+        )
         assert resp.status_code == 503
         assert resp.json()["detail"] == "application_storage_unavailable"
     finally:
