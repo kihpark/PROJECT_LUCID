@@ -115,7 +115,10 @@ def test_predicate_ceo_maps_to_led_by_on_inserted_fact() -> None:
 # ---------------------------------------------------------------------------
 
 def test_ambiguous_predicate_routes_to_related_to_with_review_flag() -> None:
-    code, needs_review = map_predicate_to_opl("is_rival_of")
+    # B-62 natural-spo-display: the OPL v1 expansion legitimately covers
+    # rivalry (COMPETES_WITH), so we use a genuinely ambiguous surface
+    # that has no lookup OR substring hit.
+    code, needs_review = map_predicate_to_opl("is_friend_with")
     assert code == "RELATED_TO"
     assert needs_review is True
 
@@ -128,7 +131,7 @@ def test_ambiguous_predicate_routes_to_related_to_with_review_flag() -> None:
         object_ref={"kind": "literal", "value": "Apple"},
         knowledge_space_id="ks-1",
         source_uid="src-4",
-        original_surface="is_rival_of",
+        original_surface="is_friend_with",
         capture_lang="en",
         object_value="Apple",
         es_client=client,
@@ -137,7 +140,7 @@ def test_ambiguous_predicate_routes_to_related_to_with_review_flag() -> None:
     body = client.index.call_args.kwargs["document"]
     assert body["predicate_code"] == "RELATED_TO"
     assert body["needs_review"] is True
-    assert body["original_surface"] == "is_rival_of"
+    assert body["original_surface"] == "is_friend_with"
 
 
 # ---------------------------------------------------------------------------

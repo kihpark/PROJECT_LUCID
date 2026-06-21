@@ -43,6 +43,11 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             "type": {"type": "keyword"},
             "subject_uid": {"type": "keyword"},
             "predicate": {"type": "keyword"},
+            # B-62 natural-spo-display - natural-English predicate
+            # surface preserved verbatim for the recall display.
+            # NEVER participates in the canonical_key dedup; that
+            # key is (subject_uid, predicate_code, object_canonical).
+            "predicate_label": {"type": "text", "analyzer": "standard"},
             "object_value": {"type": "keyword"},
             "valid_from": {"type": "date"},
             "validated_at": {"type": "date"},

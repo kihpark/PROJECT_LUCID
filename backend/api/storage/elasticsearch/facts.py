@@ -276,6 +276,7 @@ def insert_or_dedup_fact(
     negation_scope: str | None = None,
     es_client: Any | None = None,
     extra_es_fields: dict[str, Any] | None = None,
+    predicate_label: str | None = None,
 ) -> tuple[str, bool]:
     """B-62: insert a fact OR dedup against an existing one by canonical key.
 
@@ -295,6 +296,12 @@ def insert_or_dedup_fact(
 
     Returns (fact_uid, was_created). was_created=False indicates a
     dedup hit; the fact_uid points at the EXISTING doc.
+
+    B-62 natural-spo-display: `predicate_label` is the user-facing
+    English gloss for this fact. On INSERT we persist it; on DEDUP HIT
+    we do NOT overwrite the existing label — the first capture wins so
+    a later capture with a different surface phrasing cannot rewrite
+    the display. The label is NEVER part of canonical_key.
     """
     from api.models.base import new_uid as _new_uid
     from api.storage.canonical import canonical_key, object_canonical
@@ -395,6 +402,12 @@ def insert_or_dedup_fact(
         "capture_lang": capture_lang,
         "object_canonical": obj_canon,
         "canonical_key": ckey,
+        # B-62 natural-spo-display: persist the natural English predicate
+        # label so the recall display has a rich gloss. The label NEVER
+        # participates in canonical_key (key stays subject_uid /
+        # predicate_code / object_canonical) — two captures with
+        # different labels but the same triple dedup here.
+        "predicate_label": predicate_label,
         "tags": list(tags or []),
         "needs_review": bool(needs_review),
         "aliases": [],

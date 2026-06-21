@@ -152,3 +152,8 @@ class FactNode(LucidBaseModel):
     object_canonical: str | None = None
     canonical_key: str | None = None
     needs_review: bool = False
+    # B-62 natural-spo-display: natural-English predicate gloss
+    # preserved verbatim for the recall display. NEVER participates in
+    # canonical_key (dedup key stays subject_uid / predicate_code /
+    # object_canonical). Display layer only.
+    predicate_label: str | None = None

@@ -181,6 +181,11 @@ export interface RecallFact {
   // Null when the uid isn't in lucid_objects or when object_value is a literal.
   subject_label?: string | null;
   object_label?: string | null;
+  // B-62 natural-spo-display: server-resolved natural-English predicate
+  // gloss. Null on legacy facts captured before the OPL layer landed;
+  // the predicateLabel() helper falls back to the curated KO map / the
+  // canonical predicate surface in that case.
+  predicate_label?: string | null;
 }
 
 export interface EntityFactRef {

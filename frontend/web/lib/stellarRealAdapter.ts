@@ -48,7 +48,7 @@ function pushFactAsNode(acc: NodeAccumulator, fact: RecallFact, clusterHint: num
   if (acc.byId.has(fact.fact_uid)) return;
   const subject = fact.subject_label || fact.subject_uid;
   const object = fact.object_label || fact.object_value;
-  const label = `${subject} · ${predicateLabel(fact.predicate)} · ${object}`;
+  const label = `${subject} · ${predicateLabel(fact.predicate, fact.predicate_label)} · ${object}`;
   const sourceCount = Math.max(1, fact.source_uids?.length ?? 1);
   // B-62-v1 — "검증된 팩트일수록 빛난다" — source count drives the
   // emissive strength. 1 source ≈ 0.35 (visible but quiet), 3+ sources

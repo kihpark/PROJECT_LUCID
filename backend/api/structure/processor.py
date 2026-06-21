@@ -54,7 +54,7 @@ from api.structure.entity_resolver import _detect_lang
 from api.structure.link_creator import LinkCreationResult, create_links
 from api.structure.models import StructureFact, StructureObject, StructureResult
 from api.structure.object_matcher import MatchResult, match_or_create_object
-from api.structure.predicate_mapper import map_predicate_to_opl
+from api.structure.predicate_mapper import map_predicate_to_type_and_label
 
 logger = logging.getLogger("lucid.structure.processor")
 
@@ -281,11 +281,16 @@ def _serialize_struct_fact(
             and obj_val in uid_map
         ):
             d["object_value"] = uid_map[obj_val]
-    # B-62 structure-resolve: enrich the JSONB fact with canonical
-    # fields so validate.py persists them via insert_or_dedup_fact.
+    # B-62 structure-resolve + natural-spo-display: enrich the JSONB
+    # fact with canonical fields so validate.py persists them via
+    # insert_or_dedup_fact. The new map_predicate_to_type_and_label
+    # also computes the natural-English predicate_label used by recall.
     raw_predicate = d.get("predicate") or ""
-    opl_code, needs_review = map_predicate_to_opl(raw_predicate)
+    opl_code, opl_label, needs_review = map_predicate_to_type_and_label(
+        raw_predicate,
+    )
     d["predicate_code"] = opl_code
+    d["predicate_label"] = opl_label
     d["original_surface"] = raw_predicate
     d["needs_review"] = bool(needs_review)
     # capture_lang is a per-fact best-effort guess; the processor

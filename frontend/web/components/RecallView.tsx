@@ -145,7 +145,7 @@ function RecallFactCard({
         </div>
         <div>
           <dt className="opacity-60">predicate</dt>
-          <dd>{predicateLabel(fact.predicate)}</dd>
+          <dd>{predicateLabel(fact.predicate, fact.predicate_label)}</dd>
         </div>
         <div>
           <dt className="opacity-60">object</dt>
