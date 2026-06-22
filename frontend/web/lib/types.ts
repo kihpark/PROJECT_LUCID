@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Pydantic-mirror types. Hand-kept in sync with backend/api/models/validate.py.
  *
  * If you change the backend shape, mirror it here. There is no codegen step
@@ -335,4 +335,22 @@ export interface HomeBrief {
   recent_validated: HomeBriefValidatedFact[];
   top_cluster: HomeBriefCluster | null;
   is_empty: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// M4a — assistant brief (verified KG retrieval + grounded LLM inference)
+// ---------------------------------------------------------------------------
+
+export interface VerifiedFactEntry {
+  fact_uid: string;
+  subject: string;
+  predicate_label: string;
+  object: string;
+  sources: string[];
+}
+
+export interface AssistantBriefResponse {
+  verified: VerifiedFactEntry[];
+  inference: string;
+  grounded: boolean;
 }

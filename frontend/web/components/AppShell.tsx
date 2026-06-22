@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AppShell — the fixed application chrome (header + primary nav) that wraps
  * every page in the App Router. Pure layout: no data fetching except the
  * lightweight pending-count badge via useHomeBrief, no redirects, no auth
@@ -373,6 +373,7 @@ export function AppShell({ children, userName, userEmail }: AppShellProps) {
     // are no count semantics on the canvas (recall has search, stellar
     // has the whole graph slice).
     { href: '/stellar', label: 'Stellar' },
+    { href: '/assistant', label: '어시스턴트' },
     { href: '/pending', label: '검증', count: pendingCount },
   ];
 
