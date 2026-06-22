@@ -10,22 +10,30 @@
 # volumes (`postgres_data`, `es_data`) and healthchecks are tuned in
 # the base compose and should not be touched by dev tooling.
 #
+# 2026-06-22 (feat/infra-agent-isolation): the backend dev override
+# (host bind-mount + `--reload`) is REMOVED. The 2026-06-22 incident
+# showed that any process writing to the host `backend/` directory
+# could leak into the live backend container — including agent
+# verification copying worktree files into SHARED. Backend now runs
+# the image as-built. Code changes require:
+#
+#     docker compose up -d --build backend
+#
+# (10–20s rebuild; hot-reload is intentionally gone for the backend.)
+# Agents verify in an ephemeral container — see AGENTS.md §15.
+#
+# The `web` override (Next HMR + bind-mount) is unchanged because the
+# frontend dev loop has no equivalent attack surface: the web service
+# does not execute code that mutates persistent backend state.
+#
 # Rebuild grades (see HANDOFF.md):
-#   CODE only          → bind-mount picks it up; no rebuild.
+#   CODE (backend)     → `docker compose up -d --build backend`.
+#   CODE (frontend)    → bind-mount picks it up; no rebuild.
 #   DEPS (compose / requirements.txt / package.json)
 #                      → `docker compose up -d --build` once.
 #   MAPPING (ES strict)
 #                      → wipe + reindex_all + replay.
 services:
-
-  backend:
-    # The image is the same one base compose built; we only swap in
-    # the source bind mount and the --reload command so editing a .py
-    # file restarts uvicorn in-process. `uvicorn[standard]` is already
-    # in requirements.txt so watchfiles is available.
-    volumes:
-      - ./backend:/app
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
   web:
     # Next.js HMR. The override mounts the source tree but uses an

@@ -20,14 +20,16 @@ docker compose exec -T backend python -m api.ops.smoke
 The matrix below answers "what do I need to do after pulling this
 merge". Match the change set to a grade and run the listed action.
 
-| Grade   | Trigger                                                                       | What to run                                                                                                     |
-| ------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| CODE    | Any change to `backend/api/**/*.py`, `frontend/web/**/*.ts(x)`, `extension/**`. | Nothing. Bind mount + reload / HMR. (`docker compose up -d` once if containers aren't running.)                  |
-| DEPS    | `requirements.txt`, `package.json`, `pnpm-lock.yaml`, `Dockerfile`, `docker-compose*.yml`. | `docker compose up -d --build`. Single rebuild; named volumes (postgres / es) preserved.                         |
-| MAPPING | `backend/api/storage/elasticsearch/mappings.py` or any strict-dynamic ES change. | After the DEPS rebuild: in `backend` shell, `python -c "from api.storage.elasticsearch.indexes import reindex_all; from api.storage.elasticsearch.replay import replay_validation_logs; reindex_all(); replay_validation_logs()"`. |
+| Grade        | Trigger                                                                       | What to run                                                                                                     |
+| ------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| CODE-FE      | `frontend/web/**/*.ts(x)`, `extension/**`.                                    | Nothing. Bind mount + HMR. (`docker compose up -d` once if containers aren't running.)                          |
+| CODE-BE      | `backend/api/**/*.py` (and any other `backend/**/*.py`).                      | `docker compose up -d --build backend`. ~10–20s rebuild. Bind mount + `--reload` was removed in `feat/infra-agent-isolation` (2026-06-22) — agent verification could no longer reach the live container after that. |
+| DEPS         | `requirements.txt`, `package.json`, `pnpm-lock.yaml`, `Dockerfile`, `docker-compose*.yml`. | `docker compose up -d --build`. Single rebuild; named volumes (postgres / es) preserved.                         |
+| MAPPING      | `backend/api/storage/elasticsearch/mappings.py` or any strict-dynamic ES change. | After the DEPS rebuild: in `backend` shell, `python -c "from api.storage.elasticsearch.indexes import reindex_all; from api.storage.elasticsearch.replay import replay_validation_logs; reindex_all(); replay_validation_logs()"`. |
 
-When unsure, default to CODE — the worst case is "nothing happened"
-and you re-do the merge with `--build`.
+When unsure for backend, default to CODE-BE (`--build backend`). For
+frontend, default to CODE-FE (HMR catches it). When unsure across both,
+`docker compose up -d --build` rebuilds everything.
 
 ## Override semantics
 
@@ -35,8 +37,8 @@ Compose loads `docker-compose.override.yml` automatically when
 present. The file in this repo is GIT-TRACKED on purpose: every
 developer gets the same inner loop.
 
-- `backend`: source bind-mount + `uvicorn --reload`. `uvicorn[standard]` (already in `requirements.txt`) ships `watchfiles` so the reloader catches Python edits without polling.
-- `web`: source bind-mount + anonymous volumes hiding host `node_modules` / `.next`, command swapped to `pnpm dev --hostname 0.0.0.0 --port 3000`.
+- `backend`: **no override.** Backend runs the image's `CMD` (plain `uvicorn api.main:app --host 0.0.0.0 --port 8000`) in every environment. The host-bind-mount + `--reload` override was REMOVED in `feat/infra-agent-isolation` (2026-06-22) after the host-write-to-live-backend incident. Iterate via `docker compose up -d --build backend`.
+- `web`: source bind-mount + anonymous volumes hiding host `node_modules` / `.next`, command swapped to `pnpm dev --hostname 0.0.0.0 --port 3000`. (Web has no equivalent attack surface — no persistent state.)
 - `postgres` / `elasticsearch`: **NOT redeclared**. Stateful volumes (`postgres_data`, `es_data`) and tuned healthchecks live only in the base compose.
 
 To run the production shape locally for a final sanity check, pass
