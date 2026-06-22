@@ -271,6 +271,16 @@ def _create_entity(
     }
     if name_en:
         body["name_en"] = name_en
+    # B-62-debug (PO 2026-06-22): point 4a instrumentation. Persisted
+    # canonical entity — the final source of truth for what the recall
+    # display will surface as primary_label.
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "B-62-debug PERSISTED_CREATE object_uid=%s primary_label=%r "
+            "primary_lang=%r aliases=%s name_en=%r",
+            object_uid, chosen_primary, chosen_lang,
+            list(aliases or []), name_en,
+        )
     try:
         client.index(
             index=LUCID_OBJECTS,
@@ -383,6 +393,16 @@ def _repromote_primary_to_surface(
         "reason": "B-62-fix-v2 runtime re-promote on Korean surface reuse",
     })
 
+    # B-62-debug (PO 2026-06-22): point 4b instrumentation. Persisted
+    # re-promote — the canonical entity's primary_label has been
+    # swapped from English to Korean.
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "B-62-debug PERSISTED_REPROMOTE object_uid=%s new_primary=%r "
+            "new_primary_lang=%s prev_primary=%r aliases=%s",
+            object_uid, new_primary, new_primary_lang, prev_primary,
+            normalised,
+        )
     try:
         client.update(
             index=LUCID_OBJECTS,
@@ -419,10 +439,23 @@ def _maybe_repromote_on_hit(
       - Supplied surface must be detected Korean.
       - Supplied surface must differ from existing primary (cheap no-op).
     """
+    # B-62-debug (PO 2026-06-22): point 3d instrumentation. Log entry +
+    # which guard short-circuited (if any). Helps disambiguate "Mode B
+    # re-promote silently skipped" cases from "primary already Korean".
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "B-62-debug REPROMOTE_ENTER object_uid=%s surface=%r",
+            object_uid, surface,
+        )
     surface_stripped = (surface or "").strip()
     if not surface_stripped:
+        logger.debug("B-62-debug REPROMOTE_SKIP reason=empty_surface")
         return
     if _detect_lang(surface_stripped) != "ko":
+        logger.debug(
+            "B-62-debug REPROMOTE_SKIP reason=surface_not_ko surface=%r",
+            surface_stripped,
+        )
         return
     try:
         doc = client.get(index=LUCID_OBJECTS, id=object_uid)["_source"]
@@ -431,17 +464,36 @@ def _maybe_repromote_on_hit(
         return
     existing_primary = (doc.get("primary_label") or doc.get("name") or "").strip()
     if not existing_primary:
+        logger.debug("B-62-debug REPROMOTE_SKIP reason=no_existing_primary")
         return
     if existing_primary == surface_stripped:
+        logger.debug(
+            "B-62-debug REPROMOTE_SKIP reason=primary_already_matches surface=%r",
+            surface_stripped,
+        )
         return
     existing_lang = (doc.get("primary_lang") or _detect_lang(existing_primary))
     if existing_lang != "en":
+        logger.debug(
+            "B-62-debug REPROMOTE_SKIP reason=existing_primary_not_en "
+            "existing_primary=%r existing_lang=%s",
+            existing_primary, existing_lang,
+        )
         return
     if _looks_like_brand(existing_primary):
+        logger.debug(
+            "B-62-debug REPROMOTE_SKIP reason=existing_primary_brand_shape "
+            "existing_primary=%r",
+            existing_primary,
+        )
         return
     if _looks_like_brand(surface_stripped):
         # Defensive: a brand-shaped surface should never displace an
         # existing primary, even when language detection misfires.
+        logger.debug(
+            "B-62-debug REPROMOTE_SKIP reason=surface_brand_shape surface=%r",
+            surface_stripped,
+        )
         return
     _repromote_primary_to_surface(
         client=client,
@@ -507,6 +559,20 @@ def resolve_entity(
         if hit is not None:
             uid = hit.get("object_uid")
             if uid:
+                # B-62-debug (PO 2026-06-22): point 3a instrumentation.
+                # Direct primary lookup hit — captures which field
+                # matched, the existing canonical primary, and whether
+                # the surface looks brand-shaped (affects re-promote
+                # eligibility downstream).
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "B-62-debug RESOLVE branch=primary_lookup_hit field=%s "
+                        "surface=%r existing_uid=%s existing_primary=%r "
+                        "looks_like_brand_surface=%s",
+                        field, surface, uid,
+                        hit.get("primary_label") or hit.get("name"),
+                        _looks_like_brand(surface),
+                    )
                 # B-62-fix-v2: defense (a). If the matched entity's
                 # primary is English (non-brand) and our surface is
                 # Korean, re-promote the Korean surface so the recall
@@ -529,6 +595,17 @@ def resolve_entity(
             if hit is not None:
                 uid = hit.get("object_uid")
                 if uid:
+                    # B-62-debug (PO 2026-06-22): point 3b instrumentation.
+                    # Co-mention English lookup hit — Korean surface will
+                    # be appended as alias and re-promote may swap primary.
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "B-62-debug RESOLVE branch=co_mention_hit field=%s "
+                            "surface=%r co_mention=%r existing_uid=%s "
+                            "existing_primary=%r",
+                            field, surface, en, uid,
+                            hit.get("primary_label") or hit.get("name"),
+                        )
                     _append_alias(client, object_uid=uid, new_alias=surface)
                     # B-62-fix-v2: defense (a). Same re-promote logic on
                     # the co_mention path so the Korean capture surface
@@ -547,6 +624,18 @@ def resolve_entity(
     aliases = _build_alias_seed(
         primary_label, surface, llm_name, co_mention_en,
     )
+    # B-62-debug (PO 2026-06-22): point 3c instrumentation. Create-new
+    # branch — capture the picked primary, its detected language, and
+    # whether the LLM-name was brand-shaped. This is the dominant
+    # "Korean → English" transition site when surface arrived as English.
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "B-62-debug RESOLVE branch=create_new surface=%r llm_name=%r "
+            "co_mention_en=%r picked_primary=%r picked_primary_lang=%s "
+            "looks_like_brand_llm_name=%s",
+            surface, llm_name, co_mention_en, primary_label, primary_lang,
+            _looks_like_brand(llm_name) if llm_name else False,
+        )
     object_uid = _create_entity(
         client,
         surface=surface,
