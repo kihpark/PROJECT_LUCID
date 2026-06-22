@@ -141,6 +141,18 @@ def _match_object(
     raw_surface = (surface_map or {}).get(obj.uid)
     surface = raw_surface if raw_surface else obj.name
     surface_lang = _detect_lang(surface) if surface else None
+    # B-62-debug (PO 2026-06-22): point 2 instrumentation. Capture the
+    # exact (surface, surface_lang, llm_name_en) tuple the matcher will
+    # forward into resolve_entity, plus the raw surface returned by
+    # `_build_surface_map` so we can see whether the matcher fell back
+    # to obj.name (Mode A: LLM omitted subject_surface) or got the LLM
+    # span (Mode B: LLM put English in subject_surface).
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "B-62-debug MATCHER_INPUT obj_uid=%s candidate_name=%r "
+            "surface=%r surface_lang=%r llm_name_en=%r raw_surface_from_map=%r",
+            obj.uid, obj.name, surface, surface_lang, obj.name_en, raw_surface,
+        )
     try:
         result = match_or_create_object(
             obj.name,

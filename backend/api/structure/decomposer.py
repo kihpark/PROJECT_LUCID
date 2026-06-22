@@ -54,4 +54,23 @@ def decompose(merged_text: str, metadata: dict[str, Any] | None = None) -> Struc
         result.latency_ms,
         result.failure_reason,
     )
+    # B-62-debug (PO 2026-06-22): point 1 instrumentation. Log each fact's
+    # subject-side fields verbatim from the LLM (post coord-split) so we
+    # can measure whether the LLM is filling subject_surface for
+    # Korean-origin entities or quietly omitting it. DEBUG-gated — zero
+    # cost in production (default log level is INFO).
+    if logger.isEnabledFor(logging.DEBUG):
+        obj_by_uid = {o.uid: o for o in result.objects}
+        for idx, fact in enumerate(result.facts):
+            subj_obj = obj_by_uid.get(fact.subject_uid)
+            subj_name = getattr(subj_obj, "name", None) if subj_obj else None
+            subj_name_en = getattr(subj_obj, "name_en", None) if subj_obj else None
+            logger.debug(
+                "B-62-debug LLM_RAW fact=%d uid=%s subject_uid=%s "
+                "subject_name=%r subject_surface=%r subject_name_en=%r "
+                "object_value=%r object_surface=%r claim=%r",
+                idx, fact.uid, fact.subject_uid,
+                subj_name, fact.subject_surface, subj_name_en,
+                fact.object_value, fact.object_surface, fact.claim,
+            )
     return result
