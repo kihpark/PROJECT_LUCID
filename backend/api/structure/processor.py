@@ -76,21 +76,80 @@ def _safe_object_class(raw: Any) -> ObjectClass | None:
         return None
 
 
+def _build_surface_map(decomp: StructureResult) -> dict[str, str]:
+    """Walk `decomp.facts` and collect `{obj_uid: source-text surface}`.
+
+    For each fact:
+      - `fact.subject_surface` is the verbatim span for `fact.subject_uid`
+        when that uid matches the obj-N placeholder shape.
+      - `fact.object_surface` is the span for `fact.object_value` when
+        the object_value is itself an obj-N reference (the LLM is
+        pointing at another decomposed entity, not a literal).
+
+    Multiple facts may reference the same obj. We keep the longest
+    non-empty surface; ties resolve to the first seen. The longest
+    rule defends against trailing-particle differences ("중국 상무부"
+    vs "중국 상무부는") — `strip_korean_particles` in the resolver
+    normalises both to the same lookup form anyway, but preferring
+    the longer string preserves more context for the eventual
+    primary_label seed.
+
+    B-62-fix-v2 wiring: the result is threaded into
+    `match_or_create_object(..., surface=..., surface_lang=...)` so
+    the v2-defended `resolve_entity` runs on the production path.
+    """
+    surface_map: dict[str, str] = {}
+
+    def _consider(uid: str | None, surface: str | None) -> None:
+        if not uid or not surface:
+            return
+        if not _OBJ_PLACEHOLDER_RE.match(uid):
+            return
+        s = surface.strip()
+        if not s:
+            return
+        existing = surface_map.get(uid)
+        if existing is None or len(s) > len(existing):
+            surface_map[uid] = s
+
+    for fact in decomp.facts:
+        _consider(fact.subject_uid, fact.subject_surface)
+        _consider(fact.object_value, fact.object_surface)
+    return surface_map
+
+
 def _match_object(
-    obj: StructureObject, knowledge_space_id: str
+    obj: StructureObject,
+    knowledge_space_id: str,
+    surface_map: dict[str, str] | None = None,
 ) -> tuple[MatchResult | None, ObjectClass | None]:
-    """Compute embedding + run the matcher. Returns (result, resolved_class)."""
+    """Compute embedding + run the matcher. Returns (result, resolved_class).
+
+    B-62-fix-v2 wiring (PO 2026-06-22): when `surface_map` carries a
+    source-text span for this object, pass `surface` / `surface_lang`
+    / `llm_name_en` into the matcher so the v2-defended
+    `resolve_entity` path runs. When the obj has no recorded surface
+    (pre-v2 decomp payloads, or a LLM omission), the obj's `name`
+    falls back as the lookup surface so the resolver still gets a
+    valid lookup string.
+    """
     resolved_class = _safe_object_class(obj.class_)
     if resolved_class is None:
         return None, None
     emb = get_embedding(obj.name)
     embedding_list = list(emb) if emb is not None else None
+    raw_surface = (surface_map or {}).get(obj.uid)
+    surface = raw_surface if raw_surface else obj.name
+    surface_lang = _detect_lang(surface) if surface else None
     try:
         result = match_or_create_object(
             obj.name,
             resolved_class,
             knowledge_space_id,
             candidate_embedding=embedding_list,
+            surface=surface,
+            surface_lang=surface_lang,
+            llm_name_en=obj.name_en,
         )
     except Exception as exc:  # noqa: BLE001 - matcher never raises out to caller
         logger.exception("matcher failed for %r: %s", obj.name, exc)
@@ -404,8 +463,14 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         match_summaries: list[dict[str, Any]] = []
         disambig_pending: list[dict[str, Any]] = []
         kspace_id = str(job.knowledge_space_id)
+        # B-62-fix-v2 wiring: collect verbatim source-text surfaces for
+        # the decomposer's obj-N placeholders BEFORE the per-object
+        # loop, so each `_match_object` call can route through
+        # `resolve_entity` with the Korean surface (not the LLM's
+        # English translation).
+        surface_map = _build_surface_map(decomp)
         for obj in decomp.objects:
-            mr, _resolved_class = _match_object(obj, kspace_id)
+            mr, _resolved_class = _match_object(obj, kspace_id, surface_map)
             if mr is None:
                 continue
             match_per_object[obj.uid] = mr

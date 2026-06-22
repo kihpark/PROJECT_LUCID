@@ -31,6 +31,11 @@ from pydantic import Field
 from api.models.base import UID, LucidBaseModel, new_uid
 from api.models.objects import ObjectClass
 
+# B-62-fix-v2 wiring: module-level import so unit tests can patch
+# `api.structure.object_matcher.resolve_entity` directly. There is no
+# back-dep (entity_resolver does not import this module), so no cycle.
+from api.structure.entity_resolver import _detect_lang, resolve_entity
+
 logger = logging.getLogger("lucid.structure.matcher")
 
 # DCR-001 / DR-065 thresholds
@@ -100,9 +105,63 @@ def match_or_create_object(
     *,
     candidate_embedding: list[float] | None = None,
     knn_k: int = 5,
+    surface: str | None = None,
+    surface_lang: str | None = None,
+    llm_name_en: str | None = None,
 ) -> MatchResult:
     """Decide whether `candidate_name` matches an existing Object,
-    needs user disambiguation, or should create a new Object."""
+    needs user disambiguation, or should create a new Object.
+
+    B-62-fix-v2 wiring (PO 2026-06-22):
+      When `surface` is supplied (the verbatim source-text span from
+      `StructureFact.subject_surface` / `object_surface`), delegate to
+      `resolve_entity` so the v2 defenses fire on the production
+      extraction path: Korean primary_label preservation,
+      `_maybe_repromote_on_hit`, brand-shape guard via
+      `_looks_like_brand`, and `strip_korean_particles`. The
+      `(uid, was_created)` tuple from the resolver is wrapped into a
+      `MatchResult` so the rest of the processor pipeline (uid_map,
+      summaries, disambig queue) keeps working unchanged.
+
+      Legacy callers (no `surface`) keep the original exact+kNN
+      behavior. This preserves direct unit tests of the matcher and
+      any future legacy call sites that have no source-text span.
+    """
+    if surface and surface.strip():
+        # B-62-fix-v2: v2-defended path. resolve_entity does its own
+        # exact lookups across primary_label/name/name_en/aliases (the
+        # v2 canonical fields), handles cross-language merge via
+        # co_mention_en, applies re-promote on hit, and uses
+        # pick_natural_primary on the create path. The kNN /
+        # disambiguation band is intentionally skipped here — once
+        # exact surface-based lookup is the source of truth there is
+        # nothing for kNN to disambiguate.
+        lang = surface_lang or _detect_lang(surface)
+        try:
+            entity_uid, was_created = resolve_entity(
+                surface,
+                lang,
+                space_id=knowledge_space_id,
+                co_mention_en=llm_name_en,
+                llm_name=candidate_name,
+            )
+        except Exception as exc:  # noqa: BLE001 - matcher must never raise out
+            logger.warning(
+                "resolve_entity failed for surface=%r: %s; "
+                "falling back to legacy exact+kNN path", surface, exc,
+            )
+        else:
+            if was_created:
+                return MatchResult(
+                    created_new=True,
+                    new_object_uid=entity_uid,
+                    decision_reason="resolve_entity_create",
+                )
+            return MatchResult(
+                matched_object_uid=entity_uid,
+                decision_reason="resolve_entity_match",
+            )
+
     # Step 1 — exact name match (case-insensitive happens at the
     # `name.keyword` field if we lowered the input first).
     exact = _exact_name_search(
