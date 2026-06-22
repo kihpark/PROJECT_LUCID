@@ -13,6 +13,7 @@ from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import (
+    capture_video,
     admin_applications,
     applications,
     assistant,
@@ -166,7 +167,10 @@ for _router in (
     assistant.router,
     entities.router,
     predicates.router,
+    capture_video.router,  # B-46
 ):
     app.include_router(_router)
+
+
 
 
