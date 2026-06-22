@@ -193,6 +193,22 @@ LUCID_OBJECTS_MAPPING: dict[str, Any] = {
             "knowledge_space_id": {"type": "keyword"},
             "created_at": {"type": "date"},
             "updated_at": {"type": "date"},
+            # B-62-fix legacy-korean-relabel - nested audit trail of
+            # primary_label swaps performed by the backfill script in
+            # backend/scripts/relabel_legacy_korean_entities.py. NULL
+            # on objects that were never relabeled; entries grow only
+            # when the script promotes a Korean alias to primary. The
+            # field is additive - live indexes created before this
+            # ticket pick it up via the script's put_mapping call.
+            "relabel_history": {
+                "type": "nested",
+                "properties": {
+                    "at": {"type": "date"},
+                    "from_primary": {"type": "keyword"},
+                    "to_primary": {"type": "keyword"},
+                    "reason": {"type": "keyword"},
+                },
+            },
         },
     },
 }
