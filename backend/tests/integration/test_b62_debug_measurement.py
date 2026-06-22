@@ -268,47 +268,18 @@ def _run_match_object(decomp: StructureResult, caplog) -> dict:
 
 
 def test_scenario_a_llm_omitted_subject_surface_mode_a(caplog) -> None:
-    """MEASUREMENT — Scenario A: persisted primary is ENGLISH.
-
-    Confirms Mode A: the matcher fell back to obj.name (English)
-    because surface_map had no entry for obj-1. The Korean defense
-    chain in pick_natural_primary / _maybe_repromote_on_hit never
-    engages because the input was already English.
-
-    The persisted body fields are the load-bearing assertion (the
-    canonical entity actually written to ES). The breadcrumb-text
-    asserts are best-effort: caplog can fail to capture DEBUG when
-    earlier suite tests rewire logging, but the underlying
-    behavior — the persisted English primary — is unambiguous.
+    """B-62-fix-v6 (feat/spo-subject-claim-recovery): persisted primary
+    is KOREAN — the deterministic claim recovery pulled "중국 상무부"
+    out of the claim via the 는 particle boundary, overriding the LLM's
+    English fallback. This was Scenario A's bug under fix-v3-general;
+    fix-v6 closes it without LLM cooperation.
     """
     decomp = _build_decomp_scenario_a()
     body = _run_match_object(decomp, caplog)
 
-    # Load-bearing — persisted body. The bug.
-    assert body["primary_label"] == "Ministry of Commerce of China"
-    assert body["primary_lang"] == "en"
-
-    # Best-effort — breadcrumb text. Skip silently if logging was
-    # reconfigured upstream and DEBUG records were never captured.
-    if any("B-62-debug" in rec.message for rec in caplog.records):
-        assert any(
-            "B-62-debug LLM_RAW" in rec.message
-            and "subject_surface=None" in rec.message
-            for rec in caplog.records
-        ), "expected LLM_RAW breadcrumb showing subject_surface=None"
-        assert any(
-            "B-62-v3-general MATCHER_INPUT" in rec.message
-            and "surface='Ministry of Commerce of China'" in rec.message
-            and "surface_lang='en'" in rec.message
-            and "raw_surface_from_map=None" in rec.message
-            for rec in caplog.records
-        ), "expected MATCHER_INPUT fallback to English obj.name"
-        assert any(
-            "B-62-debug RESOLVE branch=create_new" in rec.message
-            and "picked_primary='Ministry of Commerce of China'" in rec.message
-            and "picked_primary_lang=en" in rec.message
-            for rec in caplog.records
-        ), "expected RESOLVE create_new with English picked_primary"
+    # Load-bearing — persisted primary is now Korean (the recovery).
+    assert body["primary_label"] == "중국 상무부"
+    assert body["primary_lang"] == "ko"
 
 
 # ---------------------------------------------------------------------------
@@ -317,26 +288,17 @@ def test_scenario_a_llm_omitted_subject_surface_mode_a(caplog) -> None:
 
 
 def test_scenario_b_llm_english_subject_surface_mode_a(caplog) -> None:
-    """MEASUREMENT — Scenario B: LLM filled subject_surface with the
-    English translation. Same outcome as A: persisted primary is
-    English. This is still Mode A from the matcher's perspective:
-    the surface forwarded into resolve_entity is English."""
+    """B-62-fix-v6 (feat/spo-subject-claim-recovery): LLM emitted English
+    "Ministry of Finance of China" in subject_surface. The claim text
+    "중국 재정부는 새 정책을 발표했다" still has the 는 particle so the
+    deterministic recovery pulls out "중국 재정부" and replaces the
+    LLM's English. Primary is Korean."""
     decomp = _build_decomp_scenario_b()
     body = _run_match_object(decomp, caplog)
 
-    # Load-bearing — persisted primary is English.
-    assert body["primary_label"] == "Ministry of Finance of China"
-    assert body["primary_lang"] == "en"
-
-    # Best-effort — breadcrumb capture only when DEBUG was actually
-    # propagated (single-test runs).
-    if any("B-62-debug" in rec.message for rec in caplog.records):
-        assert any(
-            "B-62-v3-general MATCHER_INPUT" in rec.message
-            and "surface='Ministry of Finance of China'" in rec.message
-            and "surface_lang='en'" in rec.message
-            for rec in caplog.records
-        ), "expected MATCHER_INPUT surface=English from LLM-supplied subject_surface"
+    # Load-bearing — persisted primary is now Korean (the recovery).
+    assert body["primary_label"] == "중국 재정부"
+    assert body["primary_lang"] == "ko"
 
 
 # ---------------------------------------------------------------------------

@@ -140,10 +140,12 @@ def test_korean_government_verbatim_kept_korean() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_korean_government_anglicized_flagged_for_review() -> None:
-    """LLM emits subject_surface in English on a Korean claim. The
-    English form is NOT a substring of the claim → violation
-    flagged. Primary stays English (we do NOT guess). HITL resolves."""
+def test_korean_government_anglicized_recovered_to_korean() -> None:
+    """B-62-fix-v6 (feat/spo-subject-claim-recovery): LLM emits English
+    subject_surface on a Korean claim. The deterministic claim-recovery
+    parses the particle boundary (중국 상무부는) and replaces the LLM's
+    "Ministry of Commerce of China" with the recovered Korean form.
+    needs_review=False (recovery succeeded). NO HITL needed."""
     decomp = _decomp_one(
         obj_name="Ministry of Commerce of China",
         name_en="Ministry of Commerce of China",
@@ -151,10 +153,10 @@ def test_korean_government_anglicized_flagged_for_review() -> None:
         subject_surface="Ministry of Commerce of China",
     )
     body, needs_review = _run(decomp)
-    assert needs_review is True
-    # Surface kept as LLM-emitted. Primary is English by the resolver's
-    # natural-primary rule (no Korean surface was supplied to defend).
-    assert body["primary_label"] == "Ministry of Commerce of China"
+    assert needs_review is False
+    # Surface is RECOVERED from the claim text — Korean primary wins.
+    assert body["primary_label"] == "중국 상무부"
+    assert body["primary_lang"] == "ko"
 
 
 # ---------------------------------------------------------------------------

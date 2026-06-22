@@ -407,11 +407,13 @@ def test_v2_missing_subject_surface_falls_back_to_name_via_resolve_entity() -> N
 # ---------------------------------------------------------------------------
 
 
-def test_korean_claim_english_llm_name_flags_for_review() -> None:
-    """B-62-fix-v3-general: LLM anglicized a Korean entity (no
-    subject_surface, English `name`). The verbatim validator detects
-    the violation and flags needs_review=True. Primary stays English
-    because we keep the LLM surface — no dictionary guess."""
+def test_korean_claim_english_llm_name_recovers_to_korean() -> None:
+    """B-62-fix-v6 (feat/spo-subject-claim-recovery): LLM anglicized a
+    Korean entity (no subject_surface, English `name`). The verbatim
+    validator detects the violation and the deterministic recovery
+    pulls "중국 상무부" out of the claim via the 는 particle boundary.
+    needs_review=False (recovery succeeded). NO HITL needed — the
+    English surface is replaced with the Korean form."""
     from unittest.mock import patch as _patch
 
     from api.models.objects import ObjectClass
@@ -456,12 +458,12 @@ def test_korean_claim_english_llm_name_flags_for_review() -> None:
             decomp=decomp,
         )
     assert result is not None
-    assert needs_review is True
+    assert needs_review is False
     body = mock_client.index.call_args.kwargs["document"]
-    # New behavior: surface stays the LLM-supplied English form (we do
-    # NOT guess the Korean — HITL resolves). primary_label ends up
-    # English; that's an intentional, flagged behavior.
-    assert body["primary_label"] == "Ministry of Commerce of China"
+    # B-62-fix-v6: the recovery replaces the LLM's English with the
+    # Korean form parsed from the claim. primary_label is Korean.
+    assert body["primary_label"] == "중국 상무부"
+    assert body["primary_lang"] == "ko"
 
 
 def test_redcat_holdings_english_claim_stays_english_no_violation() -> None:
