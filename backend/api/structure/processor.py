@@ -55,6 +55,10 @@ from api.structure.link_creator import LinkCreationResult, create_links
 from api.structure.models import StructureFact, StructureObject, StructureResult
 from api.structure.object_matcher import MatchResult, match_or_create_object
 from api.structure.predicate_mapper import map_predicate_to_type_and_label
+from api.structure.surface_extractor import (
+    _has_hangul,
+    derive_korean_surface_from_claim,
+)
 
 logger = logging.getLogger("lucid.structure.processor")
 
@@ -118,10 +122,30 @@ def _build_surface_map(decomp: StructureResult) -> dict[str, str]:
     return surface_map
 
 
+def _find_claim_for_obj(
+    decomp: StructureResult | None, obj_uid: str,
+) -> str | None:
+    """Return the first fact.claim whose subject_uid or object_value
+    references `obj_uid`. Used by the Mode A surface derivation
+    defense (B-62-fix-v3) to find a claim text that an entity
+    appears in so we can scan it for a Korean substring.
+
+    Returns None when no fact references the object (defensive — the
+    obj almost certainly appears in at least one fact, but we never
+    raise if it doesn't)."""
+    if decomp is None:
+        return None
+    for fact in decomp.facts:
+        if fact.subject_uid == obj_uid or fact.object_value == obj_uid:
+            return fact.claim
+    return None
+
+
 def _match_object(
     obj: StructureObject,
     knowledge_space_id: str,
     surface_map: dict[str, str] | None = None,
+    decomp: StructureResult | None = None,
 ) -> tuple[MatchResult | None, ObjectClass | None]:
     """Compute embedding + run the matcher. Returns (result, resolved_class).
 
@@ -132,6 +156,15 @@ def _match_object(
     (pre-v2 decomp payloads, or a LLM omission), the obj's `name`
     falls back as the lookup surface so the resolver still gets a
     valid lookup string.
+
+    B-62-fix-v3 (PO 2026-06-22): Mode A defense. When the LLM did
+    not supply a Korean subject_surface (`raw_surface` is missing OR
+    English) but the claim text is Korean, recover the Korean
+    surface from the claim via the curated KO↔EN org dictionary
+    in `surface_extractor`. Without this the canonical entity ends
+    up English-primary because the matcher input is the LLM's
+    English translation — the dominant failure mode confirmed by
+    `test_b62_debug_measurement` and B62_DEBUG_DISCOVERY.md.
     """
     resolved_class = _safe_object_class(obj.class_)
     if resolved_class is None:
@@ -139,7 +172,27 @@ def _match_object(
     emb = get_embedding(obj.name)
     embedding_list = list(emb) if emb is not None else None
     raw_surface = (surface_map or {}).get(obj.uid)
-    surface = raw_surface if raw_surface else obj.name
+    # B-62-fix-v3: derive a Korean surface from the claim text when
+    # the LLM-supplied raw_surface is absent OR already English. The
+    # `raw_surface` having Hangul means the LLM honoured the prompt;
+    # leave it alone in that case.
+    derived_surface: str | None = None
+    if not raw_surface or not _has_hangul(raw_surface):
+        claim_text = _find_claim_for_obj(decomp, obj.uid)
+        if claim_text and _has_hangul(claim_text):
+            derived_surface = derive_korean_surface_from_claim(
+                claim=claim_text,
+                llm_name_en=obj.name_en or obj.name,
+                claim_lang="ko",
+            )
+            if derived_surface:
+                logger.info(
+                    "B-62-fix-v3 derived Korean surface for obj=%s: "
+                    "llm_name_en=%r -> %r (raw_surface was %r)",
+                    obj.uid, obj.name_en or obj.name,
+                    derived_surface, raw_surface,
+                )
+    surface = derived_surface or raw_surface or obj.name
     surface_lang = _detect_lang(surface) if surface else None
     # B-62-debug (PO 2026-06-22): point 2 instrumentation. Capture the
     # exact (surface, surface_lang, llm_name_en) tuple the matcher will
@@ -150,8 +203,10 @@ def _match_object(
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
             "B-62-debug MATCHER_INPUT obj_uid=%s candidate_name=%r "
-            "surface=%r surface_lang=%r llm_name_en=%r raw_surface_from_map=%r",
-            obj.uid, obj.name, surface, surface_lang, obj.name_en, raw_surface,
+            "surface=%r surface_lang=%r llm_name_en=%r raw_surface_from_map=%r "
+            "derived_surface=%r",
+            obj.uid, obj.name, surface, surface_lang, obj.name_en,
+            raw_surface, derived_surface,
         )
     try:
         result = match_or_create_object(
@@ -482,7 +537,13 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         # English translation).
         surface_map = _build_surface_map(decomp)
         for obj in decomp.objects:
-            mr, _resolved_class = _match_object(obj, kspace_id, surface_map)
+            # B-62-fix-v3 (PO 2026-06-22): pass `decomp` so the Mode A
+            # surface-derivation defense can find a claim text for
+            # this object and recover the Korean source-language form
+            # when the LLM omitted subject_surface.
+            mr, _resolved_class = _match_object(
+                obj, kspace_id, surface_map, decomp=decomp,
+            )
             if mr is None:
                 continue
             match_per_object[obj.uid] = mr
