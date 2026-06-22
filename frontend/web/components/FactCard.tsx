@@ -335,12 +335,13 @@ export function FactCard({
             )}
             {fact.negation_flag && (
               <span
-                className="inline-flex items-center gap-1 text-xxs text-accent-error font-mono"
-                aria-label="negation warning"
+                className="inline-flex items-center gap-1 text-xxs text-accent-error"
+                aria-label="부정 진술"
                 role="status"
+                title="이 사실은 '~할 수 없다 / 금지 / ~지 않다' 를 담은 부정 진술입니다."
+                data-testid={`fact-negation-${factUid}`}
               >
-                ⚠ negation_flag
-                {fact.negation_scope ? ` (${fact.negation_scope})` : ''}
+                ⚠ 부정 진술
               </span>
             )}
           </div>
@@ -357,8 +358,12 @@ export function FactCard({
         <p
           className={['text-base mb-3 pl-7', isDiscarded ? 'line-through' : ''].join(' ')}
           lang={lang === 'kr' ? 'ko' : 'en'}
+          data-testid={`fact-claim-${factUid}`}
         >
-          {isEditMode && editedClaim ? editedClaim : displayClaim(fact, lang)}
+          {/* decide-ux-v2 (4): claim is the ORIGINAL sentence; never */}
+          {/* replace with the S|P|O pipe-joined reconstruction. The */}
+          {/* edited triple surfaces in the S/P/O dl below. */}
+          {displayClaim(fact, lang)}
         </p>
       )}
 
