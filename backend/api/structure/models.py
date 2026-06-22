@@ -41,7 +41,21 @@ FailureReason = Literal[
 
 
 class StructureObject(LucidBaseModel):
-    """One Object candidate emitted by the decomposer."""
+    """One Object candidate emitted by the decomposer.
+
+    Faithful-decomp PR (PO 2026-06-23): `extra='ignore'` so the LLM
+    can pad fields (`entity_type`, `person_origin`, `confidence`, …)
+    without failing the entire envelope. Storage-layer Object models
+    keep their own `extra='forbid'`, so retired fields still never
+    reach ES.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        validate_assignment=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
 
     uid: UID
     class_: ObjectClass = Field(alias="class")
@@ -94,7 +108,18 @@ class StructureFact(LucidBaseModel):
 
 
 class StructureFactObjectLink(LucidBaseModel):
-    """One Fact -> Object edge (5 link types)."""
+    """One Fact -> Object edge (5 link types).
+
+    Faithful-decomp PR: `extra='ignore'` so LLM padding (e.g. `confidence`,
+    `metadata`) doesn't tank the envelope.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        validate_assignment=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
 
     fact_uid: UID
     object_uid: UID
@@ -135,7 +160,17 @@ class StructureFactFactLink(LucidBaseModel):
 
 class StructureDisambiguation(LucidBaseModel):
     """One disambiguation candidate emitted when an Object mention has
-    multiple plausible matches (handled by Validate UI per DCR-001)."""
+    multiple plausible matches (handled by Validate UI per DCR-001).
+
+    Faithful-decomp PR: `extra='ignore'` for LLM padding tolerance.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        validate_assignment=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
 
     fact_uid: UID
     mention_text: str
@@ -144,7 +179,21 @@ class StructureDisambiguation(LucidBaseModel):
 
 
 class StructureResult(LucidBaseModel):
-    """Top-level decomposer output. Persisted later by PR-3-2 / PR-3-3."""
+    """Top-level decomposer output. Persisted later by PR-3-2 / PR-3-3.
+
+    Faithful-decomp PR (PO 2026-06-23): `extra='ignore'` so the LLM
+    can pad top-level keys (e.g. `version`, `comment`, `meta`) without
+    failing the entire envelope. The 6-round cumulative-constraint
+    prompt was producing extra keys whose Pydantic rejection turned
+    a 5-fact response into facts=0; we now silently drop them.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        validate_assignment=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
 
     objects: list[StructureObject] = Field(default_factory=list)
     facts: list[StructureFact] = Field(default_factory=list)

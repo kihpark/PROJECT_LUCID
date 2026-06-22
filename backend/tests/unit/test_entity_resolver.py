@@ -439,24 +439,37 @@ def test_resolve_entity_korean_surface_firm_name_translation_creates_korean_prim
     assert "Woori Asset Management" in body["aliases"]
 
 
-def test_prompts_contains_verbatim_surface_rule() -> None:
-    """B-62-fix-v3-general (feat/spo-surface-content-language, PO
-    2026-06-22): the verbatim-substring clause must be present.
-    Pins the new general mechanism so a future refactor cannot
-    silently drop it."""
+def test_prompts_contains_faithful_decomp_rule() -> None:
+    """feat/spo-faithful-korean-decomp (PO 2026-06-23):
+
+    The 6 prior rounds of "B-62-fix vN" strict-verbatim clauses were
+    REMOVED because their cumulative weight + Pydantic strictness
+    made the natural LLM response fail validation (facts=0).
+
+    The simplified rule is:
+      "각 fact 의 subject / predicate / object 는 소스 텍스트의
+       언어 그대로 표현하세요."
+
+    This test pins the new rule's signature anchors and explicitly
+    asserts that the OLD strict-mandate strings did NOT regress
+    back into the prompt.
+    """
     from api.structure.prompts import SYSTEM_PROMPT
-    assert "B-62-fix-v3 verbatim surface" in SYSTEM_PROMPT
-    # Core directive: verbatim substring of source text.
-    assert "verbatim" in SYSTEM_PROMPT or "원문 텍스트에 실제 등장한" in SYSTEM_PROMPT
-    # Example coverage — the four entity types the dictionary missed:
-    # Korean ministry, Korean person, Korean company, Korean brand
-    # transliteration.
-    assert "중국 상무부" in SYSTEM_PROMPT
-    assert "안도걸" in SYSTEM_PROMPT
-    assert "우리자산운용" in SYSTEM_PROMPT
+    # New rule's anchor token:
+    assert "FAITHFUL DECOMPOSITION RULE" in SYSTEM_PROMPT
+    # Core source-language directive:
+    assert "소스 텍스트" in SYSTEM_PROMPT
+    assert "그대로" in SYSTEM_PROMPT
+    assert "번역" in SYSTEM_PROMPT
+    # Brand exception still present (English-in-Korean stays English):
     assert "SpaceX" in SYSTEM_PROMPT
-    # The translation-forbidden examples must be called out by name.
-    assert "Ahn Do-geol" in SYSTEM_PROMPT
+    # Korean example anchor preserved:
+    assert "중국 상무부" in SYSTEM_PROMPT
+    # Regression guards — REMOVED strict-mandate strings must NOT
+    # reappear:
+    assert "B-62-fix-v3" not in SYSTEM_PROMPT
+    assert "Ahn Do-geol" not in SYSTEM_PROMPT
+    assert "Woori Asset Management" not in SYSTEM_PROMPT
 
 
 # --- B-62-fix-v2 subject-natlang (PO 2026-06-22) ----------------------------
@@ -637,16 +650,19 @@ def test_repromote_strips_particle_before_lookup() -> None:
     assert "중국 상무부는" not in seen_values
 
 
-def test_prompts_contains_v3_general_subject_surface_rule() -> None:
-    """B-62-fix-v3-general: subject_surface/object_surface verbatim
-    constraint must be documented in the prompt. The v2 prose was
-    superseded by the v3-general clause (which keeps the
-    subject_surface field but tightens the rule to verbatim
-    substring of source)."""
+def test_prompts_no_strict_verbatim_mandate_regressed() -> None:
+    """feat/spo-faithful-korean-decomp (PO 2026-06-23) regression guard:
+
+    The "subject_surface/object_surface verbatim substring" mandate
+    that flipped the LLM into translation mode is removed. This test
+    asserts the prompt does NOT pin those fields as required.
+    The recovery layer (`subject_recovery.py` via processor's
+    `_match_object`) is the new safety net; the prompt no longer
+    forces the LLM to emit the verbatim span.
+    """
     from api.structure.prompts import SYSTEM_PROMPT
-    assert "subject_surface" in SYSTEM_PROMPT
-    assert "object_surface" in SYSTEM_PROMPT
-    # The verbatim rule must be stated.
-    assert "substring" in SYSTEM_PROMPT
-    # Translation-forbidden directive (한국어→영어 변환 금지).
-    assert "번역 금지" in SYSTEM_PROMPT
+    # The strict "verbatim" mandate must NOT survive.
+    assert "verbatim" not in SYSTEM_PROMPT.lower()
+    # And no "subject_surface must be a substring" wording.
+    assert "subject_surface 는" not in SYSTEM_PROMPT
+    assert "번역 금지" not in SYSTEM_PROMPT

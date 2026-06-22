@@ -87,83 +87,37 @@ Run these IN ORDER on the input text:
   Step 2. Assign each Object a class from the 13 above.
 
   Step 2a. B-52 — PRESERVE THE SOURCE-LANGUAGE SURFACE FORM.
-          If you choose to normalize an Object's `name` into a
-          language other than the source text (e.g. emitting
-          `"name":"Ministry of Defense"` for a Korean article that
-          calls it "국방부"), you MUST add the source-language
-          surface form to the Object's `aliases` array.
-          Examples:
-            source: "국방부는 ..."
-              → {"name":"Ministry of Defense", "name_en":"Ministry of Defense",
-                 "aliases":["국방부"]}
+
+          FAITHFUL DECOMPOSITION RULE (PO 2026-06-23):
+
+          각 fact 의 subject / predicate / object 는 **소스 텍스트의
+          언어 그대로** 표현하세요. 번역·정규화·canonical 변환·
+          로마자화 자체가 위반입니다.
+
+            한국어 기사 → subject "중국", predicate "발표했다",
+                          object "발표 내용" 등 모두 한국어로.
+            영어 기사   → subject "OpenAI", predicate "announced",
+                          object "GPT-5" 모두 영어로.
+            일본어 기사 → 일본어 그대로.
+
+          브랜드/회사명이 영어 표기로 원문에 등장하면 영어 그대로
+          유지하세요 (SpaceX, Lockheed Martin). 한국어 음역으로
+          등장하면 (스페이스X) 그것도 그대로. 번역하지 마세요.
+
+          Object 의 `name` 도 위 규칙을 따릅니다. 한국어 기사의
+          "중국 상무부"는 name="중국 상무부". 영어 정규형을 만들고
+          싶으면 `name_en`(선택)에 적고, 한국어 원문 표기를 `aliases`
+          배열에 함께 보관하세요. 예:
+            source: "중국 상무부는 ..."
+              → {"name":"중국 상무부",
+                 "name_en":"Ministry of Commerce of China",
+                 "aliases":[]}
             source: "Bank of Korea announced ..."
-              → {"name":"한국은행", "name_en":"Bank of Korea",
-                 "aliases":["Bank of Korea"]}
+              → {"name":"Bank of Korea", "name_en":"Bank of Korea",
+                 "aliases":[]}
             source: "삼성전자는 ..."
-              → {"name":"삼성전자", "name_en":"Samsung Electronics",
-                 "aliases":[]}   # name already matches source, no alias needed
-          Also add common abbreviations / honorific-stripped variants
-          when the article uses them ("BOK" alongside "Bank of
-          Korea"; "박현주 회장" + "박현주").
-          An empty list (`"aliases": []`) is fine when the source
-          surface form equals `name`.
-
-          ADDITIONAL RULE — B-62-fix-v3 verbatim surface (PO 2026-06-22):
-
-          subject_surface 와 object_surface 는 **소스 텍스트에 실제 등장한
-          문자열을 그대로 복사**한 값이어야 합니다. 다음 규칙을 엄격히
-          지켜주세요:
-
-          1. 번역 금지. 한국어 텍스트에 "중국 상무부"가 등장하면
-             subject_surface 는 정확히 "중국 상무부". 절대 "Ministry of
-             Commerce of China"로 변환하지 마세요. 한국어 텍스트의
-             "안도걸 더불어민주당 의원"은 subject_surface="안도걸 의원"
-             또는 "안도걸" (텍스트의 실제 표기). 절대 "Ahn Do-geol"이나
-             다른 로마자 표기로 바꾸지 마세요.
-
-          2. 정규화 금지. 텍스트에 등장한 표기 그대로 사용하세요.
-             조사·어미만 제거할 수 있습니다:
-               "중국 상무부는 발표했다" → subject_surface="중국 상무부"
-               "삼성전자가 신제품을"   → subject_surface="삼성전자"
-
-          3. 영어 표기로 등장한 entity 는 영어 그대로:
-               "SpaceX announced..." → subject_surface="SpaceX"
-               "Lockheed Martin이 발표" → subject_surface="Lockheed Martin"
-             영어 원문은 영어로 유지합니다.
-
-          4. 새 단어 만들기 금지. subject_surface / object_surface 는
-             반드시 input text 의 substring 이어야 합니다. 텍스트에
-             없는 표현을 만들어내지 마세요.
-
-          5. `name` 필드는 별개입니다. LLM 의 canonical 정규화 (영어
-             정규형 권장 — 후속 매칭용). subject_surface 는 verbatim.
-             두 필드의 언어가 다를 수 있고, 다른 것이 자연스럽습니다.
-             예시:
-               source: "안도걸 더불어민주당 의원이 발표했다."
-                 OK   {"name":"Ahn Do-geol", "name_en":"Ahn Do-geol",
-                       "aliases":["안도걸 의원"]}
-                       + fact: subject_surface="안도걸 의원"
-                                                # surface verbatim, name canonical
-               source: "중국 상무부는 발표했다."
-                 OK   {"name":"Ministry of Commerce of China",
-                       "name_en":"Ministry of Commerce of China",
-                       "aliases":["중국 상무부"]}
-                       + fact: subject_surface="중국 상무부"
-               source: "우리자산운용은 ETF를 운용한다."
-                 OK   {"name":"Woori Asset Management",
-                       "name_en":"Woori Asset Management",
-                       "aliases":["우리자산운용"]}
-                       + fact: subject_surface="우리자산운용"
-               source: "스페이스X 주식이 상장됐다."
-                 OK   {"name":"SpaceX", "name_en":"SpaceX",
-                       "aliases":["스페이스X"]}
-                       + fact: subject_surface="스페이스X"
-                                # surface verbatim Korean; downstream
-                                # brand resolver normalizes to SpaceX
-
-          6. object 가 entity 일 때도 동일하게 object_surface 를 verbatim
-             으로 적어주세요. literal 값 (숫자, 금액, 날짜 등)은 기존대로
-             object_value 를 쓰고 object_surface 는 null 또는 생략합니다.
+              → {"name":"삼성전자",
+                 "name_en":"Samsung Electronics", "aliases":[]}
 
   Step 2b. B-53 — KEEP FACT TEXT IN THE SOURCE LANGUAGE.
           The fact's `claim` and `object_value` MUST be written in
@@ -173,34 +127,10 @@ Run these IN ORDER on the input text:
           ONLY EXCEPTION: `predicate` stays in English snake_case
           regardless of source language — predicate vocabulary is a
           stable graph-key surface, not user-facing prose.
-          Entity NAMES follow Step 2a (B-52): you may normalize
-          `name` but you must preserve the source surface in
-          `aliases`. THIS step (2b) is the catch-all for everything
-          else inside the fact.
-          Examples — Korean source → Korean fact text:
-            source: "SpaceX는 보통주 5억5천556만주를 매각해 750억달러를 조달했다."
-              OK    {"claim":"SpaceX는 보통주 5억5천556만주를 매각해 750억달러를 조달했다.",
-                     "predicate":"raised_initial_funding",
-                     "object_value":"750억달러"}
-              NOT   "object_value":"75 billion USD"      # translated number
-              NOT   "object_value":"$75B"                # translated unit
-              NOT   "object_value":"75,000,000,000 USD"  # currency normalized
-            source: "주관사단이 그린슈 옵션을 행사하기로 했다."
-              OK    "object_value":"그린슈 옵션"
-              NOT   "object_value":"greenshoe option"
-            source: "한국은행 기준금리는 2024년 12월 기준 3.0%였다."
-              OK    "object_value":"3.0%"                 # numeric units OK
-              NOT   "object_value":"3.0 percent"
-          English source → English fact text:
-            source: "Goldman Sachs raised 75 billion USD."
-              OK    "object_value":"75 billion USD"
-              NOT   "object_value":"750억달러"
-          Rule of thumb: if you can read the source sentence back
-          with the `object_value` substituted in and it sounds like
-          natural source-language prose, you got it right.
-          Cross-lingual canonicalisation (e.g. cents vs 원) belongs
-          on the property dict of the Object — NEVER inside the
-          fact's `object_value`.
+          One example to anchor the rule:
+            source: "SpaceX는 750억달러를 조달했다."
+              OK    "object_value":"750억달러"
+              NOT   "object_value":"75 billion USD"  # translation
 
   Step 3. Decompose every assertion into one or more AtomicFact
           candidates (proposition or procedure). Each fact must be a
@@ -302,10 +232,8 @@ it in markdown fences. Do NOT include any prose outside the JSON.
       "type": "proposition",
       "claim": "Daniel Kahneman published Prospect Theory in 1979.",
       "subject_uid": "obj-1",
-      "subject_surface": "Daniel Kahneman",
       "predicate": "published",
       "object_value": "Prospect Theory",
-      "object_surface": "Prospect Theory",
       "negation_flag": false,
       "negation_scope": null,
       "tags_suggested": ["behavioral_economics", "1979"]
