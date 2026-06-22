@@ -112,3 +112,25 @@ describe('PendingQueueList — per-row discard (spo-pending-ux)', () => {
     expect(screen.getByTestId('pending-card-job-1')).toBeInTheDocument();
   });
 });
+describe('PendingQueueList — decide-ux-fix #1: badge / discard button no overlap', () => {
+  it('renders source_type badge and discard button as distinct elements', () => {
+    const onDiscard = vi.fn(async () => {});
+    render(<PendingQueueList page={page} onPage={() => {}} onDiscard={onDiscard} />);
+
+    const badge = screen.getByTestId('pending-card-source-type-job-1');
+    const button = screen.getByTestId('discard-row-job-1');
+
+    expect(badge).toBeInTheDocument();
+    expect(button).toBeInTheDocument();
+    expect(badge).not.toBe(button);
+    // The badge reserves right-side spacing so the absolute-positioned
+    // discard button does not cover it.
+    expect(badge.className).toMatch(/mr-/);
+  });
+
+  it('badge keeps its baseline mr-14 only when discard button is rendered', () => {
+    render(<PendingQueueList page={page} onPage={() => {}} />);
+    const badge = screen.getByTestId('pending-card-source-type-job-1');
+    expect(badge.className).not.toMatch(/mr-14/);
+  });
+});

@@ -102,9 +102,22 @@ export function FactCard({
   spaceId,
 }: Props) {
   const factUid = fact.fact_uid || fact.uid || '?';
-  const isEditing = action === 'edit';
+  const isEditMode = action === 'edit';
   const isDiscarded = action === 'discard';
   const isChecked = action !== 'discard';
+  // decide-ux-fix #3: edit form open state is local. When the user
+  // clicks 저장 we close the form while keeping the parent's
+  // action='edit' (so editedSubjectUid/predicate/objectValue are
+  // still submitted). 취소 reverts to action='accept' AND closes
+  // the form. Re-clicking Edit while action='edit' re-opens it.
+  const [editFormOpen, setEditFormOpen] = useState(isEditMode);
+  useEffect(() => {
+    // When the parent transitions out of edit (e.g. via the global
+    // checkbox or discard toggle) keep the form closed for next
+    // open. When the parent jumps INTO edit from non-edit, open it.
+    if (!isEditMode) setEditFormOpen(false);
+  }, [isEditMode]);
+  const isEditing = isEditMode && editFormOpen;
 
   const labelMap = useMemo(() => buildLabelMap(objects), [objects]);
   const nameToUid = useMemo(() => buildNameToUidMap(objects), [objects]);
@@ -254,15 +267,25 @@ export function FactCard({
   };
 
   const onCancelEdit = () => {
+    setEditFormOpen(false);
     onChange({ action: 'accept' });
   };
 
   const onEditClick = () => {
-    if (isEditing) {
-      onCancelEdit();
+    if (isEditMode) {
+      // already in edit; toggle form visibility (acts as a re-open)
+      setEditFormOpen((prev) => !prev);
     } else {
       emitEdit({});
+      setEditFormOpen(true);
     }
+  };
+
+  const onSaveEdit = () => {
+    // Keep action='edit' so the parent retains editedSubjectUid /
+    // editedPredicate / editedObjectValue for the batch submit.
+    // Just close the local form.
+    setEditFormOpen(false);
   };
 
   const onSubjectChipClick = (suggestion: EntitySuggestion) => {
@@ -335,7 +358,7 @@ export function FactCard({
           className={['text-base mb-3 pl-7', isDiscarded ? 'line-through' : ''].join(' ')}
           lang={lang === 'kr' ? 'ko' : 'en'}
         >
-          {displayClaim(fact, lang)}
+          {isEditMode && editedClaim ? editedClaim : displayClaim(fact, lang)}
         </p>
       )}
 
@@ -349,7 +372,7 @@ export function FactCard({
           </div>
           <div>
             <dt className="opacity-60">predicate</dt>
-            <dd data-testid="fact-predicate">{fact.predicate || '—'}</dd>
+            <dd data-testid="fact-predicate">{currentPredicate || '—'}</dd>
           </div>
           <div>
             <dt className="opacity-60">object</dt>
@@ -511,12 +534,21 @@ export function FactCard({
           </ActionButton>
         </div>
         {isEditing && (
-          <ActionButton
-            variant="ghost"
-            onClick={onCancelEdit}
-          >
-            취소
-          </ActionButton>
+          <div className="flex gap-2">
+            <ActionButton
+              variant="ghost"
+              onClick={onCancelEdit}
+            >
+              취소
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              onClick={onSaveEdit}
+              data-testid={`fact-save-${factUid}`}
+            >
+              저장
+            </ActionButton>
+          </div>
         )}
       </div>
       {reviewMode && spaceId && (
