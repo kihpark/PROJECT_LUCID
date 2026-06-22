@@ -39,12 +39,20 @@ B-62 natural-spo-display additions (2026-06-21):
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from api.models.base import new_uid
 from api.storage.elasticsearch.client import LUCID_OBJECTS, get_client
 
 logger = logging.getLogger("lucid.structure.entity_resolver")
+
+# B-62-fix subject-natlang (PO 2026-06-22): brand-shape heuristic.
+# Conservative — single-token Latin (no whitespace), 2-16 chars. Catches
+# SpaceX, OpenAI, IBM, KAIST, NASA, Toyota, Apple. Rejects descriptive
+# translations like "Woori Asset Management", "corporate bonds", and
+# "Ministry of Defense" (all multi-word with spaces).
+_BRAND_SHAPE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,15}$")
 
 
 def _detect_lang(text: str) -> str:
@@ -64,6 +72,28 @@ def _detect_lang(text: str) -> str:
     return "en"
 
 
+def _looks_like_brand(text: str | None) -> bool:
+    """B-62-fix: return True when `text` looks like a globally-recognized
+    brand-mark (single Latin token, 2-16 chars).
+
+    Conservative by design. Any string with whitespace (e.g. "Woori
+    Asset Management", "corporate bonds", "Ministry of Defense") is
+    treated as a descriptive translation, NOT a brand, and rejected.
+    Single-token Latin strings like SpaceX, OpenAI, IBM, KAIST, Toyota
+    are accepted as brand-shaped.
+
+    This is purely a shape test — we do not consult an allowlist. The
+    PO directive (2026-06-22) is to defend Korean primary labels when
+    the LLM translates a common noun, NOT to gate brand recognition.
+    """
+    if not text:
+        return False
+    s = str(text).strip()
+    if not s:
+        return False
+    return bool(_BRAND_SHAPE_RE.match(s))
+
+
 def pick_natural_primary(
     llm_name: str | None,
     llm_name_en: str | None,
@@ -72,12 +102,21 @@ def pick_natural_primary(
 ) -> tuple[str, str]:
     """Pick the (primary_label, primary_lang) for a new canonical entity.
 
-    Precedence (B-62 natural-spo-display):
-      1. `llm_name` when non-empty. We trust the LLM's "natural" surface
+    Precedence (B-62 natural-spo-display + B-62-fix subject-natlang):
+      1. If `llm_name` is non-empty AND its detected language differs
+         from the surface's detected language AND the surface is Korean
+         AND `llm_name` is NOT brand-shaped (single-token Latin <=16
+         chars), we DEFEND the Korean surface as primary. This prevents
+         Claude's translation of Korean common nouns / firm names
+         (회사채 -> "corporate bonds", 우리자산운용 -> "Woori Asset
+         Management", 국방부 -> "Ministry of Defense") from silently
+         becoming the canonical primary label. The English llm_name
+         still lands in aliases via `_build_alias_seed`.
+      2. Else if `llm_name` is non-empty: trust it as the natural form
          and re-detect its language — Korean stays Korean, English
-         stays English. We NEVER force English just because `name_en`
-         exists alongside.
-      2. Else: the capture surface and its declared lang.
+         stays English. Brand-shaped English (SpaceX, OpenAI, KAIST)
+         falls through to here even on a Korean capture surface.
+      3. Else: the capture surface and its declared lang.
 
     `llm_name_en` is intentionally consulted ONLY as alias material in
     `resolve_entity`'s create path. Promoting it to primary_label would
@@ -86,7 +125,21 @@ def pick_natural_primary(
     """
     candidate = (llm_name or "").strip()
     if candidate:
-        return candidate, _detect_lang(candidate)
+        cand_lang = _detect_lang(candidate)
+        # Re-detect from the surface itself; the passed-in `surface_lang`
+        # may be a job-level lang code that doesn't match the actual
+        # surface (the bug surfaced when surface_lang='ko' but the
+        # caller's mental model conflated job vs surface).
+        surface_lang_detected = _detect_lang(surface or "")
+        if (
+            cand_lang != surface_lang_detected
+            and surface_lang_detected == "ko"
+            and not _looks_like_brand(candidate)
+        ):
+            # B-62-fix: defend the Korean surface — Claude translated a
+            # common noun / firm name to English. Keep Korean as primary.
+            return surface, "ko"
+        return candidate, cand_lang
     return surface, surface_lang
 
 

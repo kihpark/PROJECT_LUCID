@@ -5,7 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from api.structure.entity_resolver import pick_natural_primary, resolve_entity
+from api.structure.entity_resolver import (
+    _looks_like_brand,
+    pick_natural_primary,
+    resolve_entity,
+)
 
 
 def _hit(uid: str, **extra) -> dict:
@@ -303,3 +307,145 @@ def test_resolve_entity_llm_name_only_no_redundant_alias() -> None:
     body = client.index.call_args.kwargs["document"]
     assert body["primary_label"] == "SpaceX"
     assert body["aliases"] == []
+
+
+
+# --- B-62-fix subject-natlang (PO 2026-06-22) --------------------------------
+# Defense in depth: when Claude translates a Korean common noun / firm name
+# to English (e.g. 회사채 -> "corporate bonds", 우리자산운용 -> "Woori Asset
+# Management"), pick_natural_primary must keep the Korean surface as primary.
+# Brand-shaped English (SpaceX, OpenAI, KAIST) still wins.
+
+
+def test_looks_like_brand_single_token_latin_accepted() -> None:
+    assert _looks_like_brand("SpaceX") is True
+    assert _looks_like_brand("OpenAI") is True
+    assert _looks_like_brand("IBM") is True
+    assert _looks_like_brand("KAIST") is True
+    assert _looks_like_brand("Toyota") is True
+    assert _looks_like_brand("iPhone") is True
+
+
+def test_looks_like_brand_multiword_rejected() -> None:
+    # Descriptive English translations have whitespace -> not a brand.
+    assert _looks_like_brand("Woori Asset Management") is False
+    assert _looks_like_brand("corporate bonds") is False
+    assert _looks_like_brand("Ministry of Defense") is False
+    assert _looks_like_brand("Bank of Korea") is False
+    assert _looks_like_brand("base interest rate") is False
+
+
+def test_looks_like_brand_edge_cases() -> None:
+    assert _looks_like_brand(None) is False
+    assert _looks_like_brand("") is False
+    assert _looks_like_brand("   ") is False
+    # Single char is too short to be brand-shaped.
+    assert _looks_like_brand("A") is False
+    # Korean text never matches the Latin shape test.
+    assert _looks_like_brand("회사채") is False
+    assert _looks_like_brand("스페이스X") is False
+    # Over-long single token is rejected as a safety bound.
+    assert _looks_like_brand("A" * 17) is False
+
+
+def test_pick_natural_primary_korean_surface_descriptive_english_llm_name_keeps_korean() -> None:
+    """B-62-fix regression case: 회사채 Korean surface + Claude's
+    translation 'corporate bonds' -> Korean surface wins."""
+    label, lang = pick_natural_primary(
+        llm_name="corporate bonds",
+        llm_name_en="corporate bonds",
+        surface="회사채",
+        surface_lang="ko",
+    )
+    assert label == "회사채"
+    assert lang == "ko"
+
+
+def test_pick_natural_primary_korean_surface_firm_name_translation_keeps_korean() -> None:
+    """우리자산운용 + Claude's translation 'Woori Asset Management'
+    -> Korean surface wins (multi-word English is not brand-shaped)."""
+    label, lang = pick_natural_primary(
+        llm_name="Woori Asset Management",
+        llm_name_en="Woori Asset Management",
+        surface="우리자산운용",
+        surface_lang="ko",
+    )
+    assert label == "우리자산운용"
+    assert lang == "ko"
+
+
+def test_pick_natural_primary_korean_surface_with_brand_english_llm_name_keeps_english() -> None:
+    """스페이스X + Claude's brand-canonical 'SpaceX' -> SpaceX wins
+    because SpaceX is brand-shaped (single Latin token)."""
+    label, lang = pick_natural_primary(
+        llm_name="SpaceX",
+        llm_name_en="SpaceX",
+        surface="스페이스X",
+        surface_lang="ko",
+    )
+    assert label == "SpaceX"
+    assert lang == "en"
+
+
+def test_pick_natural_primary_english_surface_unaffected_by_fix() -> None:
+    """Defense applies only when surface is Korean. English surface +
+    English llm_name -> English wins (existing behavior preserved)."""
+    label, lang = pick_natural_primary(
+        llm_name="SpaceX",
+        llm_name_en="SpaceX",
+        surface="SpaceX",
+        surface_lang="en",
+    )
+    assert label == "SpaceX"
+    assert lang == "en"
+
+
+def test_resolve_entity_korean_surface_english_translation_creates_korean_primary() -> None:
+    """End-to-end at resolve_entity level: Korean surface 회사채 + LLM
+    name 'corporate bonds' -> created object has Korean primary_label
+    and the English translation lands in aliases."""
+    client = MagicMock()
+    client.search.return_value = _no_hit()
+    uid, was_created = resolve_entity(
+        "회사채", "ko",
+        space_id="ks-1",
+        llm_name="corporate bonds",
+        es_client=client,
+    )
+    assert was_created is True
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "회사채"
+    assert body["primary_lang"] == "ko"
+    # The English translation MUST be preserved as an alias so the
+    # recall path can still cross-lingually match.
+    assert "corporate bonds" in body["aliases"]
+
+
+def test_resolve_entity_korean_surface_firm_name_translation_creates_korean_primary() -> None:
+    """우리자산운용 + LLM name 'Woori Asset Management' (multi-word ->
+    not brand-shaped) -> Korean primary, English in aliases."""
+    client = MagicMock()
+    client.search.return_value = _no_hit()
+    uid, was_created = resolve_entity(
+        "우리자산운용", "ko",
+        space_id="ks-1",
+        llm_name="Woori Asset Management",
+        es_client=client,
+    )
+    assert was_created is True
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "우리자산운용"
+    assert body["primary_lang"] == "ko"
+    assert "Woori Asset Management" in body["aliases"]
+
+
+def test_prompts_contains_korean_common_noun_rule() -> None:
+    """Pin the B-62-fix prompt clause so a future refactor cannot
+    silently drop it."""
+    from api.structure.prompts import SYSTEM_PROMPT
+    assert "B-62-fix subject-natlang" in SYSTEM_PROMPT
+    assert "한국어 일반명사" in SYSTEM_PROMPT
+    assert "회사채" in SYSTEM_PROMPT
+    assert "우리자산운용" in SYSTEM_PROMPT
+    # The brand-allowed exception must be documented.
+    assert "SpaceX" in SYSTEM_PROMPT
