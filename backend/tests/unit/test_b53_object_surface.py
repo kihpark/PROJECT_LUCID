@@ -45,20 +45,25 @@ def test_object_value_must_stay_in_source_language():
     assert "NOT translate" in SYSTEM_PROMPT or "not translate" in SYSTEM_PROMPT.lower()
 
 
-def test_predicate_exception_is_explicit():
-    """Per PO directive: predicate vocabulary stays English snake_case.
-    The Step 2b rule must call that out so the LLM doesn't over-
-    correct and start emitting Korean predicates that break the
-    graph-key surface."""
-    # Look for the predicate exception block. Either spelling of the
-    # rationale ("predicate stays in English" / "predicate vocabulary
-    # is a stable graph-key surface") is fine — we just need ONE.
+def test_predicate_is_source_language_verbatim():
+    """feat/spo-decide-payload-wire (PO 2026-06-23): the prior B-53
+    'predicate stays in English snake_case regardless of source
+    language' exception is RETIRED. PO directive now: predicate must
+    be in the source language as a verb phrase, mirroring claim and
+    object_value. The Decide UI surfaces source-language predicates
+    directly; the predicate-mapper still computes a canonical English
+    code via `predicate_label` for graph queries.
+
+    This test pins the new rule: the prompt must mention predicate +
+    source-language verb-phrase mandate (한국어 기사 → 한국어 동사구,
+    영어 기사 → 영어).
+    """
     lower = SYSTEM_PROMPT.lower()
     assert "predicate" in lower
-    assert (
-        "english snake_case" in lower
-        or "stable graph-key surface" in lower
-    )
+    # The new clause uses Korean verb-phrase examples that survive any
+    # line wrap. Pin at least two of the canonical exemplar verbs.
+    assert "발표했다" in SYSTEM_PROMPT
+    assert "동사구" in SYSTEM_PROMPT
 
 
 def test_step_2b_includes_concrete_korean_negative_example():

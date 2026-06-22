@@ -58,6 +58,7 @@ from api.structure.object_matcher import MatchResult, match_or_create_object
 from api.structure.predicate_mapper import map_predicate_to_type_and_label
 from api.structure.subject_recovery import recover_korean_subject_from_claim
 from api.structure.surface_extractor import (
+    detect_predicate_violation,
     detect_violation,
     strip_korean_particles,
 )
@@ -436,6 +437,8 @@ def _serialize_struct_fact(
     uid_map: dict[str, str] | None = None,
     fact_uid_map: dict[str, str] | None = None,
     violation_per_object: dict[str, bool] | None = None,
+    match_per_object: dict[str, MatchResult] | None = None,
+    decomp_objects: dict[str, StructureObject] | None = None,
 ) -> dict[str, Any]:
     """Pydantic StructureFact -> dict suitable for JSONB.
 
@@ -508,7 +511,19 @@ def _serialize_struct_fact(
             and vpo.get(obj_val_raw, False)
         )
     )
-    d["needs_review"] = bool(needs_review) or surface_violation
+    # feat/spo-decide-payload-wire (PO 2026-06-23): predicate script-
+    # violation. The prompt now mandates source-language verb phrases
+    # ("발표했다", "elected"); when the LLM still emits English snake_case
+    # ("elected_president") on a Korean claim, we flag — but never rewrite.
+    predicate_violation = detect_predicate_violation(
+        raw_predicate, f.claim,
+    )
+    d["needs_review"] = (
+        bool(needs_review)
+        or surface_violation
+        or predicate_violation
+    )
+    d["predicate_violation"] = predicate_violation
     # capture_lang is a per-fact best-effort guess; the processor
     # overrides it with a job-level detected lang in the metadata
     # stamp. We seed it here so older readers see a non-null value.
@@ -525,6 +540,79 @@ def _serialize_struct_fact(
     # `name` because pre-v2 LLM payloads never emitted *_surface.
     d.setdefault("subject_surface", d.get("subject_surface") or None)
     d.setdefault("object_surface", d.get("object_surface") or None)
+    # feat/spo-decide-payload-wire (PO 2026-06-23): propagate the
+    # corrected canonical surface from `match_per_object` so the
+    # Decide UI sees the brand-canonical / claim-recovered form (not
+    # the LLM's raw English anglicization). The override walks:
+    #
+    #   match_per_object[subject_uid].primary_label   # corrected
+    #     ↓ fallback
+    #   decomp_objects[subject_uid].name              # LLM raw
+    #     ↓ fallback
+    #   d["subject_surface"]                          # unchanged
+    #
+    # Same logic for the object side when `object_value` is an
+    # obj-N entity reference (literals — numbers, "흑자", dates —
+    # are NOT touched). The Decide UI reads `subject_label` /
+    # `object_label` directly when present and falls back to the
+    # objects-array lookup; either path now lands on the corrected
+    # primary_label because `_serialize_struct_object` also writes
+    # the corrected surface to `objects_payload[i].name`.
+    mpo = match_per_object or {}
+    dobjs = decomp_objects or {}
+
+    def _corrected_and_raw(uid: str) -> tuple[str | None, str | None]:
+        """Return (corrected_primary_label, llm_raw_name) for `uid`."""
+        mr = mpo.get(uid)
+        obj = dobjs.get(uid)
+        corrected = (mr.primary_label if mr and mr.primary_label else None)
+        raw = (obj.name if obj and obj.name else None)
+        return corrected, raw
+
+    def _resolve_label(uid: str) -> str | None:
+        corrected, raw = _corrected_and_raw(uid)
+        return corrected or raw
+
+    def _was_corrected(uid: str, current_surface: str | None) -> bool:
+        """True when the matcher's primary_label differs from BOTH the
+        LLM's raw object name AND the current subject_surface — meaning
+        claim_recovery / brand_resolver / pick_natural_primary chose a
+        different canonical surface that the caller has not yet seen.
+        """
+        corrected, raw = _corrected_and_raw(uid)
+        if not corrected:
+            return False
+        if raw and corrected != raw:
+            return True
+        if current_surface and corrected != current_surface:
+            return True
+        return False
+
+    subject_label = _resolve_label(subj_uid_raw)
+    if subject_label:
+        d["subject_label"] = subject_label
+        # Patch subject_surface when (a) it's empty, OR (b) the matcher
+        # chose a primary_label that differs from the LLM-raw — meaning
+        # a correction fired (claim_recovery / brand_resolver). The
+        # legitimate non-correction spans (e.g. "SpaceX" inside Korean
+        # text) leave subject_surface untouched because corrected == raw.
+        if (
+            not d.get("subject_surface")
+            or _was_corrected(subj_uid_raw, d.get("subject_surface"))
+        ):
+            d["subject_surface"] = subject_label
+    if (
+        isinstance(obj_val_raw, str)
+        and _OBJ_PLACEHOLDER_RE.match(obj_val_raw)
+    ):
+        object_label = _resolve_label(obj_val_raw)
+        if object_label:
+            d["object_label"] = object_label
+            if (
+                not d.get("object_surface")
+                or _was_corrected(obj_val_raw, d.get("object_surface"))
+            ):
+                d["object_surface"] = object_label
     # tags carries the LLM's tags_suggested when present (we don't
     # synthesize tags in this PR; real tagging is a later ticket).
     d.setdefault("tags", list(d.get("tags_suggested") or []))
@@ -534,6 +622,7 @@ def _serialize_struct_fact(
 def _serialize_struct_object(
     o: StructureObject,
     uid_map: dict[str, str] | None = None,
+    match_per_object: dict[str, MatchResult] | None = None,
 ) -> dict[str, Any]:
     """Pydantic StructureObject -> dict suitable for JSONB.
 
@@ -547,9 +636,36 @@ def _serialize_struct_object(
     UUIDs while the objects array keeps LLM "obj-N" placeholders, so
     the Decide overlay's label lookup fails and FactCard shows raw
     UUIDs to the user.
+
+    feat/spo-decide-payload-wire (PO 2026-06-23): when
+    `match_per_object[o.uid].primary_label` is non-empty and differs
+    from the LLM's raw `name`, write the corrected primary_label as
+    `name` and stash the original LLM name as an alias. This is what
+    fixes the rendered subject in the Decide UI — `FactCard.tsx::
+    resolveEntity` reads `obj.name` directly to display the subject.
     """
     d = o.model_dump(by_alias=True, mode="json")
     d["properties"] = dict(d.get("properties") or {})
+    # feat/spo-decide-payload-wire: corrected surface override. We do
+    # this BEFORE the uid rewrite so we can key off the LLM-side uid
+    # (o.uid) as it appears in match_per_object.
+    mpo = match_per_object or {}
+    mr = mpo.get(o.uid)
+    if mr is not None and mr.primary_label:
+        original_name = d.get("name") or ""
+        corrected = mr.primary_label
+        if corrected and corrected != original_name:
+            d["name"] = corrected
+            existing_aliases = list(d.get("aliases") or [])
+            # Preserve the LLM's raw name as alias (e.g. English form
+            # cross-language lookup keeps working).
+            if (
+                original_name
+                and original_name not in existing_aliases
+                and original_name != corrected
+            ):
+                existing_aliases.append(original_name)
+            d["aliases"] = existing_aliases
     if uid_map:
         original = d.get("uid")
         if isinstance(original, str) and original in uid_map:
@@ -721,17 +837,29 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         # The route reads facts / objects / *_links_detail directly from the
         # structure metadata; before chore 5 these were never written, so
         # the UI showed "0 pending fact(s)" even on a successful structure.
+        # feat/spo-decide-payload-wire: thread match_per_object +
+        # decomp_objects into both serializers so the corrected surface
+        # (from claim_recovery / brand_resolver / pick_natural_primary)
+        # propagates to the Decide UI payload.
+        decomp_objects_by_uid = {o.uid: o for o in decomp.objects}
         facts_payload = [
             _serialize_struct_fact(
                 f,
                 uid_map=uid_map,
                 fact_uid_map=fact_uid_map,
                 violation_per_object=violation_per_object,
+                match_per_object=match_per_object,
+                decomp_objects=decomp_objects_by_uid,
             )
             for f in decomp.facts
         ]
         objects_payload = [
-            _serialize_struct_object(o, uid_map=uid_map) for o in decomp.objects
+            _serialize_struct_object(
+                o,
+                uid_map=uid_map,
+                match_per_object=match_per_object,
+            )
+            for o in decomp.objects
         ]
         fact_object_links_detail = [
             {

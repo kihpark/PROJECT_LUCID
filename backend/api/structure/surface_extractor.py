@@ -132,10 +132,47 @@ def detect_violation(
     return True
 
 
+def detect_predicate_violation(predicate: str, claim: str) -> bool:
+    """Return True when the LLM emitted an English predicate on a
+    Korean claim.
+
+    feat/spo-decide-payload-wire (PO 2026-06-23): the PO directive is
+    "predicate 측 verbatim - rule-based parse 금지, prompt 강화 + 위반시
+    flag". The prompt now instructs the LLM to keep the predicate in the
+    source language as a verb phrase; this util detects the residual
+    violations so the Decide UI surfaces them for HITL review.
+
+    A violation is when ALL of:
+      - claim contains Hangul (Korean source), AND
+      - predicate has no Hangul (Latin / snake_case English).
+
+    Returns False (no violation) when:
+      - claim is English / non-Korean — English predicate is correct,
+      - predicate has Hangul — LLM preserved Korean correctly.
+
+    Unlike `detect_violation`, we do NOT check whether the predicate is
+    a verbatim substring of the claim: predicates are normally an
+    abstraction over the verb phrase (e.g. claim "발표했다 ..." →
+    predicate "발표했다"), and they don't always literally appear in
+    the source. Source-language script is the only honest signal.
+
+    We also do NOT exempt brand-shaped predicates — there is no such
+    thing as a "brand predicate". `elected_president`, `imposed_export_control`,
+    `is_former_member_of` are all snake_case English and trip the flag
+    when the claim is Korean.
+    """
+    if not has_hangul(claim):
+        return False
+    if has_hangul(predicate):
+        return False
+    return True
+
+
 __all__ = [
     "has_hangul",
     "_has_hangul",
     "strip_korean_particles",
     "is_verbatim_substring",
     "detect_violation",
+    "detect_predicate_violation",
 ]
