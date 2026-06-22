@@ -44,15 +44,12 @@ def client(pg_engine, alembic_upgrade):
 def auth_ctx(client, pg_engine):
     email = f"ent-{uuid.uuid4().hex[:8]}@lucid.example"
     password = "longerthan8chars!"
-    sm = sessionmaker(bind=pg_engine, expire_on_commit=False)
-    with sm() as s:
-        user = create_user_via_orm(s, email=email, password=password)
-        space_id = str(user.knowledge_spaces[0].id)
+    user_id, space_id = create_user_via_orm(pg_engine, email, password)
     r = client.post("/api/auth/login", json={"email": email, "password": password})
     assert r.status_code == 200, r.text
     token = r.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
-    return headers, str(user.id), space_id
+    return headers, user_id, space_id
 
 
 def _index_object(space_id: str, name: str, name_en: str = "", uid: str | None = None):
