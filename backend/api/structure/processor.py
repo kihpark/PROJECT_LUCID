@@ -51,11 +51,12 @@ from api.storage.postgres.orm import SourceJobORM
 from api.storage.postgres.session import make_sessionmaker
 from api.structure.brand_resolver import resolve_korean_brand
 from api.structure.decomposer import decompose
-from api.structure.entity_resolver import _detect_lang, _looks_like_brand
+from api.structure.entity_resolver import _detect_lang
 from api.structure.link_creator import LinkCreationResult, create_links
 from api.structure.models import StructureFact, StructureObject, StructureResult
 from api.structure.object_matcher import MatchResult, match_or_create_object
 from api.structure.predicate_mapper import map_predicate_to_type_and_label
+from api.structure.subject_recovery import recover_korean_subject_from_claim
 from api.structure.surface_extractor import (
     detect_violation,
     strip_korean_particles,
@@ -208,19 +209,67 @@ def _match_object(
     # (defensive), we cannot validate and assume no violation.
     source_text = _find_claim_for_obj(decomp, obj.uid) or ""
     surface_for_check = bare_surface if not brand_en else brand_en
-    needs_review = detect_violation(
-        surface=surface_for_check,
-        source=source_text,
-        looks_like_brand=_looks_like_brand(surface_for_check),
-    )
-    if needs_review:
-        logger.warning(
-            "B-62-fix-v3-general verbatim violation: obj=%s "
-            "surface=%r is Latin non-brand but claim is Korean "
-            "(%r); surface is NOT a substring of claim. Keeping "
-            "LLM surface and flagging needs_review=True.",
-            obj.uid, surface, source_text,
+    # B-62-fix-v6 (PO 2026-06-22, feat/spo-subject-claim-recovery):
+    # When `brand_en` is set, `brand_resolver` has already canonicalized
+    # a known Korean transliteration (스페이스X → SpaceX) — skip the
+    # violation check entirely; the brand mapping is the authoritative
+    # decision.
+    # Otherwise pass `looks_like_brand=False` to detect_violation. The
+    # brand-shape regex was previously letting country anglicizations
+    # ("Japan" / "Korea" / "China") through as brand-shaped, which
+    # silently bypassed recovery. The verbatim-substring exemption
+    # inside detect_violation still legitimately keeps "SpaceX" when
+    # it appears literally in the source.
+    if brand_en:
+        violation = False
+    else:
+        violation = detect_violation(
+            surface=surface_for_check,
+            source=source_text,
+            looks_like_brand=False,
         )
+    needs_review = False
+    if violation:
+        # B-62-fix-v6 (PO 2026-06-22, feat/spo-subject-claim-recovery):
+        # DETERMINISTIC Korean subject recovery — replace the LLM's
+        # English surface with the noun phrase parsed from the Korean
+        # claim using particle boundaries (은/는/이/가/께서/에서). No
+        # LLM, no dictionary, no translation — pure text parsing.
+        # When recovery succeeds, we drop the English surface and keep
+        # the Korean form, NEEDS_REVIEW=False.
+        # When recovery fails (no particle in the claim — rare), we
+        # keep the LLM surface and flag NEEDS_REVIEW=True. This is
+        # the only genuine HITL case left in the loop.
+        recovered = recover_korean_subject_from_claim(source_text)
+        if recovered:
+            logger.info(
+                "B-62-fix-v6 claim-recovery: obj=%s replaced LLM "
+                "surface %r with Korean %r (parsed from claim %r)",
+                obj.uid, surface, recovered, source_text[:120],
+            )
+            surface = recovered
+            # B-62-fix-v6: also override the LLM-supplied entity name
+            # passed into the resolver. Without this, the downstream
+            # `pick_natural_primary` sees `llm_name="Japan"` and the
+            # brand-shape regex re-promotes "Japan" over the recovered
+            # Korean "일본" — undoing the recovery. Threading the
+            # recovered Korean into both surface AND candidate_name
+            # makes the resolver's natural-primary picker land on the
+            # Korean form. The original English LLM name lives on in
+            # `name_en` so cross-language alias / co-mention still works.
+            candidate_name_override = recovered
+            needs_review = False
+        else:
+            logger.warning(
+                "B-62-fix-v6 claim-recovery FAILED: obj=%s claim=%r "
+                "has no subject particle; keeping LLM surface %r and "
+                "flagging needs_review=True.",
+                obj.uid, source_text[:120], surface,
+            )
+            needs_review = True
+            candidate_name_override = None
+    else:
+        candidate_name_override = None
 
     surface_lang = _detect_lang(surface) if surface else None
     # Point-2 instrumentation kept (DEBUG-gated, zero prod cost).
@@ -232,9 +281,10 @@ def _match_object(
             obj.uid, obj.name, surface, surface_lang, obj.name_en,
             raw_surface, brand_en, needs_review,
         )
+    candidate_name = candidate_name_override or obj.name
     try:
         result = match_or_create_object(
-            obj.name,
+            candidate_name,
             resolved_class,
             knowledge_space_id,
             candidate_embedding=embedding_list,
