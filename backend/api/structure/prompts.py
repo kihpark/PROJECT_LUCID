@@ -139,6 +139,23 @@ Run these IN ORDER on the input text:
             source: "스페이스X 주식이 상장됐다."
               OK    {"name":"SpaceX", "name_en":"SpaceX",
                      "aliases":["스페이스X"]}    # brand — English canonical form preserved
+          ADDITIONAL RULE — B-62-fix-v2 subject surface (PO 2026-06-22):
+
+          subject_surface 필드는 **원문 텍스트에 실제로 등장한 표현**을 그대로
+          적어주세요. 번역·로마자화·정규화 금지. 한국어 기사면 "중국 상무부",
+          영어 기사면 "Ministry of Commerce of China" — 원문에 있는 그대로.
+
+          조사·어미는 제거하여 엔티티 표면만 남깁니다:
+            "중국 상무부는 발표했다" → subject_surface = "중국 상무부"
+            "삼성전자가 발표했다"      → subject_surface = "삼성전자"
+
+          `name` 필드는 LLM 의 canonical 표현 (한국어 일반명사는 한국어,
+          글로벌 브랜드는 영어). subject_surface 와 name 이 다를 수 있고,
+          다른 것이 자연스럽습니다.
+
+          object 가 entity 일 때도 동일하게 object_surface 를 적어주세요.
+          literal 값 (숫자, 금액, 날짜 등)은 기존대로 object_value 를 씁니다.
+
   Step 2b. B-53 — KEEP FACT TEXT IN THE SOURCE LANGUAGE.
           The fact's `claim` and `object_value` MUST be written in
           the same language as the source text. Do NOT translate
@@ -276,8 +293,10 @@ it in markdown fences. Do NOT include any prose outside the JSON.
       "type": "proposition",
       "claim": "Daniel Kahneman published Prospect Theory in 1979.",
       "subject_uid": "obj-1",
+      "subject_surface": "Daniel Kahneman",
       "predicate": "published",
       "object_value": "Prospect Theory",
+      "object_surface": "Prospect Theory",
       "negation_flag": false,
       "negation_scope": null,
       "tags_suggested": ["behavioral_economics", "1979"]

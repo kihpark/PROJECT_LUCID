@@ -299,6 +299,16 @@ def _serialize_struct_fact(
     d.setdefault(
         "capture_lang", _detect_lang(d.get("claim") or d.get("object_value") or ""),
     )
+    # B-62-fix-v2 (PO 2026-06-22): fall back the LLM-emitted surface
+    # to the subject/object entity name. The entity resolver (when
+    # wired into the processor's create path) will pass `subject_surface`
+    # as `surface` so the canonical primary_label preserves the
+    # source-language form. Until that wiring lands, surface_fact_uid_map
+    # carries enough information for downstream readers (validate.py)
+    # to recover the verbatim span. The fallback uses StructureObject
+    # `name` because pre-v2 LLM payloads never emitted *_surface.
+    d.setdefault("subject_surface", d.get("subject_surface") or None)
+    d.setdefault("object_surface", d.get("object_surface") or None)
     # tags carries the LLM's tags_suggested when present (we don't
     # synthesize tags in this PR; real tagging is a later ticket).
     d.setdefault("tags", list(d.get("tags_suggested") or []))

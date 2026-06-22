@@ -286,3 +286,112 @@ def test_korean_firm_name_descriptive_translation_preserves_korean_primary() -> 
     assert body["primary_label"] == "우리자산운용"
     assert body["primary_lang"] == "ko"
     assert "Woori Asset Management" in body["aliases"]
+
+
+# ---------------------------------------------------------------------------
+# 6. B-62-fix-v2 subject-natlang (PO 2026-06-22): defense-in-depth
+#    - (a) re-promote: legacy English-primary entity becomes Korean primary
+#      on first Korean reuse.
+#    - (b) surface-as-original-span: Korean particle stripped before lookup
+#      so the canonical entity is found.
+# ---------------------------------------------------------------------------
+
+def test_v2_repromote_english_primary_to_korean_on_reuse() -> None:
+    """E2E: existing English-primary entity `Ministry of Commerce of China`
+    + fresh Korean capture `중국 상무부` -> re-promote so primary becomes
+    Korean. Brand-shape guard prevents over-correction (SpaceX stays)."""
+    client = MagicMock()
+    existing = {
+        "object_uid": "uid-moc",
+        "primary_label": "Ministry of Commerce of China",
+        "primary_lang": "en",
+        "name": "Ministry of Commerce of China",
+        "aliases": [],
+        "relabel_history": [],
+    }
+    # First lookup field is primary_label — hit.
+    client.search.return_value = {"hits": {"hits": [{"_source": existing}]}}
+    client.get.return_value = {"_source": existing}
+
+    uid, was_created = resolve_entity(
+        "중국 상무부", "ko", space_id="ks-1", es_client=client,
+    )
+    assert was_created is False
+    assert uid == "uid-moc"
+    assert client.update.called
+    doc = client.update.call_args.kwargs["doc"]
+    assert doc["primary_label"] == "중국 상무부"
+    assert doc["primary_lang"] == "ko"
+    assert "Ministry of Commerce of China" in doc["aliases"]
+
+
+def test_v2_brand_guard_blocks_spacex_repromote() -> None:
+    """`SpaceX` is brand-shaped — even with Korean capture `스페이스X`,
+    primary stays SpaceX."""
+    client = MagicMock()
+    existing = {
+        "object_uid": "uid-spacex",
+        "primary_label": "SpaceX",
+        "primary_lang": "en",
+        "name": "SpaceX",
+        "aliases": [],
+    }
+    client.search.return_value = {"hits": {"hits": [{"_source": existing}]}}
+    client.get.return_value = {"_source": existing}
+
+    uid, _ = resolve_entity(
+        "스페이스X", "ko", space_id="ks-1", es_client=client,
+    )
+    assert uid == "uid-spacex"
+    assert not client.update.called
+
+
+def test_v2_korean_particle_stripped_before_lookup() -> None:
+    """LLM emits subject_surface='중국 상무부는' (with particle). The
+    resolver strips the particle and lookup matches the canonical entity."""
+    client = MagicMock()
+    existing = {
+        "object_uid": "uid-moc",
+        "primary_label": "중국 상무부",
+        "primary_lang": "ko",
+        "name": "중국 상무부",
+        "aliases": [],
+    }
+    seen: list[str] = []
+
+    def _search(*, index, query, size):
+        filt = query["bool"]["filter"]
+        _f, v = next(iter(filt[1]["term"].items()))
+        seen.append(v)
+        if v == "중국 상무부":
+            return {"hits": {"hits": [{"_source": existing}]}}
+        return {"hits": {"hits": []}}
+
+    client.search.side_effect = _search
+    client.get.return_value = {"_source": existing}
+
+    uid, was_created = resolve_entity(
+        "중국 상무부는", "ko", space_id="ks-1", es_client=client,
+    )
+    assert was_created is False
+    assert uid == "uid-moc"
+    assert "중국 상무부는" not in seen
+
+
+def test_v2_missing_subject_surface_falls_back_to_name_via_resolve_entity() -> None:
+    """When the LLM omits subject_surface (legacy / older Claude payload),
+    the resolver behavior is unchanged — it operates on whatever surface
+    the processor passes in. This locks the back-compat invariant."""
+    client = MagicMock()
+    client.search.return_value = {"hits": {"hits": []}}
+
+    # Surface fallback is what the caller would pass after coalescing
+    # subject_surface to subject_name. With "삼성전자" surface alone (no
+    # llm_name), the create path mints a Korean primary.
+    uid, was_created = resolve_entity(
+        "삼성전자", "ko", space_id="ks-1", es_client=client,
+    )
+    assert was_created is True
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "삼성전자"
+    assert body["primary_lang"] == "ko"
