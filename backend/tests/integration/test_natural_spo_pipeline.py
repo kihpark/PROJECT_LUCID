@@ -447,7 +447,7 @@ def test_mode_a_korean_claim_with_english_llm_name_resolves_to_korean_primary() 
     mock_client.exists.return_value = False
 
     with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
-         _patch("api.storage.elasticsearch.embeddings.get_embedding", return_value=None):
+         _patch("api.structure.processor.get_embedding", return_value=None):
         result, _ = _match_object(
             decomp.objects[0],
             knowledge_space_id="ks-1",
@@ -504,7 +504,7 @@ def test_mode_a_redcat_holdings_english_claim_stays_english() -> None:
     mock_client.exists.return_value = False
 
     with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
-         _patch("api.storage.elasticsearch.embeddings.get_embedding", return_value=None):
+         _patch("api.structure.processor.get_embedding", return_value=None):
         result, _ = _match_object(
             decomp.objects[0],
             knowledge_space_id="ks-1",
@@ -555,7 +555,7 @@ def test_mode_a_export_control_policy_noun_resolves_to_korean() -> None:
     mock_client.exists.return_value = False
 
     with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
-         _patch("api.storage.elasticsearch.embeddings.get_embedding", return_value=None):
+         _patch("api.structure.processor.get_embedding", return_value=None):
         result, _ = _match_object(
             decomp.objects[0],
             knowledge_space_id="ks-1",
