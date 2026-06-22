@@ -239,3 +239,50 @@ def test_korean_entity_with_llm_english_name_primary_is_natural_english() -> Non
     assert body["primary_label"] == "SpaceX"
     assert body["primary_lang"] == "en"
     assert "스페이스X" in body["aliases"]
+
+
+
+# ---------------------------------------------------------------------------
+# 5. B-62-fix subject-natlang (PO 2026-06-22): Korean common-noun capture
+#    preserves Korean primary even when LLM emits English translation as
+#    `name`. Brand-shaped English (SpaceX, OpenAI, KAIST) still wins.
+# ---------------------------------------------------------------------------
+
+def test_korean_common_noun_capture_preserves_korean_primary() -> None:
+    """Regression: Korean source emits 회사채; Claude translates `name`
+    to 'corporate bonds'. The resolver MUST defend the Korean surface
+    as primary_label and demote the English translation to aliases."""
+    client = MagicMock()
+    client.search.return_value = {"hits": {"hits": []}}
+
+    uid, was_created = resolve_entity(
+        "회사채", "ko",
+        space_id="ks-1",
+        llm_name="corporate bonds",
+        es_client=client,
+    )
+    assert was_created is True
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "회사채"
+    assert body["primary_lang"] == "ko"
+    assert "corporate bonds" in body["aliases"]
+
+
+def test_korean_firm_name_descriptive_translation_preserves_korean_primary() -> None:
+    """Regression: 우리자산운용 + Claude's 'Woori Asset Management' (a
+    multi-word descriptive translation, NOT a brand) -> Korean primary
+    is preserved. English translation lands in aliases."""
+    client = MagicMock()
+    client.search.return_value = {"hits": {"hits": []}}
+
+    uid, was_created = resolve_entity(
+        "우리자산운용", "ko",
+        space_id="ks-1",
+        llm_name="Woori Asset Management",
+        es_client=client,
+    )
+    assert was_created is True
+    body = client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "우리자산운용"
+    assert body["primary_lang"] == "ko"
+    assert "Woori Asset Management" in body["aliases"]

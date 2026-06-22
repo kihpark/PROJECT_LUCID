@@ -107,6 +107,38 @@ Run these IN ORDER on the input text:
           Korea"; "박현주 회장" + "박현주").
           An empty list (`"aliases": []`) is fine when the source
           surface form equals `name`.
+
+          ADDITIONAL RULE — B-62-fix subject-natlang (PO 2026-06-22):
+          한국어 일반명사·서술 표현·기관명을 영어로 번역해 `name`에 넣지 마세요.
+          `name` field for Korean common nouns and descriptive
+          translations MUST stay in the SOURCE LANGUAGE. The English
+          form belongs in `name_en` (and only there).
+          ALLOWED to use English in `name` ONLY for:
+            - Globally recognized brand-mark forms whose Korean
+              transliteration is the borrowed form (SpaceX, OpenAI,
+              Toyota, IBM, Apple, KAIST, BTS).
+          NOT allowed in `name` (must stay Korean):
+            - Descriptive translations: 회사채 → NOT "corporate bonds",
+              우리자산운용 → NOT "Woori Asset Management",
+              국방부 → NOT "Ministry of Defense",
+              정부 → NOT "government",
+              기준금리 → NOT "base interest rate".
+          Test: if a Korean reader would read your `name` field and say
+          "그건 영어 번역이지 원문이 아닌데"라고 한다면, 그건 잘못된 거다.
+          Examples (Korean source):
+            source: "회사채 발행 논의가 있었다."
+              OK    {"name":"회사채", "name_en":"corporate bonds",
+                     "aliases":[]}
+              NOT   {"name":"corporate bonds", "name_en":"corporate bonds",
+                     "aliases":["회사채"]}
+            source: "우리자산운용은 ETF를 운용한다."
+              OK    {"name":"우리자산운용", "name_en":"Woori Asset Management",
+                     "aliases":[]}
+              NOT   {"name":"Woori Asset Management", "name_en":"Woori Asset Management",
+                     "aliases":["우리자산운용"]}
+            source: "스페이스X 주식이 상장됐다."
+              OK    {"name":"SpaceX", "name_en":"SpaceX",
+                     "aliases":["스페이스X"]}    # brand — English canonical form preserved
   Step 2b. B-53 — KEEP FACT TEXT IN THE SOURCE LANGUAGE.
           The fact's `claim` and `object_value` MUST be written in
           the same language as the source text. Do NOT translate
