@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { ActionButton } from './ActionButton';
-import { LangToggle, type Lang } from './LangToggle';
 import { FactCard } from './FactCard';
 import { DisambigCard } from './DisambigCard';
 import {
@@ -83,7 +82,6 @@ export function DecideOverlay({
   initial,
   reviewMode = false,
 }: Props) {
-  const [lang, setLang] = useState<Lang>('en');
   const [factDecisions, setFactDecisions] = useState<
     Record<string, FactDecisionDraft>
   >(() => buildDefaultDecisions(initial.facts));
@@ -210,7 +208,6 @@ export function DecideOverlay({
       <header className="mb-6">
         <div className="flex items-baseline justify-between gap-4 mb-2">
           <h1 className="text-xl font-light">Decide</h1>
-          <LangToggle value={lang} onChange={setLang} />
         </div>
         <p className="text-sm text-text-secondary">
           <a
@@ -323,7 +320,7 @@ export function DecideOverlay({
                 key={uid}
                 fact={f}
                 objects={initial.objects}
-                lang={lang}
+                lang="en"
                 action={decision.action}
                 editedClaim={decision.editedClaim}
                 editedSubjectUid={decision.editedSubjectUid}

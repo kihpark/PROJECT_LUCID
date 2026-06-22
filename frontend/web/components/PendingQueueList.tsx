@@ -42,11 +42,24 @@ function PendingCard({ job, onDiscardRow }: PendingCardProps) {
         href={`/pending/${job.job_id}` as Route}
         className="block"
       >
-        <header className="flex items-baseline justify-between mb-2">
+        <header className="flex items-baseline justify-between mb-2 gap-3">
           <h3 className="text-sm font-medium truncate" title={job.source_url}>
             {hostFromUrl(job.source_url) ?? job.source_url}
           </h3>
-          <code className="text-xxs text-text-muted font-mono shrink-0 ml-2">
+          {/*
+           * decide-ux-fix #1: source_type badge moves to a top-right
+           * vertical cluster shared with the 폐기 button so they no
+           * longer overlap. When onDiscardRow is set the badge stays
+           * in the header but reserves right padding equal to the
+           * button's width via the parent container's pr-16.
+           */}
+          <code
+            data-testid={`pending-card-source-type-${job.job_id}`}
+            className={
+              'text-xxs text-text-muted font-mono shrink-0 '
+              + (onDiscardRow ? 'mr-14' : '')
+            }
+          >
             {job.source_type}
           </code>
         </header>

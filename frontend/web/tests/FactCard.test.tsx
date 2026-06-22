@@ -686,3 +686,105 @@ describe('FactCard — predicate autocomplete (spo-pending-ux)', () => {
     );
   });
 });
+describe('FactCard — decide-ux-fix #3: 저장 button', () => {
+  it('renders both 취소 and 저장 buttons in edit mode', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-save-fn-1')).toBeInTheDocument();
+    expect(screen.getByText('저장')).toBeInTheDocument();
+    const cancelButtons = screen.getAllByText('취소');
+    expect(cancelButtons.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('clicking 저장 closes the edit form but keeps action=edit on the card', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-2"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    // form is open: subject input is visible
+    expect(screen.getByTestId('fact-edit-subject-fn-1')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('fact-save-fn-1'));
+    // form closes
+    expect(screen.queryByTestId('fact-edit-subject-fn-1')).toBeNull();
+    // card stays at action='edit' (data-state on article)
+    expect(screen.getByTestId('fact-card-fn-1')).toHaveAttribute('data-state', 'edit');
+  });
+
+  it('after 저장 the non-editing view shows the edited subject/predicate/object', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-2"
+        editedPredicate="may_replace"
+        editedObjectValue="운영시간"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('fact-save-fn-1'));
+    // Edited values surface in the read-only dl
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('operating hours');
+    expect(screen.getByTestId('fact-predicate')).toHaveTextContent('may_replace');
+  });
+
+  it('clicking 취소 in edit mode reverts the card and closes the form', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const cancelButtons = screen.getAllByText('취소');
+    fireEvent.click(cancelButtons[cancelButtons.length - 1]!);
+    expect(onChange).toHaveBeenCalledWith({ action: 'accept' });
+  });
+
+  it('re-clicking Edit while action=edit re-opens a closed form', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    // close the form
+    fireEvent.click(screen.getByTestId('fact-save-fn-1'));
+    expect(screen.queryByTestId('fact-edit-subject-fn-1')).toBeNull();
+    // re-open via Edit click
+    fireEvent.click(screen.getByText('Edit'));
+    expect(screen.getByTestId('fact-edit-subject-fn-1')).toBeInTheDocument();
+  });
+});

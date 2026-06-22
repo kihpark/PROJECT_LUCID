@@ -198,3 +198,17 @@ describe('DecideOverlay — discard job button rename (spo-pending-ux)', () => {
     await waitFor(() => expect(api.discardJob).toHaveBeenCalledWith('ks-1', 'job-xyz'));
   });
 });
+describe('DecideOverlay — decide-ux-fix #2: KR/EN toggle removed', () => {
+  it('does not render a LangToggle group', () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    expect(screen.queryByRole('group', { name: /Display language/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^KR$/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^EN$/ })).toBeNull();
+  });
+
+  it('renders fact claims using the EN prefer-fallback', () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    expect(screen.getByText('EN claim 1')).toBeInTheDocument();
+    expect(screen.getByText('EN claim 2')).toBeInTheDocument();
+  });
+});
