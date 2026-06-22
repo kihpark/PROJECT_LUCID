@@ -7,6 +7,8 @@ import uuid
 
 import pytest
 
+from tests.integration.conftest import create_user_via_orm
+
 pytestmark = pytest.mark.integration
 
 
@@ -41,19 +43,19 @@ def client(pg_engine, alembic_upgrade):
 
 
 @pytest.fixture
-def auth_headers(client):
-    """Register a user and return Authorization headers + space_id + user_id."""
+def auth_headers(client, pg_engine):
+    """Bootstrap a user via ORM, log in, return Authorization headers + ids."""
     email = f"capture-{uuid.uuid4().hex[:8]}@lucid.example"
-    reg = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "longerthan8chars!"},
+    password = "longerthan8chars!"
+    user_id, space_id = create_user_via_orm(pg_engine, email, password)
+    login = client.post(
+        "/api/auth/login", json={"email": email, "password": password},
     )
-    assert reg.status_code == 201, reg.text
-    body = reg.json()
+    assert login.status_code == 200, login.text
     return {
-        "headers": {"Authorization": f"Bearer {body['access_token']}"},
-        "space_id": body["space_id"],
-        "user_id": body["user"]["id"],
+        "headers": {"Authorization": f"Bearer {login.json()['access_token']}"},
+        "space_id": space_id,
+        "user_id": user_id,
         "email": email,
     }
 
@@ -133,7 +135,7 @@ def test_capture_invalid_base64_returns_400(client, auth_headers):
     assert r.json()["detail"] == "raw_payload_b64_invalid"
 
 
-def test_jobs_endpoint_ownership_403(client, auth_headers):
+def test_jobs_endpoint_ownership_403(client, auth_headers, pg_engine):
     """User A cannot fetch user B's job."""
     # A captures a job
     r = client.post(
@@ -147,20 +149,21 @@ def test_jobs_endpoint_ownership_403(client, auth_headers):
     )
     job_id = r.json()["job_id"]
 
-    # B registers
+    # B bootstraps via ORM + logs in
     b_email = f"otherb-{uuid.uuid4().hex[:8]}@lucid.example"
-    b = client.post(
-        "/api/auth/register",
-        json={"email": b_email, "password": "longerthan8chars!"},
-    ).json()
-    b_headers = {"Authorization": f"Bearer {b['access_token']}"}
+    b_pw = "longerthan8chars!"
+    create_user_via_orm(pg_engine, b_email, b_pw)
+    b_login = client.post(
+        "/api/auth/login", json={"email": b_email, "password": b_pw},
+    )
+    b_headers = {"Authorization": f"Bearer {b_login.json()['access_token']}"}
 
     # B tries to read A's job
     r2 = client.get(f"/api/jobs/{job_id}", headers=b_headers)
     assert r2.status_code == 403
 
 
-def test_pending_jobs_filtered_by_user(client, auth_headers):
+def test_pending_jobs_filtered_by_user(client, auth_headers, pg_engine):
     # Capture 2 from current user
     for url in ("https://example.com/a", "https://example.com/b"):
         client.post(
@@ -172,12 +175,14 @@ def test_pending_jobs_filtered_by_user(client, auth_headers):
                 "captured_from": "chrome_ext",
             },
         )
-    # Capture 1 from another user
-    other = client.post(
-        "/api/auth/register",
-        json={"email": f"o-{uuid.uuid4().hex[:8]}@x.com", "password": "longerthan8chars!"},
-    ).json()
-    other_h = {"Authorization": f"Bearer {other['access_token']}"}
+    # Capture 1 from another user (ORM bootstrap + login)
+    other_email = f"o-{uuid.uuid4().hex[:8]}@x.com"
+    other_pw = "longerthan8chars!"
+    create_user_via_orm(pg_engine, other_email, other_pw)
+    other_login = client.post(
+        "/api/auth/login", json={"email": other_email, "password": other_pw},
+    )
+    other_h = {"Authorization": f"Bearer {other_login.json()['access_token']}"}
     client.post(
         "/api/capture",
         headers=other_h,
@@ -246,26 +251,27 @@ def test_b29_capture_duplicate_returns_existing_job(client, auth_headers):
         s.close()
 
 
-def test_b29_capture_dedup_scoped_to_user(client):
+def test_b29_capture_dedup_scoped_to_user(client, pg_engine):
     """Two different users may each save the same URL; the dedup
     guard is per-(user, ks, url), not global."""
-    # User A
+    # User A — ORM bootstrap + login
     email_a = f"dedup-a-{uuid.uuid4().hex[:8]}@lucid.example"
-    reg_a = client.post(
-        "/api/auth/register",
-        json={"email": email_a, "password": "longerthan8chars!"},
+    pw = "longerthan8chars!"
+    create_user_via_orm(pg_engine, email_a, pw)
+    login_a = client.post(
+        "/api/auth/login", json={"email": email_a, "password": pw},
     )
-    assert reg_a.status_code == 201, reg_a.text
-    headers_a = {"Authorization": f"Bearer {reg_a.json()['access_token']}"}
+    assert login_a.status_code == 200, login_a.text
+    headers_a = {"Authorization": f"Bearer {login_a.json()['access_token']}"}
 
-    # User B
+    # User B — ORM bootstrap + login
     email_b = f"dedup-b-{uuid.uuid4().hex[:8]}@lucid.example"
-    reg_b = client.post(
-        "/api/auth/register",
-        json={"email": email_b, "password": "longerthan8chars!"},
+    create_user_via_orm(pg_engine, email_b, pw)
+    login_b = client.post(
+        "/api/auth/login", json={"email": email_b, "password": pw},
     )
-    assert reg_b.status_code == 201, reg_b.text
-    headers_b = {"Authorization": f"Bearer {reg_b.json()['access_token']}"}
+    assert login_b.status_code == 200, login_b.text
+    headers_b = {"Authorization": f"Bearer {login_b.json()['access_token']}"}
 
     payload = {
         "source_url": "https://example.com/scoped-dedup",

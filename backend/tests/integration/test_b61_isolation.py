@@ -1,9 +1,9 @@
 """B-61 — per-user knowledge-space isolation regression tests.
 
-The /me + register + login surface is only meaningful if user B can
-never observe user A's facts or canonical entities. The route layer
-already enforces this via `_resolve_space` / inline checks — these
-tests pin the contract so a careless refactor surfaces as a CI red.
+The /me + login surface is only meaningful if user B can never observe
+user A's facts or canonical entities. The route layer already enforces
+this via `_resolve_space` / inline checks — these tests pin the
+contract so a careless refactor surfaces as a CI red.
 
 Three pinned contracts:
 
@@ -15,6 +15,10 @@ Three pinned contracts:
   3. The same entity surface string ("SpaceX") used by A and by B
      produces TWO distinct canonical entity uuids — one per space.
      This is the "no canonical entity leak" assertion.
+
+B-61-fix-admission: user creation is done directly via the ORM (no
+public /register endpoint exists anymore — admins admit users via
+/api/admin/applications/{id}/approve).
 """
 from __future__ import annotations
 
@@ -60,19 +64,57 @@ def client(pg_engine, alembic_upgrade):
     return TestClient(app)
 
 
-def _register(client, email_prefix: str) -> tuple[dict, str, str]:
+def _create_user_via_orm(
+    pg_engine, email: str, password: str, name: str | None = None,
+) -> tuple[str, str]:
+    """Create a User + Personal KnowledgeSpace + UserSettings directly
+    via the ORM. Returns (user_id, space_id)."""
+    from api.security import hash_password
+    from api.storage.postgres.orm import KnowledgeSpace, User, UserSettings
+
+    sm = sessionmaker(bind=pg_engine, expire_on_commit=False)
+    session = sm()
+    try:
+        user = User(
+            email=email,
+            name=name,
+            password_hash=hash_password(password),
+        )
+        session.add(user)
+        session.flush()
+        space = KnowledgeSpace(
+            user_id=user.id, type="personal", name=name or "Personal",
+        )
+        session.add(space)
+        settings = UserSettings(
+            user_id=user.id,
+            validation_mode="quick",
+            surface_on_by_default=True,
+        )
+        session.add(settings)
+        session.commit()
+        session.refresh(user)
+        session.refresh(space)
+        return str(user.id), str(space.id)
+    finally:
+        session.close()
+
+
+def _create_and_login(
+    client, pg_engine, email_prefix: str,
+) -> tuple[str, str, str]:
+    """Returns (user_id, access_token, space_id)."""
     email = f"{email_prefix}-{uuid.uuid4().hex[:8]}@lucid.example"
-    resp = client.post(
-        "/api/auth/register",
-        json={
-            "email": email,
-            "password": "longerthan8chars!",
-            "name": email_prefix.upper(),
-        },
+    password = "longerthan8chars!"
+    user_id, space_id = _create_user_via_orm(
+        pg_engine, email, password, email_prefix.upper(),
     )
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    return body, body["access_token"], body["space_id"]
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert resp.status_code == 200, resp.text
+    return user_id, resp.json()["access_token"], space_id
 
 
 def _index_fact_into(
@@ -118,13 +160,13 @@ def _delete_fact(fact_uid: str) -> None:
         pass
 
 
-def test_b61_user_b_cannot_read_user_a_space(client):
-    """A registers + owns a space. B registers. B → GET A's space
+def test_b61_user_b_cannot_read_user_a_space(client, pg_engine):
+    """A owns a space. B is a separate user. B → GET A's space
     → must 403. Returning 404 here would leak "this space exists";
     the spaces route correctly returns 403 instead.
     """
-    _a_body, _a_token, a_space_id = _register(client, "alice")
-    _b_body, b_token, _b_space_id = _register(client, "bob")
+    _a_id, _a_token, a_space_id = _create_and_login(client, pg_engine, "alice")
+    _b_id, b_token, _b_space_id = _create_and_login(client, pg_engine, "bob")
 
     resp = client.get(
         f"/api/spaces/{a_space_id}",
@@ -133,7 +175,9 @@ def test_b61_user_b_cannot_read_user_a_space(client):
     assert resp.status_code == 403, resp.text
 
 
-def test_b61_user_b_recall_does_not_see_user_a_facts(client, monkeypatch):
+def test_b61_user_b_recall_does_not_see_user_a_facts(
+    client, pg_engine, monkeypatch,
+):
     """A captures a fact about "SpaceX 본사는 LA에 있다" in A's space.
     B then runs recall on B's own space → must return zero facts.
     The ES query carries `knowledge_space_id == b_space_id` so the
@@ -144,8 +188,8 @@ def test_b61_user_b_recall_does_not_see_user_a_facts(client, monkeypatch):
         lambda text: [0.1] * 1536,
     )
 
-    _a_body, _a_token, a_space_id = _register(client, "alice")
-    _b_body, b_token, b_space_id = _register(client, "bob")
+    _a_id, _a_token, a_space_id = _create_and_login(client, pg_engine, "alice")
+    _b_id, b_token, b_space_id = _create_and_login(client, pg_engine, "bob")
 
     a_fact_uid = f"fn-iso-{uuid.uuid4().hex[:8]}"
     _index_fact_into(
@@ -172,7 +216,7 @@ def test_b61_user_b_recall_does_not_see_user_a_facts(client, monkeypatch):
 
 
 def test_b61_same_entity_string_creates_separate_canonical_entities(
-    client, monkeypatch,
+    client, pg_engine, monkeypatch,
 ):
     """A captures a fact with subject_uid="ent-spacex-A" in A's space.
     B captures a fact with subject_uid="ent-spacex-B" in B's space.
@@ -190,8 +234,8 @@ def test_b61_same_entity_string_creates_separate_canonical_entities(
         lambda text: [0.1] * 1536,
     )
 
-    _a_body, _a_token, a_space_id = _register(client, "alice")
-    _b_body, _b_token, b_space_id = _register(client, "bob")
+    _a_id, _a_token, a_space_id = _create_and_login(client, pg_engine, "alice")
+    _b_id, _b_token, b_space_id = _create_and_login(client, pg_engine, "bob")
 
     # Two facts about "SpaceX" — one per space — with deliberately
     # different subject_uids to simulate independent canonical resolution.

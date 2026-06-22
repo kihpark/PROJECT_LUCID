@@ -8,12 +8,6 @@ from pydantic import EmailStr, Field
 from api.models.base import UID, LucidBaseModel
 
 
-class RegisterRequest(LucidBaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
-    name: str | None = Field(default=None, max_length=120)
-
-
 class LoginRequest(LucidBaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
@@ -29,14 +23,6 @@ class UserPublic(LucidBaseModel):
     id: UID
     email: EmailStr
     name: str | None = None
-
-
-class RegisterResponse(LucidBaseModel):
-    user: UserPublic
-    space_id: UID
-    access_token: str
-    token_type: Literal["bearer"] = "bearer"
-    expires_in: int
 
 
 class KnowledgeSpacePublic(LucidBaseModel):
@@ -79,3 +65,4 @@ class MeResponse(LucidBaseModel):
     display_name: str | None = None
     default_space_id: UID | None = None
     is_new_user: bool = False
+    is_admin: bool = False

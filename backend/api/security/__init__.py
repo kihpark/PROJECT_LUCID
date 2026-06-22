@@ -8,6 +8,7 @@ Sprint 1B:
 from api.security.dependencies import (
     get_current_user,
     get_current_user_id,
+    require_admin,
     require_jwt,
 )
 from api.security.jwt import (
@@ -26,6 +27,7 @@ __all__ = [
     "JWT_ALGORITHM",
     "JWTPayload",
     "require_jwt",
+    "require_admin",
     "get_current_user",
     "get_current_user_id",
 ]

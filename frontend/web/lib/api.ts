@@ -126,29 +126,10 @@ export function getMySpaces(): Promise<KnowledgeSpacePublic[]> {
 }
 
 // ---------------------------------------------------------------------------
-// B-61 — multi-user gate: register, logout, /me
+// B-61 — multi-user gate: logout, /me
+// (B-61-fix-admission removed registerUser / RegisterRequest /
+//  RegisterResponse — admins now admit users via /api/admin/applications.)
 // ---------------------------------------------------------------------------
-
-export type RegisterRequest = {
-  email: string;
-  password: string;
-  name?: string | null;
-};
-
-export type RegisterResponse = {
-  user: { id: string; email: string; name?: string | null };
-  space_id: string;
-  access_token: string;
-  token_type: 'bearer';
-  expires_in: number;
-};
-
-export function registerUser(payload: RegisterRequest): Promise<RegisterResponse> {
-  return request<RegisterResponse>('/api/auth/register', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
 
 export async function logoutUser(): Promise<void> {
   // Best-effort: JWT is stateless, so a network failure or 401 here is
@@ -168,6 +149,7 @@ export type MeResponse = {
   display_name?: string | null;
   default_space_id?: string | null;
   is_new_user: boolean;
+  is_admin: boolean;
 };
 
 export function getMe(): Promise<MeResponse> {
@@ -324,4 +306,50 @@ export function detachSource(
 
 export function getHomeBrief(): Promise<HomeBrief> {
   return request<HomeBrief>('/api/home/brief');
+}
+
+// ---------------------------------------------------------------------------
+// B-61-fix-admission — admin admission endpoints
+// ---------------------------------------------------------------------------
+
+export type ApplicationListItem = {
+  application_id: string;
+  email: string;
+  profession: string | null;
+  q1: string | null;
+  q2: string | null;
+  lang: string | null;
+  status: string;
+  created_at: string | null;
+};
+
+export type ApplicationsListResponse = {
+  items: ApplicationListItem[];
+  total: number;
+};
+
+export type ApproveResponse = {
+  application_id: string;
+  user_id: string;
+  email: string;
+  temp_password: string;
+  already_existed: boolean;
+  status: string;
+};
+
+export function listApplications(
+  statusFilter: 'pending' | 'approved' | 'rejected' | 'all' = 'pending',
+): Promise<ApplicationsListResponse> {
+  const params = new URLSearchParams();
+  params.set('status', statusFilter);
+  return request<ApplicationsListResponse>(
+    `/api/admin/applications?${params.toString()}`,
+  );
+}
+
+export function approveApplication(id: string): Promise<ApproveResponse> {
+  return request<ApproveResponse>(
+    `/api/admin/applications/${encodeURIComponent(id)}/approve`,
+    { method: 'POST' },
+  );
 }

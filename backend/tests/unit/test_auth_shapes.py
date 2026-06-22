@@ -1,4 +1,12 @@
-"""Unit: Pydantic request/response shapes for auth + settings."""
+"""Unit: Pydantic request/response shapes for auth + settings.
+
+B-61-fix-admission: RegisterRequest/RegisterResponse were removed
+together with the public /api/auth/register endpoint. Their fields
+(email + password + optional name) are still validated downstream by
+the LoginRequest schema (for password) and the ApproveResponse schema
+(for the admin admission flow); the schema shapes are exercised
+end-to-end by the integration suite.
+"""
 from __future__ import annotations
 
 import pytest
@@ -6,31 +14,18 @@ from pydantic import ValidationError
 
 from api.models.auth import (
     LoginRequest,
-    RegisterRequest,
     UpdateUserSettingsRequest,
 )
-
-
-def test_register_request_minimum():
-    req = RegisterRequest(email="alice@example.com", password="hunter2!")
-    assert req.email == "alice@example.com"
-    assert req.password == "hunter2!"
-    assert req.name is None
-
-
-def test_register_request_rejects_short_password():
-    with pytest.raises(ValidationError):
-        RegisterRequest(email="bob@example.com", password="short")
-
-
-def test_register_request_rejects_bad_email():
-    with pytest.raises(ValidationError):
-        RegisterRequest(email="not-an-email", password="hunter2!")
 
 
 def test_login_request_accepts_any_password_length():
     """login validates against the stored hash; we do not pre-filter length."""
     assert LoginRequest(email="c@d.com", password="x").password == "x"
+
+
+def test_login_request_rejects_bad_email():
+    with pytest.raises(ValidationError):
+        LoginRequest(email="not-an-email", password="hunter2!")
 
 
 def test_update_settings_validation_mode_enum():

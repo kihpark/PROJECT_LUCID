@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from api.extractors.base import ExtractResult
+from tests.integration.conftest import create_user_via_orm
 
 pytestmark = pytest.mark.integration
 
@@ -79,15 +80,15 @@ def client(pg_engine, alembic_upgrade):
 
 
 @pytest.fixture
-def auth_headers(client):
+def auth_headers(client, pg_engine):
     email = f"e2e-{uuid.uuid4().hex[:8]}@lucid.example"
-    reg = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "longerthan8chars!"},
+    password = "longerthan8chars!"
+    create_user_via_orm(pg_engine, email, password)
+    login = client.post(
+        "/api/auth/login", json={"email": email, "password": password},
     )
-    assert reg.status_code == 201, reg.text
-    body = reg.json()
-    return {"Authorization": f"Bearer {body['access_token']}"}
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
 def _wait_for_status(

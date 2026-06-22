@@ -6,8 +6,6 @@ Built first (zero deps); imported by ES storage layer and API routes.
 from api.models.auth import (
     KnowledgeSpacePublic,
     LoginRequest,
-    RegisterRequest,
-    RegisterResponse,
     TokenResponse,
     UpdateSpaceRequest,
     UpdateUserSettingsRequest,
@@ -112,8 +110,6 @@ __all__ = [
     "SourceType",
     "Source",
     # auth (Sprint 1B)
-    "RegisterRequest",
-    "RegisterResponse",
     "LoginRequest",
     "TokenResponse",
     "UserPublic",

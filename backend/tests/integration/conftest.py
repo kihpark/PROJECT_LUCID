@@ -255,6 +255,63 @@ def es_indexes(es_client):
     indexes.delete_indexes()
 
 
+# --- B-61-fix-admission — direct ORM user bootstrap helper -----------
+#
+# The public /api/auth/register endpoint was removed; admins admit new
+# users via /api/admin/applications/{id}/approve. The integration
+# tests that used to hit /register now bootstrap a user directly via
+# the ORM. This helper is a session-independent function (no fixture
+# required) so the existing per-file `client` fixtures don't need to
+# grow new dependencies.
+
+
+def create_user_via_orm(
+    pg_engine,
+    email: str,
+    password: str,
+    name: str | None = None,
+    is_admin: bool = False,
+) -> tuple[str, str]:
+    """Create a User + Personal KnowledgeSpace + UserSettings directly
+    in the test Postgres. Returns (user_id, space_id) as strings.
+
+    Replaces the deleted POST /api/auth/register for tests that just
+    need a bootstrapped user.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    from api.security import hash_password
+    from api.storage.postgres.orm import KnowledgeSpace, User, UserSettings
+
+    sm = sessionmaker(bind=pg_engine, expire_on_commit=False)
+    session = sm()
+    try:
+        user = User(
+            email=email,
+            name=name,
+            password_hash=hash_password(password),
+            is_admin=is_admin,
+        )
+        session.add(user)
+        session.flush()
+        space = KnowledgeSpace(
+            user_id=user.id, type="personal", name=name or "Personal",
+        )
+        session.add(space)
+        settings = UserSettings(
+            user_id=user.id,
+            validation_mode="quick",
+            surface_on_by_default=True,
+        )
+        session.add(settings)
+        session.commit()
+        session.refresh(user)
+        session.refresh(space)
+        return str(user.id), str(space.id)
+    finally:
+        session.close()
+
+
 @pytest.fixture()
 def fake_embedding(monkeypatch):
     """Replace get_embedding with a deterministic fake (1536-dim 0.5 vec).
