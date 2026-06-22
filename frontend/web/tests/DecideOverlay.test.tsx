@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { DecideOverlay } from '@/components/DecideOverlay';
 import type { PendingJobDetail } from '@/lib/types';
@@ -29,6 +29,8 @@ vi.mock('@/lib/api', () => ({
     skipped_objects: [],
     validation_log_count: payload.decisions.length,
   })),
+  searchEntitySuggestions: vi.fn(async () => []),
+  listPredicates: vi.fn(async () => []),
 }));
 
 import * as api from '@/lib/api';
@@ -67,6 +69,8 @@ const baseJob: PendingJobDetail = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+  (api.listPredicates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 });
 
 describe('DecideOverlay — checkbox-by-default landing (B-31)', () => {
@@ -95,9 +99,7 @@ describe('DecideOverlay — checkbox-by-default landing (B-31)', () => {
   it('Submit button is enabled on landing — no "Accept all" indirection', () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
     expect(screen.getByText('Submit decisions')).not.toBeDisabled();
-    // The pre-B-31 "Accept all N undecided" button is gone.
     expect(screen.queryByRole('button', { name: /Accept all/i })).toBeNull();
-    // And no tabs.
     expect(screen.queryByRole('tab', { name: /Review/i })).toBeNull();
   });
 });
@@ -154,7 +156,6 @@ describe('DecideOverlay — Edit + Discard buttons (B-31)', () => {
   });
 });
 
-
 describe('DecideOverlay — submit success panel (B-37)', () => {
   it('replaces the review surface with the success panel after Submit', async () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
@@ -164,17 +165,14 @@ describe('DecideOverlay — submit success panel (B-37)', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('decisions-recorded-panel')).not.toBeNull(),
     );
-    // The fact cards are gone — no more chance of double-submitting.
     expect(screen.queryByTestId('fact-card-fn-1')).toBeNull();
     expect(screen.queryByTestId('fact-card-fn-2')).toBeNull();
-    // The Pending Queue back-link is the post-submit affordance.
     const back = screen.getByTestId('back-to-pending') as HTMLAnchorElement;
     expect(back.getAttribute('href')).toBe('/pending');
   });
 
   it('success panel includes the counts of accepted / edited / discarded', async () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
-    // Discard fn-2 so the counts aren't all in one bucket.
     fireEvent.click(screen.getByTestId('fact-checkbox-fn-2'));
     fireEvent.click(screen.getByText('Submit decisions'));
     await waitFor(() =>
@@ -183,5 +181,20 @@ describe('DecideOverlay — submit success panel (B-37)', () => {
     const panel = screen.getByTestId('decisions-recorded-panel');
     expect(panel).toHaveTextContent(/1건 accept/);
     expect(panel).toHaveTextContent(/1건 discard/);
+  });
+});
+
+describe('DecideOverlay — discard job button rename (spo-pending-ux)', () => {
+  it('renders "이 추출 전체 폐기" button instead of "Discard job"', () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    expect(screen.getByText('이 추출 전체 폐기')).toBeInTheDocument();
+    expect(screen.queryByText('Discard job')).toBeNull();
+  });
+
+  it('clicking "이 추출 전체 폐기" calls discardJob API', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+    fireEvent.click(screen.getByText('이 추출 전체 폐기'));
+    await waitFor(() => expect(api.discardJob).toHaveBeenCalledWith('ks-1', 'job-xyz'));
   });
 });

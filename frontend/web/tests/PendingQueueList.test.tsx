@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+﻿import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { PendingQueueList } from '@/components/PendingQueueList';
 import type { PendingPage } from '@/lib/types';
@@ -58,23 +58,57 @@ describe('PendingQueueList', () => {
 
   it('does not render the objects count (B-29 U-2)', () => {
     render(<PendingQueueList page={page} onPage={() => {}} />);
-    // The facts dd survives as the only numeric stat.
     const factsDds = screen.getAllByTestId('pending-card-facts');
     expect(factsDds.length).toBe(2);
-    // No "objects" label remains on the card surface.
     expect(screen.queryByText(/^objects$/)).toBeNull();
   });
 
   it('card href is the resolved dynamic segment, not a literal [jobId]', () => {
-    // Regression for Walking-Skeleton Iteration 2 Bug 1 — the
-    // object-form href ({ pathname: '/pending/[jobId]', query: { jobId } })
-    // does NOT substitute the dynamic segment; Next.js rendered it as
-    // `/pending/[jobId]?jobId=<UUID>` and clicks landed on NotFound.
     render(<PendingQueueList page={page} onPage={() => {}} />);
-    const link = screen.getByTestId('pending-card-job-1').closest('a');
+    const card = screen.getByTestId('pending-card-job-1');
+    const link = card.closest('a') ?? card.querySelector('a');
     expect(link).not.toBeNull();
     expect(link!.getAttribute('href')).toBe('/pending/job-1');
     expect(link!.getAttribute('href')).not.toContain('[jobId]');
     expect(link!.getAttribute('href')).not.toContain('?jobId=');
+  });
+});
+
+describe('PendingQueueList — per-row discard (spo-pending-ux)', () => {
+  it('renders a 폐기 button per row when onDiscard prop provided', () => {
+    const onDiscard = vi.fn(async () => {});
+    render(<PendingQueueList page={page} onPage={() => {}} onDiscard={onDiscard} />);
+    expect(screen.getByTestId('discard-row-job-1')).toBeInTheDocument();
+    expect(screen.getByTestId('discard-row-job-2')).toBeInTheDocument();
+  });
+
+  it('does NOT render 폐기 buttons when onDiscard not provided', () => {
+    render(<PendingQueueList page={page} onPage={() => {}} />);
+    expect(screen.queryByTestId('discard-row-job-1')).toBeNull();
+    expect(screen.queryByTestId('discard-row-job-2')).toBeNull();
+  });
+
+  it('clicking 폐기 hides the row immediately (optimistic)', () => {
+    const onDiscard = vi.fn(() => new Promise<void>(() => {/* never resolves in test */}));
+    render(<PendingQueueList page={page} onPage={() => {}} onDiscard={onDiscard} />);
+    fireEvent.click(screen.getByTestId('discard-row-job-1'));
+    expect(screen.queryByTestId('pending-card-job-1')).toBeNull();
+    expect(screen.getByTestId('pending-card-job-2')).toBeInTheDocument();
+  });
+
+  it('shows a 복원 snackbar after clicking 폐기', () => {
+    const onDiscard = vi.fn(() => new Promise<void>(() => {}));
+    render(<PendingQueueList page={page} onPage={() => {}} onDiscard={onDiscard} />);
+    fireEvent.click(screen.getByTestId('discard-row-job-1'));
+    expect(screen.getByText('복원')).toBeInTheDocument();
+  });
+
+  it('clicking 복원 restores the hidden row', () => {
+    const onDiscard = vi.fn(() => new Promise<void>(() => {}));
+    render(<PendingQueueList page={page} onPage={() => {}} onDiscard={onDiscard} />);
+    fireEvent.click(screen.getByTestId('discard-row-job-1'));
+    expect(screen.queryByTestId('pending-card-job-1')).toBeNull();
+    fireEvent.click(screen.getByText('복원'));
+    expect(screen.getByTestId('pending-card-job-1')).toBeInTheDocument();
   });
 });

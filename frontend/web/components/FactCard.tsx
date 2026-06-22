@@ -1,9 +1,10 @@
-'use client';
+﻿'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { ActionButton } from './ActionButton';
 import { GraphNoteEditor } from './GraphNoteEditor';
-import type { FactAction, FactSummary, ObjectSummary } from '@/lib/types';
+import { searchEntitySuggestions, listPredicates } from '@/lib/api';
+import type { FactAction, FactSummary, ObjectSummary, EntitySuggestion, PredicateEntry } from '@/lib/types';
 import type { Lang } from './LangToggle';
 
 interface EditPayload {
@@ -17,20 +18,8 @@ interface EditPayload {
 interface Props {
   fact: FactSummary;
   lang: Lang;
-  // B-27: when present, FactCard resolves subject_uid / object_value
-  // references like "obj-1" against this list and displays the
-  // object's human-readable name (or name_en in EN mode). If a value
-  // matches the obj-N shape but has no entry, the card shows a
-  // "(미해석)" / "(unresolved)" marker rather than the raw ref so the
-  // PO can spot serialization gaps in dogfood. Plain literal values
-  // (numbers, dates, "흑자" etc.) pass through unchanged.
   objects?: ObjectSummary[];
-  // B-31: every fact lands with a default `action` ('accept'), so this
-  // is required (no longer optional).
   action: FactAction;
-  // B-34: structured edit state. When `action === 'edit'`, the parent
-  // tracks per-fact subject/predicate/object overrides here. Each field
-  // falls back to the fact's original triple if not set.
   editedClaim?: string;
   editedSubjectUid?: string;
   editedPredicate?: string;
@@ -47,26 +36,16 @@ function displayClaim(fact: FactSummary, lang: Lang): string {
   return fact.claim;
 }
 
-// B-37: an entity reference can be an LLM-emitted placeholder
-// ("obj-12"), a canonical UUID4 produced by the B-35 remap
-// ("6895dbc7-a533-..."), or a UUID-shaped string with non-strict
-// version bits (older create_new path). All three resolve through
-// labelMap; failing that we show a "(미해석)" marker rather than
-// dump the raw uid on the user.
 const OBJECT_REF_PATTERN = /^(?:obj-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
-function buildLabelMap(
-  objects: ObjectSummary[] | undefined,
-): Map<string, ObjectSummary> {
+function buildLabelMap(objects: ObjectSummary[] | undefined): Map<string, ObjectSummary> {
   const m = new Map<string, ObjectSummary>();
   if (!objects) return m;
   for (const o of objects) m.set(o.uid, o);
   return m;
 }
 
-function buildNameToUidMap(
-  objects: ObjectSummary[] | undefined,
-): Map<string, string> {
+function buildNameToUidMap(objects: ObjectSummary[] | undefined): Map<string, string> {
   const m = new Map<string, string>();
   if (!objects) return m;
   for (const o of objects) {
@@ -93,21 +72,20 @@ function resolveEntity(
   return value;
 }
 
-/**
- * Build the regenerated claim preview from the (possibly edited) triple.
- * Triple notation rather than natural language — the claim is the
- * persisted FactNode.claim, and `[S | P | O]` is honest about what
- * we have (a triple) without pretending to be a sentence.
- */
-function regenerateClaim(
-  subjectLabel: string,
-  predicate: string,
-  objectLabel: string,
-): string {
+function regenerateClaim(subjectLabel: string, predicate: string, objectLabel: string): string {
   const s = subjectLabel || '?';
   const p = predicate || '?';
   const o = objectLabel || '?';
   return `${s} | ${p} | ${o}`;
+}
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
 }
 
 export function FactCard({
@@ -138,35 +116,109 @@ export function FactCard({
   const subjectLabel = resolveEntity(currentSubject, labelMap, lang);
   const objectLabel = resolveEntity(currentObject, labelMap, lang);
 
-  // Build the regenerated claim from the current (possibly edited)
-  // triple. While in edit mode this updates as the user types; when
-  // not in edit mode the fact's original claim is shown via
-  // `displayClaim` instead.
   const previewClaim = useMemo(
     () => regenerateClaim(subjectLabel, currentPredicate, objectLabel),
     [subjectLabel, currentPredicate, objectLabel],
   );
 
-  const emitEdit = (
-    next: {
-      subject?: string;
-      predicate?: string;
-      object?: string;
-    },
-  ) => {
+  // Entity suggestion state — subject
+  const [subjectQuery, setSubjectQuery] = useState(() =>
+    subjectLabel !== '—' ? subjectLabel : currentSubject,
+  );
+  const [subjectSuggestions, setSubjectSuggestions] = useState<EntitySuggestion[]>([]);
+  const debouncedSubjectQuery = useDebounce(subjectQuery, 200);
+
+  // Entity suggestion state — object
+  const [objectQuery, setObjectQuery] = useState(() =>
+    objectLabel !== '—' ? objectLabel : currentObject,
+  );
+  const [objectSuggestions, setObjectSuggestions] = useState<EntitySuggestion[]>([]);
+  const debouncedObjectQuery = useDebounce(objectQuery, 200);
+
+  // Predicate autocomplete state
+  const [predicateQuery, setPredicateQuery] = useState(currentPredicate);
+  const [predicateCache, setPredicateCache] = useState<PredicateEntry[]>([]);
+  const predicateSuggestions = useMemo(() => {
+    if (!predicateQuery.trim()) return [];
+    const q = predicateQuery.toLowerCase();
+    return predicateCache
+      .filter(
+        (p) =>
+          p.code.toLowerCase().includes(q) ||
+          p.label_ko.toLowerCase().includes(q) ||
+          p.label_en.toLowerCase().includes(q),
+      )
+      .slice(0, 5);
+  }, [predicateQuery, predicateCache]);
+
+  // Load predicate cache on mount when editing
+  useEffect(() => {
+    if (!isEditing) return;
+    listPredicates()
+      .then(setPredicateCache)
+      .catch(() => {/* degrade quietly */});
+  }, [isEditing]);
+
+  // Sync inputs when parent-controlled values change
+  const prevSubjectRef = useRef(currentSubject);
+  const prevObjectRef = useRef(currentObject);
+  const prevPredicateRef = useRef(currentPredicate);
+  useEffect(() => {
+    if (currentSubject !== prevSubjectRef.current) {
+      prevSubjectRef.current = currentSubject;
+      const resolved = resolveEntity(currentSubject, labelMap, lang);
+      setSubjectQuery(resolved !== '—' ? resolved : currentSubject);
+    }
+  }, [currentSubject, labelMap, lang]);
+  useEffect(() => {
+    if (currentObject !== prevObjectRef.current) {
+      prevObjectRef.current = currentObject;
+      const resolved = resolveEntity(currentObject, labelMap, lang);
+      setObjectQuery(resolved !== '—' ? resolved : currentObject);
+    }
+  }, [currentObject, labelMap, lang]);
+  useEffect(() => {
+    if (currentPredicate !== prevPredicateRef.current) {
+      prevPredicateRef.current = currentPredicate;
+      setPredicateQuery(currentPredicate);
+    }
+  }, [currentPredicate]);
+
+  // Fetch subject suggestions
+  useEffect(() => {
+    if (!isEditing || !debouncedSubjectQuery.trim() || !spaceId) {
+      setSubjectSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    searchEntitySuggestions(debouncedSubjectQuery, spaceId, 5)
+      .then((items) => { if (!cancelled) setSubjectSuggestions(items); })
+      .catch(() => { if (!cancelled) setSubjectSuggestions([]); });
+    return () => { cancelled = true; };
+  }, [debouncedSubjectQuery, isEditing, spaceId]);
+
+  // Fetch object suggestions
+  useEffect(() => {
+    if (!isEditing || !debouncedObjectQuery.trim() || !spaceId) {
+      setObjectSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    searchEntitySuggestions(debouncedObjectQuery, spaceId, 5)
+      .then((items) => { if (!cancelled) setObjectSuggestions(items); })
+      .catch(() => { if (!cancelled) setObjectSuggestions([]); });
+    return () => { cancelled = true; };
+  }, [debouncedObjectQuery, isEditing, spaceId]);
+
+  // Emit helpers
+  const emitEdit = (next: { subject?: string; predicate?: string; object?: string }) => {
     const nextSubject = next.subject ?? currentSubject;
     const nextPredicate = next.predicate ?? currentPredicate;
     const nextObject = next.object ?? currentObject;
-    // Auto-resolve object: if the user typed a name that matches a known
-    // entity, store the uid; otherwise treat as literal.
     const resolvedObject = nameToUid.get(nextObject) ?? nextObject;
     const nextSubjectLabel = resolveEntity(nextSubject, labelMap, lang);
     const nextObjectLabel = resolveEntity(resolvedObject, labelMap, lang);
-    const nextClaim = regenerateClaim(
-      nextSubjectLabel,
-      nextPredicate,
-      nextObjectLabel,
-    );
+    const nextClaim = regenerateClaim(nextSubjectLabel, nextPredicate, nextObjectLabel);
     onChange({
       action: 'edit',
       editedClaim: nextClaim,
@@ -182,16 +234,52 @@ export function FactCard({
     } else {
       onChange(
         editedClaim
-          ? {
-              action: 'edit',
-              editedClaim,
-              editedSubjectUid,
-              editedPredicate,
-              editedObjectValue,
-            }
+          ? { action: 'edit', editedClaim, editedSubjectUid, editedPredicate, editedObjectValue }
           : { action: 'accept' },
       );
     }
+  };
+
+  // Discard toggle: when already discarded, clicking '취소' reverts
+  const onDiscardToggle = () => {
+    if (isDiscarded) {
+      onChange(
+        editedClaim
+          ? { action: 'edit', editedClaim, editedSubjectUid, editedPredicate, editedObjectValue }
+          : { action: 'accept' },
+      );
+    } else {
+      onChange({ action: 'discard' });
+    }
+  };
+
+  const onCancelEdit = () => {
+    onChange({ action: 'accept' });
+  };
+
+  const onEditClick = () => {
+    if (isEditing) {
+      onCancelEdit();
+    } else {
+      emitEdit({});
+    }
+  };
+
+  const onSubjectChipClick = (suggestion: EntitySuggestion) => {
+    setSubjectQuery(suggestion.primary_label);
+    setSubjectSuggestions([]);
+    emitEdit({ subject: suggestion.entity_id });
+  };
+
+  const onObjectChipClick = (suggestion: EntitySuggestion) => {
+    setObjectQuery(suggestion.primary_label);
+    setObjectSuggestions([]);
+    emitEdit({ object: suggestion.entity_id });
+  };
+
+  const onPredicateChipClick = (entry: PredicateEntry) => {
+    setPredicateQuery(entry.code);
+    emitEdit({ predicate: entry.code });
   };
 
   return (
@@ -216,21 +304,41 @@ export function FactCard({
         />
         <div className="flex-1 flex items-baseline justify-between">
           <code className="text-xxs text-text-muted font-mono">{factUid}</code>
-          {fact.negation_flag && (
-            <span
-              className="inline-flex items-center gap-1 text-xxs text-accent-error font-mono"
-              aria-label="negation warning"
-              role="status"
-            >
-              ⚠ negation_flag
-              {fact.negation_scope ? ` (${fact.negation_scope})` : ''}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {isDiscarded && (
+              <span className="inline-flex items-center text-xxs font-mono text-accent-error bg-accent-error/10 border border-accent-error/30 rounded px-1.5 py-0.5">
+                폐기 예정
+              </span>
+            )}
+            {fact.negation_flag && (
+              <span
+                className="inline-flex items-center gap-1 text-xxs text-accent-error font-mono"
+                aria-label="negation warning"
+                role="status"
+              >
+                ⚠ negation_flag
+                {fact.negation_scope ? ` (${fact.negation_scope})` : ''}
+              </span>
+            )}
+          </div>
         </div>
       </header>
-      <p className="text-base mb-3 pl-7" lang={lang === 'kr' ? 'ko' : 'en'}>
-        {isEditing ? previewClaim : displayClaim(fact, lang)}
-      </p>
+
+      {isEditing && (
+        <blockquote className="italic text-sm text-text-secondary mb-3 pl-7 border-l-2 border-border-subtle">
+          &ldquo;{displayClaim(fact, lang)}&rdquo;
+        </blockquote>
+      )}
+
+      {!isEditing && (
+        <p
+          className={['text-base mb-3 pl-7', isDiscarded ? 'line-through' : ''].join(' ')}
+          lang={lang === 'kr' ? 'ko' : 'en'}
+        >
+          {displayClaim(fact, lang)}
+        </p>
+      )}
+
       {!isEditing
         && (fact.subject_uid || fact.predicate || fact.object_value)
         && (
@@ -249,6 +357,7 @@ export function FactCard({
           </div>
         </dl>
       )}
+
       {isEditing && (
         <div className="mb-3 pl-7 space-y-3">
           <div>
@@ -258,36 +367,40 @@ export function FactCard({
             >
               subject
             </label>
-            <select
+            <input
               id={`edit-subject-${factUid}`}
               data-testid={`fact-edit-subject-${factUid}`}
-              value={currentSubject}
-              onChange={(e) => emitEdit({ subject: e.target.value })}
+              type="text"
+              value={subjectQuery}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSubjectQuery(val);
+                emitEdit({ subject: val });
+              }}
+              placeholder="entity name or uid"
               className={
                 'w-full rounded-md border border-border-subtle bg-bg-elevated '
                 + 'p-2 text-sm text-text-primary focus:outline-none '
                 + 'focus:border-accent-cool'
               }
-            >
-              {/* B-37: when the current value isn't in objects (e.g. canonical
-                UUID was assigned post-decompose), still keep the value selectable
-                but label it humanely. resolveEntity already does the heavy
-                lifting; the dropdown just shows its output. */}
-              {!objects?.some((o) => o.uid === currentSubject) && (
-                <option value={currentSubject}>
-                  {currentSubject
-                    ? `현재: ${resolveEntity(currentSubject, labelMap, lang)}`
-                    : '(unset)'}
-                </option>
-              )}
-              {(objects ?? []).map((o) => (
-                <option key={o.uid} value={o.uid}>
-                  {(lang === 'en' && o.name_en) ? o.name_en : o.name}{' '}
-                  ({o.uid})
-                </option>
-              ))}
-            </select>
+            />
+            {subjectSuggestions.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {subjectSuggestions.map((s) => (
+                  <button
+                    key={s.entity_id}
+                    type="button"
+                    onClick={() => onSubjectChipClick(s)}
+                    data-testid={`subject-chip-${s.entity_id}`}
+                    className="text-xxs rounded border border-accent-cool/40 bg-accent-cool/10 px-2 py-0.5 text-accent-cool hover:bg-accent-cool/20 font-mono"
+                  >
+                    → {s.primary_label} [{s.primary_lang}]
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
           <div>
             <label
               className="text-xxs text-text-muted font-mono opacity-60 block mb-1"
@@ -299,8 +412,12 @@ export function FactCard({
               id={`edit-predicate-${factUid}`}
               data-testid={`fact-edit-predicate-${factUid}`}
               type="text"
-              value={currentPredicate}
-              onChange={(e) => emitEdit({ predicate: e.target.value })}
+              value={predicateQuery}
+              onChange={(e) => {
+                const val = e.target.value;
+                setPredicateQuery(val);
+                emitEdit({ predicate: val });
+              }}
               placeholder="snake_case_predicate"
               className={
                 'w-full rounded-md border border-border-subtle bg-bg-elevated '
@@ -308,7 +425,23 @@ export function FactCard({
                 + 'focus:border-accent-cool'
               }
             />
+            {predicateSuggestions.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {predicateSuggestions.map((p) => (
+                  <button
+                    key={p.code}
+                    type="button"
+                    onClick={() => onPredicateChipClick(p)}
+                    data-testid={`predicate-chip-${p.code}`}
+                    className="text-xxs rounded border border-accent-cool/40 bg-accent-cool/10 px-2 py-0.5 text-accent-cool hover:bg-accent-cool/20 font-mono"
+                  >
+                    {p.label_ko} / {p.label_en} ({p.code})
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
           <div>
             <label
               className="text-xxs text-text-muted font-mono opacity-60 block mb-1"
@@ -320,9 +453,12 @@ export function FactCard({
               id={`edit-object-${factUid}`}
               data-testid={`fact-edit-object-${factUid}`}
               type="text"
-              value={currentObject}
-              list={`fact-edit-object-${factUid}-options`}
-              onChange={(e) => emitEdit({ object: e.target.value })}
+              value={objectQuery}
+              onChange={(e) => {
+                const val = e.target.value;
+                setObjectQuery(val);
+                emitEdit({ object: val });
+              }}
               placeholder="entity name or literal value"
               className={
                 'w-full rounded-md border border-border-subtle bg-bg-elevated '
@@ -330,14 +466,23 @@ export function FactCard({
                 + 'focus:border-accent-cool'
               }
             />
-            {objects && objects.length > 0 && (
-              <datalist id={`fact-edit-object-${factUid}-options`}>
-                {objects.map((o) => (
-                  <option key={o.uid} value={o.name} />
+            {objectSuggestions.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {objectSuggestions.map((s) => (
+                  <button
+                    key={s.entity_id}
+                    type="button"
+                    onClick={() => onObjectChipClick(s)}
+                    data-testid={`object-chip-${s.entity_id}`}
+                    className="text-xxs rounded border border-accent-cool/40 bg-accent-cool/10 px-2 py-0.5 text-accent-cool hover:bg-accent-cool/20 font-mono"
+                  >
+                    → {s.primary_label} [{s.primary_lang}]
+                  </button>
                 ))}
-              </datalist>
+              </div>
             )}
           </div>
+
           <p className="text-xxs text-text-muted opacity-60 font-mono">
             preview: <span data-testid={`fact-edit-preview-${factUid}`}>{previewClaim}</span>
           </p>
@@ -346,22 +491,33 @@ export function FactCard({
           </p>
         </div>
       )}
-      <div className="flex gap-2 flex-wrap pl-7">
-        <ActionButton
-          variant="secondary"
-          active={isEditing}
-          onClick={() => emitEdit({})}
-          disabled={isDiscarded}
-        >
-          Edit
-        </ActionButton>
-        <ActionButton
-          variant={isDiscarded ? 'danger' : 'ghost'}
-          active={isDiscarded}
-          onClick={() => onChange({ action: 'discard' })}
-        >
-          Discard
-        </ActionButton>
+
+      <div className="flex gap-2 flex-wrap pl-7 items-center justify-between">
+        <div className="flex gap-2 flex-wrap">
+          <ActionButton
+            variant="secondary"
+            active={isEditing}
+            onClick={onEditClick}
+            disabled={isDiscarded}
+          >
+            Edit
+          </ActionButton>
+          <ActionButton
+            variant={isDiscarded ? 'danger' : 'ghost'}
+            active={isDiscarded}
+            onClick={onDiscardToggle}
+          >
+            {isDiscarded ? '취소' : 'Discard'}
+          </ActionButton>
+        </div>
+        {isEditing && (
+          <ActionButton
+            variant="ghost"
+            onClick={onCancelEdit}
+          >
+            취소
+          </ActionButton>
+        )}
       </div>
       {reviewMode && spaceId && (
         <GraphNoteEditor spaceId={spaceId} factUid={factUid} />

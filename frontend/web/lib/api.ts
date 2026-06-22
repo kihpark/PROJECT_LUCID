@@ -5,6 +5,7 @@ import { getToken, clearToken } from './auth';
 import type {
   DecideRequest,
   DecideResponse,
+  EntitySuggestion,
   FactDetailResponse,
   FactMutationResponse,
   FactsList,
@@ -16,6 +17,7 @@ import type {
   PendingJobDetail,
   PendingListFilters,
   PendingPage,
+  PredicateEntry,
   RecallResponse,
 } from './types';
 
@@ -366,4 +368,45 @@ export function postAssistantBrief(
     method: 'POST',
     body: JSON.stringify({ query, space_id: spaceId }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// spo-pending-ux — entity suggestion + predicate autocomplete
+// ---------------------------------------------------------------------------
+
+export function searchEntitySuggestions(
+  q: string,
+  spaceId: string,
+  limit = 5,
+): Promise<EntitySuggestion[]> {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  params.set('limit', String(limit));
+  return request<{ items: EntitySuggestion[] }>(
+    `/api/spaces/${spaceId}/entities/suggest?${params.toString()}`,
+  ).then((r) => r.items);
+}
+
+// Module-level predicate cache — predicates are global vocabulary that
+// rarely change. First call fetches; subsequent calls return the same
+// promise so only one in-flight request is ever made even if the component
+// mounts multiple times.
+let _predicateCache: PredicateEntry[] | null = null;
+let _predicateFetch: Promise<PredicateEntry[]> | null = null;
+
+export function listPredicates(): Promise<PredicateEntry[]> {
+  if (_predicateCache !== null) {
+    return Promise.resolve(_predicateCache);
+  }
+  if (_predicateFetch !== null) {
+    return _predicateFetch;
+  }
+  _predicateFetch = request<{ items: PredicateEntry[] }>('/api/predicates').then(
+    (r) => {
+      _predicateCache = r.items;
+      _predicateFetch = null;
+      return r.items;
+    },
+  );
+  return _predicateFetch;
 }

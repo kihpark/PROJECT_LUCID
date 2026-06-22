@@ -354,3 +354,17 @@ export interface AssistantBriefResponse {
   inference: string;
   grounded: boolean;
 }
+
+// spo-pending-ux — entity suggestion + predicate autocomplete
+export interface EntitySuggestion {
+  entity_id: string;
+  primary_label: string;
+  primary_lang: 'ko' | 'en' | '';
+  score: number;
+}
+
+export interface PredicateEntry {
+  code: string;
+  label_ko: string;
+  label_en: string;
+}

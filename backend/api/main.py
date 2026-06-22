@@ -28,6 +28,8 @@ from api.routes import (
     users,
     validate,
     validation_api,
+    entities,
+    predicates,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -162,6 +164,9 @@ for _router in (
     applications.router,
     admin_applications.router,
     assistant.router,
+    entities.router,
+    predicates.router,
 ):
     app.include_router(_router)
+
 
