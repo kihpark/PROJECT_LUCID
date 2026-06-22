@@ -76,8 +76,11 @@ describe('FactCard — claim display', () => {
         onChange={onChange}
       />,
     );
-    expect(screen.getByRole('status')).toHaveTextContent('negation_flag');
-    expect(screen.getByRole('status')).toHaveTextContent('partial');
+    // decide-ux-v2 (2): user-facing Korean label; internal
+    // negation_flag (full) token is no longer surfaced.
+    expect(screen.getByRole('status')).toHaveTextContent('부정 진술');
+    expect(screen.getByRole('status')).not.toHaveTextContent('negation_flag');
+    expect(screen.getByRole('status')).not.toHaveTextContent('partial');
   });
 });
 
@@ -786,5 +789,180 @@ describe('FactCard — decide-ux-fix #3: 저장 button', () => {
     // re-open via Edit click
     fireEvent.click(screen.getByText('Edit'));
     expect(screen.getByTestId('fact-edit-subject-fn-1')).toBeInTheDocument();
+  });
+});
+
+
+describe('FactCard - decide-ux-v2 (2): negation user explanation', () => {
+  it('renders Korean label instead of raw negation_flag token', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{ ...baseFact, negation_flag: true, negation_scope: 'full' }}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const badge = screen.getByTestId('fact-negation-fn-1');
+    expect(badge).toHaveTextContent('부정 진술');
+  });
+
+  it('exposes a Korean tooltip via the title attribute', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{ ...baseFact, negation_flag: true, negation_scope: 'full' }}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const badge = screen.getByTestId('fact-negation-fn-1');
+    expect(badge).toHaveAttribute(
+      'title',
+      expect.stringContaining('부정 진술'),
+    );
+  });
+
+  it('hides the internal (full) scope token from user-visible text', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{ ...baseFact, negation_flag: true, negation_scope: 'full' }}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const badge = screen.getByTestId('fact-negation-fn-1');
+    expect(badge.textContent).not.toMatch(/\(full\)/);
+    expect(badge.textContent).not.toMatch(/negation_flag/);
+  });
+});
+
+describe('FactCard - decide-ux-v2 (3): edit-mode entity chips', () => {
+  it('renders subject entity-suggest chips when typing in edit mode', async () => {
+    const onChange = vi.fn();
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'uuid-acme', primary_label: 'ACME Corp', primary_lang: 'en', score: 0.9 },
+    ]);
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        spaceId="ks-1"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: 'ACME' },
+    });
+    await waitFor(() => {
+      expect(api.searchEntitySuggestions).toHaveBeenCalledWith('ACME', 'ks-1', 5);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-acme')).toBeInTheDocument();
+    });
+  });
+
+  it('clicking a subject chip binds editedSubjectUid and fills the input', async () => {
+    const onChange = vi.fn();
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'uuid-acme', primary_label: 'ACME Corp', primary_lang: 'en', score: 0.9 },
+    ]);
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        spaceId="ks-1"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: 'ACME' },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-acme')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('subject-chip-uuid-acme'));
+    const input = screen.getByTestId('fact-edit-subject-fn-1') as HTMLInputElement;
+    expect(input.value).toBe('ACME Corp');
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'edit',
+        editedSubjectUid: 'uuid-acme',
+      }),
+    );
+  });
+
+  it('does not call searchEntitySuggestions when spaceId is missing', async () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: 'ACME' },
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    expect(api.searchEntitySuggestions).not.toHaveBeenCalled();
+  });
+});
+
+describe('FactCard - decide-ux-v2 (4): claim preservation after save', () => {
+  it('view-mode claim renders the ORIGINAL sentence, not pipe-joined S|P|O', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedClaim="Seoul FX Market Operations Council | may_replace | operating hours"
+        editedSubjectUid="obj-1"
+        editedPredicate="may_replace"
+        editedObjectValue="obj-2"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('fact-save-fn-1'));
+    const claim = screen.getByTestId('fact-claim-fn-1');
+    expect(claim).toHaveTextContent('AI will replace jobs.');
+    expect(claim.textContent).not.toMatch(/\|/);
+  });
+
+  it('view-mode in accept state shows original claim (regression guard)', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const claim = screen.getByTestId('fact-claim-fn-1');
+    expect(claim).toHaveTextContent('AI will replace jobs.');
+    expect(claim.textContent).not.toMatch(/\|/);
   });
 });
