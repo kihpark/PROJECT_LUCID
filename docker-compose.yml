@@ -40,12 +40,18 @@ services:
       retries: 18
       start_period: 30s
 
-  # DEVX-01: this is the PRODUCTION shape — the image built from
-  # backend/Dockerfile runs as-is (no source mount, no --reload).
-  # `docker-compose.override.yml` (auto-loaded when present) adds the
-  # bind mount + --reload for the dev inner loop. To force production
-  # mode, run `docker compose -f docker-compose.yml up` (skips the
-  # override) or delete the override file.
+  # DEVX-01 / feat/infra-agent-isolation (2026-06-22): backend runs the
+  # image AS-BUILT in every environment — no source bind-mount, no
+  # --reload. The dev override (docker-compose.override.yml) used to
+  # add both for hot-reload, but the 2026-06-22 incident proved that
+  # any host write to `backend/` could leak into the live container
+  # (agent verification sync was indistinguishable from PO edits).
+  #
+  # Backend code change → image rebuild:
+  #     docker compose up -d --build backend     # ~10-20s
+  #
+  # Agents verify in an EPHEMERAL container that mounts THEIR worktree,
+  # not the shared backend tree — see AGENTS.md §15.
   backend:
     build: ./backend
     ports:

@@ -137,6 +137,11 @@ docker compose up -d                      # postgres + elasticsearch + backend
 docker compose logs -f backend            # tail backend logs
 docker compose down                       # stop (data persists in volumes)
 docker compose down -v                    # stop + wipe postgres + es volumes
+
+# Backend code change after feat/infra-agent-isolation (2026-06-22):
+# the host bind-mount + --reload override is GONE. A backend edit
+# requires an image rebuild.
+docker compose up -d --build backend      # ~10-20s rebuild + recreate
 ```
 
 Rules: Never commit code that breaks existing tests.
@@ -144,6 +149,54 @@ Every new feature requires tests. Integration tests need a live Postgres + Elast
 Ruff + mypy must pass before pushing (CI will block otherwise).
 Integration tests are skipped automatically when Postgres / Elasticsearch
 are unreachable, so unit-only `pytest tests/unit` works on any laptop.
+
+### Agent verification pattern (post-2026-06-22 isolation rule)
+
+**Agents MUST NOT copy worktree files into the SHARED `backend/` directory.**
+That path was the bind-mount surface; while it is gone after
+`feat/infra-agent-isolation`, the prohibition stays — leaking edits into
+SHARED is also git-noise and a footgun for any future re-introduction of
+a dev-mode mount.
+
+Agents verify in an **ephemeral container** that mounts the AGENT'S
+worktree (NOT the shared backend tree). The running `lucid-backend-1`
+container is never touched.
+
+```bash
+# From the worktree root (the directory containing pyproject.toml, etc.)
+docker compose run --rm \
+    -v "$(pwd)/backend:/app" \
+    -w /app \
+    --no-deps \
+    -e DATABASE_URL="postgresql://lucid:lucid@host.docker.internal:5432/lucid" \
+    -e ELASTICSEARCH_URL="http://host.docker.internal:9200" \
+    backend \
+    python -m pytest -q
+```
+
+Why each flag matters:
+- `--rm` — the test container is disposed after the run.
+- `-v "$(pwd)/backend:/app"` — mounts the WORKTREE backend, not SHARED.
+- `--no-deps` — reuse the already-running postgres / elasticsearch from
+  `docker compose up -d`; do not start a parallel stack.
+- `DATABASE_URL` / `ELASTICSEARCH_URL` point at the host-mapped ports
+  (5432 / 9200) via `host.docker.internal`. If you'd rather use the
+  compose network, add `--network lucid_default` and use the service
+  names `postgres:5432` / `elasticsearch:9200`.
+
+If `docker compose run` clashes with another override field, drop down
+to plain `docker run --rm` using the image tag from
+`docker compose images backend`. Same flags, same outcome.
+
+Skip the ephemeral container entirely for unit tests with no DB / ES
+dependency:
+
+```bash
+cd <worktree>/backend && python -m pytest tests/unit -q
+```
+
+This bypasses Docker but means your local Python must match the
+container's interpreter version. CI is the authoritative gate.
 
 ---
 
@@ -1138,6 +1191,11 @@ MAX_FACTS_PER_CAPTURE=10       # Limit atomic facts per single capture
 - Create any fact or route without knowledge_space_id
 - Use em-dashes (—) in code comments or docstrings
 - Add new production dependencies without checking requirements.txt first
+- Sync worktree files into the SHARED `backend/` directory for any
+  reason (`cp <worktree>/backend/*.py <SHARED>/backend/...`). The
+  2026-06-22 incident showed this leaks into the live container.
+  Verify in an ephemeral container instead — see §2 "Agent
+  verification pattern" above.
 
 ---
 
