@@ -49,15 +49,16 @@ from api.models.source_job import SourceStatus
 from api.storage.elasticsearch.embeddings import get_embedding
 from api.storage.postgres.orm import SourceJobORM
 from api.storage.postgres.session import make_sessionmaker
+from api.structure.brand_resolver import resolve_korean_brand
 from api.structure.decomposer import decompose
-from api.structure.entity_resolver import _detect_lang
+from api.structure.entity_resolver import _detect_lang, _looks_like_brand
 from api.structure.link_creator import LinkCreationResult, create_links
 from api.structure.models import StructureFact, StructureObject, StructureResult
 from api.structure.object_matcher import MatchResult, match_or_create_object
 from api.structure.predicate_mapper import map_predicate_to_type_and_label
 from api.structure.surface_extractor import (
-    _has_hangul,
-    derive_korean_surface_from_claim,
+    detect_violation,
+    strip_korean_particles,
 )
 
 logger = logging.getLogger("lucid.structure.processor")
@@ -146,67 +147,90 @@ def _match_object(
     knowledge_space_id: str,
     surface_map: dict[str, str] | None = None,
     decomp: StructureResult | None = None,
-) -> tuple[MatchResult | None, ObjectClass | None]:
-    """Compute embedding + run the matcher. Returns (result, resolved_class).
+) -> tuple[MatchResult | None, ObjectClass | None, bool]:
+    """Compute embedding + run the matcher.
 
-    B-62-fix-v2 wiring (PO 2026-06-22): when `surface_map` carries a
-    source-text span for this object, pass `surface` / `surface_lang`
-    / `llm_name_en` into the matcher so the v2-defended
-    `resolve_entity` path runs. When the obj has no recorded surface
-    (pre-v2 decomp payloads, or a LLM omission), the obj's `name`
-    falls back as the lookup surface so the resolver still gets a
-    valid lookup string.
+    Returns ``(match_result, resolved_class, needs_review)``.
 
-    B-62-fix-v3 (PO 2026-06-22): Mode A defense. When the LLM did
-    not supply a Korean subject_surface (`raw_surface` is missing OR
-    English) but the claim text is Korean, recover the Korean
-    surface from the claim via the curated KO↔EN org dictionary
-    in `surface_extractor`. Without this the canonical entity ends
-    up English-primary because the matcher input is the LLM's
-    English translation — the dominant failure mode confirmed by
-    `test_b62_debug_measurement` and B62_DEBUG_DISCOVERY.md.
+    The third element is the **verbatim-substring violation flag**
+    introduced by B-62-fix-v3-general (PO 2026-06-22,
+    feat/spo-surface-content-language). It is True when the LLM-
+    supplied surface for this object violates the verbatim rule
+    (Korean source + Latin non-brand surface that is NOT a substring
+    of the source). Callers propagate the flag onto every fact whose
+    subject or object references this obj.
+
+    Mechanism (replaces the prior curated KO↔EN dictionary):
+
+      1. Take the LLM-supplied surface (from `surface_map`) and strip
+         trailing Korean postpositions.
+
+      2. Brand canonical: if the bare surface is a known Korean
+         transliteration of an international brand (스페이스X), map
+         to the English canonical (SpaceX) via `brand_resolver`.
+         This is a narrow brands-only step; it does NOT translate
+         Korean common nouns or ministries.
+
+      3. Verbatim violation detection: against the claim text the
+         object appears in, check whether a Hangul source + Latin
+         non-brand surface is NOT a substring. When violated, we
+         KEEP the LLM surface unchanged (no dictionary guess) and
+         flag `needs_review=True` so HITL can resolve.
+
+    When no per-fact surface span is recorded (LLM omitted
+    subject_surface), the obj's `name` is the fallback surface and
+    the same violation check applies — anglicized Korean entities
+    are still flagged.
     """
     resolved_class = _safe_object_class(obj.class_)
     if resolved_class is None:
-        return None, None
+        return None, None, False
     emb = get_embedding(obj.name)
     embedding_list = list(emb) if emb is not None else None
     raw_surface = (surface_map or {}).get(obj.uid)
-    # B-62-fix-v3: derive a Korean surface from the claim text when
-    # the LLM-supplied raw_surface is absent OR already English. The
-    # `raw_surface` having Hangul means the LLM honoured the prompt;
-    # leave it alone in that case.
-    derived_surface: str | None = None
-    if not raw_surface or not _has_hangul(raw_surface):
-        claim_text = _find_claim_for_obj(decomp, obj.uid)
-        if claim_text and _has_hangul(claim_text):
-            derived_surface = derive_korean_surface_from_claim(
-                claim=claim_text,
-                llm_name_en=obj.name_en or obj.name,
-                claim_lang="ko",
-            )
-            if derived_surface:
-                logger.info(
-                    "B-62-fix-v3 derived Korean surface for obj=%s: "
-                    "llm_name_en=%r -> %r (raw_surface was %r)",
-                    obj.uid, obj.name_en or obj.name,
-                    derived_surface, raw_surface,
-                )
-    surface = derived_surface or raw_surface or obj.name
+
+    # Use the LLM-supplied surface span when present; otherwise fall
+    # back to the obj's `name`. The fallback IS subject to the same
+    # verbatim check below (Mode A — LLM omitted subject_surface but
+    # emitted English `name`).
+    surface_seed = raw_surface or obj.name
+    bare_surface = strip_korean_particles(surface_seed)
+
+    # Step (1) — brand canonical for Korean transliterations of
+    # international brands. 스페이스X → SpaceX. The map is narrow and
+    # brands-only; ministries / persons / arbitrary companies stay
+    # Korean.
+    brand_en = resolve_korean_brand(bare_surface)
+    surface = brand_en if brand_en else surface_seed
+
+    # Step (2) — verbatim violation detection. Source text is the
+    # claim the entity appears in. When no claim is available
+    # (defensive), we cannot validate and assume no violation.
+    source_text = _find_claim_for_obj(decomp, obj.uid) or ""
+    surface_for_check = bare_surface if not brand_en else brand_en
+    needs_review = detect_violation(
+        surface=surface_for_check,
+        source=source_text,
+        looks_like_brand=_looks_like_brand(surface_for_check),
+    )
+    if needs_review:
+        logger.warning(
+            "B-62-fix-v3-general verbatim violation: obj=%s "
+            "surface=%r is Latin non-brand but claim is Korean "
+            "(%r); surface is NOT a substring of claim. Keeping "
+            "LLM surface and flagging needs_review=True.",
+            obj.uid, surface, source_text,
+        )
+
     surface_lang = _detect_lang(surface) if surface else None
-    # B-62-debug (PO 2026-06-22): point 2 instrumentation. Capture the
-    # exact (surface, surface_lang, llm_name_en) tuple the matcher will
-    # forward into resolve_entity, plus the raw surface returned by
-    # `_build_surface_map` so we can see whether the matcher fell back
-    # to obj.name (Mode A: LLM omitted subject_surface) or got the LLM
-    # span (Mode B: LLM put English in subject_surface).
+    # Point-2 instrumentation kept (DEBUG-gated, zero prod cost).
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
-            "B-62-debug MATCHER_INPUT obj_uid=%s candidate_name=%r "
-            "surface=%r surface_lang=%r llm_name_en=%r raw_surface_from_map=%r "
-            "derived_surface=%r",
+            "B-62-v3-general MATCHER_INPUT obj_uid=%s candidate_name=%r "
+            "surface=%r surface_lang=%r llm_name_en=%r "
+            "raw_surface_from_map=%r brand_en=%r needs_review=%s",
             obj.uid, obj.name, surface, surface_lang, obj.name_en,
-            raw_surface, derived_surface,
+            raw_surface, brand_en, needs_review,
         )
     try:
         result = match_or_create_object(
@@ -220,8 +244,8 @@ def _match_object(
         )
     except Exception as exc:  # noqa: BLE001 - matcher never raises out to caller
         logger.exception("matcher failed for %r: %s", obj.name, exc)
-        return None, resolved_class
-    return result, resolved_class
+        return None, resolved_class, needs_review
+    return result, resolved_class, needs_review
 
 
 def _summarize_result(result: MatchResult) -> dict[str, Any]:
@@ -361,6 +385,7 @@ def _serialize_struct_fact(
     f: StructureFact,
     uid_map: dict[str, str] | None = None,
     fact_uid_map: dict[str, str] | None = None,
+    violation_per_object: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     """Pydantic StructureFact -> dict suitable for JSONB.
 
@@ -418,7 +443,22 @@ def _serialize_struct_fact(
     d["predicate_code"] = opl_code
     d["predicate_label"] = opl_label
     d["original_surface"] = raw_predicate
-    d["needs_review"] = bool(needs_review)
+    # B-62-fix-v3-general: OR-in the per-object verbatim-violation
+    # flag. Either the subject obj OR (if the object_value is an
+    # obj-N reference) the object obj's violation propagates to the
+    # fact's needs_review. The predicate-mapper flag is preserved
+    # from the prior behavior.
+    vpo = violation_per_object or {}
+    subj_uid_raw = f.subject_uid
+    obj_val_raw = f.object_value if isinstance(f.object_value, str) else ""
+    surface_violation = bool(
+        vpo.get(subj_uid_raw, False)
+        or (
+            _OBJ_PLACEHOLDER_RE.match(obj_val_raw)
+            and vpo.get(obj_val_raw, False)
+        )
+    )
+    d["needs_review"] = bool(needs_review) or surface_violation
     # capture_lang is a per-fact best-effort guess; the processor
     # overrides it with a job-level detected lang in the metadata
     # stamp. We seed it here so older readers see a non-null value.
@@ -594,20 +634,25 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         # `resolve_entity` with the Korean surface (not the LLM's
         # English translation).
         surface_map = _build_surface_map(decomp)
+        # B-62-fix-v3-general (feat/spo-surface-content-language,
+        # PO 2026-06-22): per-object verbatim-violation flag. When the
+        # LLM anglicized a Korean entity (against the verbatim rule
+        # in the prompt) and there is no English substring in the
+        # source to match, this flag is True. Propagated onto every
+        # fact referencing this obj so HITL surfaces them.
+        violation_per_object: dict[str, bool] = {}
         for obj in decomp.objects:
-            # B-62-fix-v3 (PO 2026-06-22): pass `decomp` so the Mode A
-            # surface-derivation defense can find a claim text for
-            # this object and recover the Korean source-language form
-            # when the LLM omitted subject_surface.
-            mr, _resolved_class = _match_object(
+            mr, _resolved_class, needs_review = _match_object(
                 obj, kspace_id, surface_map, decomp=decomp,
             )
+            violation_per_object[obj.uid] = needs_review
             if mr is None:
                 continue
             match_per_object[obj.uid] = mr
             summary = _summarize_result(mr)
             summary["llm_uid"] = obj.uid
             summary["candidate_name"] = obj.name
+            summary["needs_review"] = needs_review
             match_summaries.append(summary)
             if mr.disambiguation_required:
                 disambig_pending.append(summary)
@@ -627,7 +672,12 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         # structure metadata; before chore 5 these were never written, so
         # the UI showed "0 pending fact(s)" even on a successful structure.
         facts_payload = [
-            _serialize_struct_fact(f, uid_map=uid_map, fact_uid_map=fact_uid_map)
+            _serialize_struct_fact(
+                f,
+                uid_map=uid_map,
+                fact_uid_map=fact_uid_map,
+                violation_per_object=violation_per_object,
+            )
             for f in decomp.facts
         ]
         objects_payload = [

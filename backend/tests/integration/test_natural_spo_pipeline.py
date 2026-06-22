@@ -398,19 +398,20 @@ def test_v2_missing_subject_surface_falls_back_to_name_via_resolve_entity() -> N
 
 
 # ---------------------------------------------------------------------------
-# 7. B-62-fix-v3 (PO 2026-06-22): Mode A defense. LLM omits subject_surface
-#    AND emits English in `name`. The processor's surface-derivation pulls
-#    the Korean substring from the claim text via the curated KO↔EN org
-#    dictionary and the resolver mints a Korean-primary canonical entity.
+# 7. B-62-fix-v3-general (feat/spo-surface-content-language, PO 2026-06-22):
+#    verbatim-substring constraint replaces the dictionary band-aid. When
+#    the LLM emits an English surface for a Korean-content entity AND the
+#    English form is NOT a substring of the claim, the matcher flags
+#    needs_review=True. Primary stays English (we do NOT guess the Korean
+#    form — that's HITL's job).
 # ---------------------------------------------------------------------------
 
 
-def test_mode_a_korean_claim_with_english_llm_name_resolves_to_korean_primary() -> None:
-    """B-62-fix-v3 (PO 2026-06-22): Mode A end-to-end. The LLM emitted
-    `name='Ministry of Commerce of China'` and `subject_surface=None`
-    for a Korean-language claim. The processor's `_match_object` must
-    derive '중국 상무부' from the claim via the dictionary lookup and
-    the resolver must mint that as primary_label."""
+def test_korean_claim_english_llm_name_flags_for_review() -> None:
+    """B-62-fix-v3-general: LLM anglicized a Korean entity (no
+    subject_surface, English `name`). The verbatim validator detects
+    the violation and flags needs_review=True. Primary stays English
+    because we keep the LLM surface — no dictionary guess."""
     from unittest.mock import patch as _patch
 
     from api.models.objects import ObjectClass
@@ -440,7 +441,7 @@ def test_mode_a_korean_claim_with_english_llm_name_resolves_to_korean_primary() 
         extraction_status="success",
     )
     surface_map = _build_surface_map(decomp)
-    assert "obj-1" not in surface_map  # confirm raw_surface is absent
+    assert "obj-1" not in surface_map
 
     mock_client = MagicMock()
     mock_client.search.return_value = {"hits": {"hits": []}}
@@ -448,28 +449,25 @@ def test_mode_a_korean_claim_with_english_llm_name_resolves_to_korean_primary() 
 
     with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
          _patch("api.structure.processor.get_embedding", return_value=None):
-        result, _ = _match_object(
+        result, _, needs_review = _match_object(
             decomp.objects[0],
             knowledge_space_id="ks-1",
             surface_map=surface_map,
-            decomp=decomp,  # B-62-fix-v3 enabler
+            decomp=decomp,
         )
     assert result is not None
-    assert result.created_new is True
+    assert needs_review is True
     body = mock_client.index.call_args.kwargs["document"]
-    # The dictionary derivation recovered the Korean span from the claim,
-    # so the canonical primary is Korean and the English LLM-name lands
-    # in aliases (via `co_mention_en` on the resolver create path).
-    assert body["primary_label"] == "중국 상무부"
-    assert body["primary_lang"] == "ko"
-    assert "Ministry of Commerce of China" in body["aliases"]
+    # New behavior: surface stays the LLM-supplied English form (we do
+    # NOT guess the Korean — HITL resolves). primary_label ends up
+    # English; that's an intentional, flagged behavior.
+    assert body["primary_label"] == "Ministry of Commerce of China"
 
 
-def test_mode_a_redcat_holdings_english_claim_stays_english() -> None:
-    """B-62-fix-v3 control: RedCat Holdings is NOT in the dictionary,
-    the claim is English, and there's no Korean to recover. The
-    surface-derivation must return None and the original English flow
-    runs unchanged — no regression for English brands."""
+def test_redcat_holdings_english_claim_stays_english_no_violation() -> None:
+    """Control: RedCat Holdings is multi-word English on an English
+    claim. No violation (source is not Korean). Primary stays English
+    and needs_review=False — regression guard for English entities."""
     from unittest.mock import patch as _patch
 
     from api.models.objects import ObjectClass
@@ -505,22 +503,24 @@ def test_mode_a_redcat_holdings_english_claim_stays_english() -> None:
 
     with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
          _patch("api.structure.processor.get_embedding", return_value=None):
-        result, _ = _match_object(
+        result, _, needs_review = _match_object(
             decomp.objects[0],
             knowledge_space_id="ks-1",
             surface_map=surface_map,
             decomp=decomp,
         )
     assert result is not None
+    assert needs_review is False
     body = mock_client.index.call_args.kwargs["document"]
     assert body["primary_label"] == "RedCat Holdings"
     assert body["primary_lang"] == "en"
 
 
-def test_mode_a_export_control_policy_noun_resolves_to_korean() -> None:
-    """B-62-fix-v3: policy nouns the LLM translates ('export control'
-    → 수출통제) are covered too. The Korean form appears verbatim in
-    the claim and is recovered as primary."""
+def test_lockheed_martin_in_korean_claim_no_violation() -> None:
+    """English entity name appearing verbatim in a Korean claim is
+    NOT a violation — multi-word English isn't brand-shaped, but the
+    surface IS a substring of the source, so the verbatim check
+    passes. needs_review=False, primary stays English."""
     from unittest.mock import patch as _patch
 
     from api.models.objects import ObjectClass
@@ -531,20 +531,20 @@ def test_mode_a_export_control_policy_noun_resolves_to_korean() -> None:
         objects=[
             StructureObject(
                 uid="obj-1",
-                **{"class": ObjectClass.CONCEPT.value},
-                name="export control",
-                name_en="export control",
+                **{"class": ObjectClass.ORGANIZATION.value},
+                name="Lockheed Martin",
+                name_en="Lockheed Martin",
             ),
         ],
         facts=[
             StructureFact(
                 uid="fn-1",
                 **{"type": "proposition"},
-                claim="중국이 새 수출통제 조치를 발표했다.",
+                claim="Lockheed Martin이 새 무기 체계를 발표했다.",
                 subject_uid="obj-1",
-                subject_surface=None,
-                predicate="is",
-                object_value="강화됨",
+                subject_surface="Lockheed Martin",
+                predicate="announces",
+                object_value="새 무기 체계",
             ),
         ],
         extraction_status="success",
@@ -556,13 +556,14 @@ def test_mode_a_export_control_policy_noun_resolves_to_korean() -> None:
 
     with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
          _patch("api.structure.processor.get_embedding", return_value=None):
-        result, _ = _match_object(
+        result, _, needs_review = _match_object(
             decomp.objects[0],
             knowledge_space_id="ks-1",
             surface_map=surface_map,
             decomp=decomp,
         )
+    assert result is not None
+    assert needs_review is False
     body = mock_client.index.call_args.kwargs["document"]
-    assert body["primary_label"] == "수출통제"
-    assert body["primary_lang"] == "ko"
-    assert "export control" in body["aliases"]
+    assert body["primary_label"] == "Lockheed Martin"
+    assert body["primary_lang"] == "en"

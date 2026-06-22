@@ -439,16 +439,24 @@ def test_resolve_entity_korean_surface_firm_name_translation_creates_korean_prim
     assert "Woori Asset Management" in body["aliases"]
 
 
-def test_prompts_contains_korean_common_noun_rule() -> None:
-    """Pin the B-62-fix prompt clause so a future refactor cannot
+def test_prompts_contains_verbatim_surface_rule() -> None:
+    """B-62-fix-v3-general (feat/spo-surface-content-language, PO
+    2026-06-22): the verbatim-substring clause must be present.
+    Pins the new general mechanism so a future refactor cannot
     silently drop it."""
     from api.structure.prompts import SYSTEM_PROMPT
-    assert "B-62-fix subject-natlang" in SYSTEM_PROMPT
-    assert "한국어 일반명사" in SYSTEM_PROMPT
-    assert "회사채" in SYSTEM_PROMPT
+    assert "B-62-fix-v3 verbatim surface" in SYSTEM_PROMPT
+    # Core directive: verbatim substring of source text.
+    assert "verbatim" in SYSTEM_PROMPT or "원문 텍스트에 실제 등장한" in SYSTEM_PROMPT
+    # Example coverage — the four entity types the dictionary missed:
+    # Korean ministry, Korean person, Korean company, Korean brand
+    # transliteration.
+    assert "중국 상무부" in SYSTEM_PROMPT
+    assert "안도걸" in SYSTEM_PROMPT
     assert "우리자산운용" in SYSTEM_PROMPT
-    # The brand-allowed exception must be documented.
     assert "SpaceX" in SYSTEM_PROMPT
+    # The translation-forbidden examples must be called out by name.
+    assert "Ahn Do-geol" in SYSTEM_PROMPT
 
 
 # --- B-62-fix-v2 subject-natlang (PO 2026-06-22) ----------------------------
@@ -629,13 +637,16 @@ def test_repromote_strips_particle_before_lookup() -> None:
     assert "중국 상무부는" not in seen_values
 
 
-def test_prompts_contains_subject_surface_v2_rule() -> None:
-    """Pin the B-62-fix-v2 prompt clause so a future refactor cannot
-    silently drop it."""
+def test_prompts_contains_v3_general_subject_surface_rule() -> None:
+    """B-62-fix-v3-general: subject_surface/object_surface verbatim
+    constraint must be documented in the prompt. The v2 prose was
+    superseded by the v3-general clause (which keeps the
+    subject_surface field but tightens the rule to verbatim
+    substring of source)."""
     from api.structure.prompts import SYSTEM_PROMPT
-    assert "B-62-fix-v2 subject surface" in SYSTEM_PROMPT
     assert "subject_surface" in SYSTEM_PROMPT
-    assert "원문 텍스트에 실제로 등장한 표현" in SYSTEM_PROMPT
-    assert "중국 상무부" in SYSTEM_PROMPT
-    # object_surface for entity refs too
     assert "object_surface" in SYSTEM_PROMPT
+    # The verbatim rule must be stated.
+    assert "substring" in SYSTEM_PROMPT
+    # Translation-forbidden directive (한국어→영어 변환 금지).
+    assert "번역 금지" in SYSTEM_PROMPT

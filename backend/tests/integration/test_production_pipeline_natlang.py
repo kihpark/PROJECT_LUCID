@@ -146,11 +146,14 @@ def test_korean_common_noun_routes_surface_to_resolver():
     assert captured["co_mention_en"] == "Ministry of Commerce"
 
 
-def test_brand_subject_surface_still_routes_through_resolver():
-    """SpaceX captured with Korean surface 스페이스X - the surface
-    still flows to resolve_entity. The brand guard inside the
-    resolver decides what becomes primary; the wiring contract is
-    that the production path delegates that decision."""
+def test_brand_subject_surface_normalizes_to_english_canonical():
+    """B-62-fix-v3-general (PO 2026-06-22, feat/spo-surface-content-
+    language): a Korean transliteration of an international brand
+    (스페이스X) is normalized to the canonical English form (SpaceX)
+    BEFORE the surface flows to resolve_entity. This is the narrow
+    brand-exception layer in `brand_resolver.py`; it applies to a
+    small curated list of international brands, not to Korean
+    common nouns or arbitrary companies."""
     job = _make_job(text="스페이스X는 발표했다.")
     decomp = _decomp_with_surface(
         obj_name="SpaceX",
@@ -166,7 +169,9 @@ def test_brand_subject_surface_still_routes_through_resolver():
         return ("entity-uid-spx", True)
 
     _run(job, decomp, resolve_entity_mock=resolve_entity_mock)
-    assert captured["surface"] == "스페이스X"
+    # The brand resolver canonicalised the Korean transliteration to
+    # the English canonical form before the resolver was called.
+    assert captured["surface"] == "SpaceX"
     assert captured["llm_name"] == "SpaceX"
 
 
