@@ -211,7 +211,18 @@ def _build_result(
     try:
         result = StructureResult.model_validate(parsed)
     except Exception as exc:  # noqa: BLE001 - schema mismatch -> empty failure
-        logger.warning("StructureResult schema validation failed: %s", exc)
+        # Faithful-decomp PR (PO 2026-06-23): on validation failure
+        # log e.errors() so the field-level cause is visible in prod
+        # logs. Without this, the prior "%s" formatting truncated the
+        # ValidationError repr and we lost which field rejected the
+        # response. Also stamp a 200-char preview of the parsed dict.
+        error_details = getattr(exc, "errors", None)
+        details_repr = error_details() if callable(error_details) else None
+        logger.warning(
+            "StructureResult schema validation failed: %s "
+            "(errors=%r, parsed_preview=%r)",
+            exc, details_repr, str(parsed)[:200],
+        )
         envelope = _empty_failure("malformed_llm_output")
         result = StructureResult.model_validate(envelope)
     result.input_char_count = len(merged_text)
