@@ -1,4 +1,4 @@
-"""Structure-stage BackgroundTasks worker (Sprint 3 PR-3-2).
+﻿"""Structure-stage BackgroundTasks worker (Sprint 3 PR-3-2).
 
 `process_extracted_job(job_id)` is the entry point Sprint 2C's
 `extractors/processor.py::_record_success()` will call once a
@@ -400,6 +400,64 @@ def _serialize_struct_object(
     return d
 
 
+
+def _attach_video_locators(
+    facts_payload: list[dict],
+    segment_timecodes: list[dict],
+    merged_text: str,
+    media_url: str,
+    source_uid: str,
+) -> None:
+    """B-46: attach a video locator to each fact in-place.
+
+    For each serialised fact, find the segment whose ``[char_start,
+    char_end]`` range contains the first occurrence of the fact's
+    surface text inside ``merged_text``. When no match is found, fall
+    back to segment 0 (defensive). The locator is written into
+    ``fact["locators"]`` so the validate / surface layer can render
+    a timestamped playback link.
+
+    This function mutates ``facts_payload`` in place and only runs when
+    ``segment_timecodes`` is non-empty, so non-video jobs are unaffected.
+    """
+    if not segment_timecodes or not facts_payload:
+        return
+
+    def _find_segment(surface: str) -> dict:
+        """Find the timecode segment that contains `surface`."""
+        if not surface:
+            return segment_timecodes[0]
+        idx = merged_text.find(surface)
+        if idx == -1:
+            logger.debug(
+                "_attach_video_locators: surface %r not found in merged_text; using seg 0",
+                surface[:80],
+            )
+            return segment_timecodes[0]
+        for seg in segment_timecodes:
+            if seg["char_start"] <= idx < seg["char_end"]:
+                return seg
+        # Fallback: nearest segment by char_start
+        return segment_timecodes[0]
+
+    for fact in facts_payload:
+        # Try claim text first, then subject_surface, then empty string
+        surface = (
+            fact.get("claim")
+            or fact.get("subject_surface")
+            or ""
+        )
+        seg = _find_segment(surface)
+        fact["locators"] = [
+            {
+                "kind": "video",
+                "source_uid": source_uid,
+                "start_ms": seg["start_ms"],
+                "end_ms": seg["end_ms"],
+                "media_url": media_url,
+            }
+        ]
+
 def process_extracted_job(job_id: uuid.UUID | str) -> None:
     """BackgroundTasks entry. Safe to call on missing / terminal jobs."""
     if isinstance(job_id, str):
@@ -520,6 +578,17 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             for ff in decomp.fact_fact_links
         ]
 
+
+        # B-46: attach per-fact video locators when the job is VIDEO_STT.
+        video_stt = (job.extracted_metadata or {}).get("video_stt", {})
+        if video_stt:
+            _attach_video_locators(
+                facts_payload=facts_payload,
+                segment_timecodes=video_stt.get("segment_timecodes", []),
+                merged_text=merged_text,
+                media_url=video_stt.get("media_url", ""),
+                source_uid=str(job.id),
+            )
         # M1 / E telemetry + DR-067 content payload.
         meta = dict(job.extracted_metadata or {})
         meta["structure"] = {
@@ -607,3 +676,5 @@ def _record_failure(session: Any, job: SourceJobORM, message: str) -> None:
     job.error_message = (message or "")[:2000]
     job.updated_at = _utc_now()
     session.commit()
+
+

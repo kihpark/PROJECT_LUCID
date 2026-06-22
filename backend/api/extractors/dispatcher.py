@@ -1,4 +1,4 @@
-"""Extractor dispatcher.
+﻿"""Extractor dispatcher.
 
 `get_extractor(source_type)` returns the single Extractor mapped to
 each source_type, with one exception: YouTube has a two-step chain
@@ -38,6 +38,7 @@ from api.extractors.pdf import PdfExtractor
 from api.extractors.web_article import WebArticleExtractor
 from api.extractors.youtube_transcript import YoutubeTranscriptExtractor
 from api.extractors.youtube_whisper import YoutubeWhisperExtractor
+from api.extractors.video_stt import VideoSttExtractor
 from api.models.source import SourceType
 
 logger = logging.getLogger("lucid.extractors.dispatcher")
@@ -49,6 +50,7 @@ SOURCE_TYPE_TO_EXTRACTOR: dict[SourceType, type[Extractor]] = {
     SourceType.YOUTUBE: YoutubeTranscriptExtractor,  # primary; fallback in extract_youtube
     SourceType.PAGE_IMAGE: ImageExtractor,
     SourceType.PDF: PdfExtractor,
+    SourceType.VIDEO_STT: VideoSttExtractor,  # B-46: dedicated STT path
 }
 
 
@@ -115,3 +117,4 @@ def extract(raw: bytes, metadata: dict[str, Any], *, source_type: SourceType) ->
     except Exception as exc:  # noqa: BLE001
         # Wrap unexpected errors so callers get a uniform exception class
         raise ExtractorError(f"{type(extractor).__name__} failed: {exc}") from exc
+

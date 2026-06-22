@@ -1,4 +1,4 @@
-"""Unit tests for validation.py, contradiction.py, source.py."""
+﻿"""Unit tests for validation.py, contradiction.py, source.py."""
 from __future__ import annotations
 
 import pytest
@@ -84,6 +84,7 @@ def test_source_type_enum_lists_seven_beta_entry_points():
         "pdf",
         "pwa_share",
         "url_paste",
+        "video_stt",  # B-46: generic video/audio STT capture adapter
     }
     assert {s.value for s in SourceType} == expected
 
@@ -97,3 +98,4 @@ def test_source_minimal():
         knowledge_space_id=new_uid(),
     )
     assert s.capture_count == 1
+

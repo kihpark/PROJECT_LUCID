@@ -1,4 +1,4 @@
-"""Source + per-source policy enums.
+﻿"""Source + per-source policy enums.
 
 PO directive 2026-05-21 [변경 3]: per-source policy (trusted vs careful)
 is set in Settings SET-2 once per source domain, not asked at capture
@@ -38,6 +38,7 @@ class SourceType(StrEnum):
     PDF = "pdf"
     PWA_SHARE = "pwa_share"
     URL_PASTE = "url_paste"
+    VIDEO_STT = "video_stt"  # B-46: generic video/audio STT capture adapter
 
 
 class Source(LucidBaseModel):
@@ -65,3 +66,4 @@ class Source(LucidBaseModel):
     # B-48a reference-layer expansion.
     source_job_id: UID | None = None
     captured_at: datetime | None = None
+
