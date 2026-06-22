@@ -108,53 +108,62 @@ Run these IN ORDER on the input text:
           An empty list (`"aliases": []`) is fine when the source
           surface form equals `name`.
 
-          ADDITIONAL RULE — B-62-fix subject-natlang (PO 2026-06-22):
-          한국어 일반명사·서술 표현·기관명을 영어로 번역해 `name`에 넣지 마세요.
-          `name` field for Korean common nouns and descriptive
-          translations MUST stay in the SOURCE LANGUAGE. The English
-          form belongs in `name_en` (and only there).
-          ALLOWED to use English in `name` ONLY for:
-            - Globally recognized brand-mark forms whose Korean
-              transliteration is the borrowed form (SpaceX, OpenAI,
-              Toyota, IBM, Apple, KAIST, BTS).
-          NOT allowed in `name` (must stay Korean):
-            - Descriptive translations: 회사채 → NOT "corporate bonds",
-              우리자산운용 → NOT "Woori Asset Management",
-              국방부 → NOT "Ministry of Defense",
-              정부 → NOT "government",
-              기준금리 → NOT "base interest rate".
-          Test: if a Korean reader would read your `name` field and say
-          "그건 영어 번역이지 원문이 아닌데"라고 한다면, 그건 잘못된 거다.
-          Examples (Korean source):
-            source: "회사채 발행 논의가 있었다."
-              OK    {"name":"회사채", "name_en":"corporate bonds",
-                     "aliases":[]}
-              NOT   {"name":"corporate bonds", "name_en":"corporate bonds",
-                     "aliases":["회사채"]}
-            source: "우리자산운용은 ETF를 운용한다."
-              OK    {"name":"우리자산운용", "name_en":"Woori Asset Management",
-                     "aliases":[]}
-              NOT   {"name":"Woori Asset Management", "name_en":"Woori Asset Management",
-                     "aliases":["우리자산운용"]}
-            source: "스페이스X 주식이 상장됐다."
-              OK    {"name":"SpaceX", "name_en":"SpaceX",
-                     "aliases":["스페이스X"]}    # brand — English canonical form preserved
-          ADDITIONAL RULE — B-62-fix-v2 subject surface (PO 2026-06-22):
+          ADDITIONAL RULE — B-62-fix-v3 verbatim surface (PO 2026-06-22):
 
-          subject_surface 필드는 **원문 텍스트에 실제로 등장한 표현**을 그대로
-          적어주세요. 번역·로마자화·정규화 금지. 한국어 기사면 "중국 상무부",
-          영어 기사면 "Ministry of Commerce of China" — 원문에 있는 그대로.
+          subject_surface 와 object_surface 는 **소스 텍스트에 실제 등장한
+          문자열을 그대로 복사**한 값이어야 합니다. 다음 규칙을 엄격히
+          지켜주세요:
 
-          조사·어미는 제거하여 엔티티 표면만 남깁니다:
-            "중국 상무부는 발표했다" → subject_surface = "중국 상무부"
-            "삼성전자가 발표했다"      → subject_surface = "삼성전자"
+          1. 번역 금지. 한국어 텍스트에 "중국 상무부"가 등장하면
+             subject_surface 는 정확히 "중국 상무부". 절대 "Ministry of
+             Commerce of China"로 변환하지 마세요. 한국어 텍스트의
+             "안도걸 더불어민주당 의원"은 subject_surface="안도걸 의원"
+             또는 "안도걸" (텍스트의 실제 표기). 절대 "Ahn Do-geol"이나
+             다른 로마자 표기로 바꾸지 마세요.
 
-          `name` 필드는 LLM 의 canonical 표현 (한국어 일반명사는 한국어,
-          글로벌 브랜드는 영어). subject_surface 와 name 이 다를 수 있고,
-          다른 것이 자연스럽습니다.
+          2. 정규화 금지. 텍스트에 등장한 표기 그대로 사용하세요.
+             조사·어미만 제거할 수 있습니다:
+               "중국 상무부는 발표했다" → subject_surface="중국 상무부"
+               "삼성전자가 신제품을"   → subject_surface="삼성전자"
 
-          object 가 entity 일 때도 동일하게 object_surface 를 적어주세요.
-          literal 값 (숫자, 금액, 날짜 등)은 기존대로 object_value 를 씁니다.
+          3. 영어 표기로 등장한 entity 는 영어 그대로:
+               "SpaceX announced..." → subject_surface="SpaceX"
+               "Lockheed Martin이 발표" → subject_surface="Lockheed Martin"
+             영어 원문은 영어로 유지합니다.
+
+          4. 새 단어 만들기 금지. subject_surface / object_surface 는
+             반드시 input text 의 substring 이어야 합니다. 텍스트에
+             없는 표현을 만들어내지 마세요.
+
+          5. `name` 필드는 별개입니다. LLM 의 canonical 정규화 (영어
+             정규형 권장 — 후속 매칭용). subject_surface 는 verbatim.
+             두 필드의 언어가 다를 수 있고, 다른 것이 자연스럽습니다.
+             예시:
+               source: "안도걸 더불어민주당 의원이 발표했다."
+                 OK   {"name":"Ahn Do-geol", "name_en":"Ahn Do-geol",
+                       "aliases":["안도걸 의원"]}
+                       + fact: subject_surface="안도걸 의원"
+                                                # surface verbatim, name canonical
+               source: "중국 상무부는 발표했다."
+                 OK   {"name":"Ministry of Commerce of China",
+                       "name_en":"Ministry of Commerce of China",
+                       "aliases":["중국 상무부"]}
+                       + fact: subject_surface="중국 상무부"
+               source: "우리자산운용은 ETF를 운용한다."
+                 OK   {"name":"Woori Asset Management",
+                       "name_en":"Woori Asset Management",
+                       "aliases":["우리자산운용"]}
+                       + fact: subject_surface="우리자산운용"
+               source: "스페이스X 주식이 상장됐다."
+                 OK   {"name":"SpaceX", "name_en":"SpaceX",
+                       "aliases":["스페이스X"]}
+                       + fact: subject_surface="스페이스X"
+                                # surface verbatim Korean; downstream
+                                # brand resolver normalizes to SpaceX
+
+          6. object 가 entity 일 때도 동일하게 object_surface 를 verbatim
+             으로 적어주세요. literal 값 (숫자, 금액, 날짜 등)은 기존대로
+             object_value 를 쓰고 object_surface 는 null 또는 생략합니다.
 
   Step 2b. B-53 — KEEP FACT TEXT IN THE SOURCE LANGUAGE.
           The fact's `claim` and `object_value` MUST be written in

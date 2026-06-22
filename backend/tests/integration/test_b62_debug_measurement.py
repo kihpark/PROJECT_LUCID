@@ -244,10 +244,13 @@ def _run_match_object(decomp: StructureResult, caplog) -> dict:
                 "synthetic input", {"knowledge_space_id": "ks-debug"},
             )
             surface_map = _build_surface_map(full)
-            result, _resolved_class = _match_object(
+            # B-62-fix-v3-general: `_match_object` now returns a
+            # 3-tuple with the verbatim-violation flag.
+            result, _resolved_class, _needs_review = _match_object(
                 full.objects[0],
                 knowledge_space_id="ks-debug",
                 surface_map=surface_map,
+                decomp=full,
             )
     finally:
         for n, lvl in prior_levels.items():
@@ -294,7 +297,7 @@ def test_scenario_a_llm_omitted_subject_surface_mode_a(caplog) -> None:
             for rec in caplog.records
         ), "expected LLM_RAW breadcrumb showing subject_surface=None"
         assert any(
-            "B-62-debug MATCHER_INPUT" in rec.message
+            "B-62-v3-general MATCHER_INPUT" in rec.message
             and "surface='Ministry of Commerce of China'" in rec.message
             and "surface_lang='en'" in rec.message
             and "raw_surface_from_map=None" in rec.message
@@ -329,7 +332,7 @@ def test_scenario_b_llm_english_subject_surface_mode_a(caplog) -> None:
     # propagated (single-test runs).
     if any("B-62-debug" in rec.message for rec in caplog.records):
         assert any(
-            "B-62-debug MATCHER_INPUT" in rec.message
+            "B-62-v3-general MATCHER_INPUT" in rec.message
             and "surface='Ministry of Finance of China'" in rec.message
             and "surface_lang='en'" in rec.message
             for rec in caplog.records
@@ -358,7 +361,7 @@ def test_scenario_c_llm_korean_subject_surface_baseline(caplog) -> None:
     # Best-effort breadcrumb check.
     if any("B-62-debug" in rec.message for rec in caplog.records):
         assert any(
-            "B-62-debug MATCHER_INPUT" in rec.message
+            "B-62-v3-general MATCHER_INPUT" in rec.message
             and "surface='국방부'" in rec.message
             and "surface_lang='ko'" in rec.message
             for rec in caplog.records
