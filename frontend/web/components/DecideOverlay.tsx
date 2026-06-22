@@ -309,7 +309,7 @@ export function DecideOverlay({
             disabled={busy}
             onClick={onDiscardJob}
           >
-            Discard job
+            이 추출 전체 폐기
           </ActionButton>
         </div>
 

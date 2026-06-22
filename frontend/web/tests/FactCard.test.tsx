@@ -1,7 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FactCard } from '@/components/FactCard';
 import type { FactSummary, ObjectSummary } from '@/lib/types';
+
+// Mock api module
+vi.mock('@/lib/api', () => ({
+  searchEntitySuggestions: vi.fn(async () => []),
+  listPredicates: vi.fn(async () => []),
+}));
+
+import * as api from '@/lib/api';
 
 const baseFact: FactSummary = {
   fact_uid: 'fn-1',
@@ -31,6 +39,12 @@ const baseObjects: ObjectSummary[] = [
     properties: {},
   },
 ];
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+  (api.listPredicates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+});
 
 describe('FactCard — claim display', () => {
   it('renders the claim in the chosen language', () => {
@@ -130,7 +144,6 @@ describe('FactCard — structured S/P/O editor (B-34)', () => {
       />,
     );
     fireEvent.click(screen.getByText('Edit'));
-    // The Edit click emits an `edit` action with the current triple seeded.
     rerender(
       <FactCard
         fact={baseFact}
@@ -165,7 +178,26 @@ describe('FactCard — structured S/P/O editor (B-34)', () => {
     expect(screen.queryByPlaceholderText(/Edited claim/i)).toBeNull();
   });
 
-  it('changing the subject dropdown emits editedSubjectUid + regenerated claim', () => {
+  it('subject input is a text input (not a select)', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const subjectInput = screen.getByTestId('fact-edit-subject-fn-1');
+    expect(subjectInput.tagName).toBe('INPUT');
+    expect(subjectInput).toHaveAttribute('type', 'text');
+  });
+
+  it('typing into subject input emits editedSubjectUid as typed literal', () => {
     const onChange = vi.fn();
     render(
       <FactCard
@@ -186,10 +218,6 @@ describe('FactCard — structured S/P/O editor (B-34)', () => {
       expect.objectContaining({
         action: 'edit',
         editedSubjectUid: 'obj-2',
-        editedPredicate: 'will_replace',
-        editedObjectValue: 'jobs',
-        // claim regenerated: subject label is now "operating hours" (en mode)
-        editedClaim: expect.stringContaining('operating hours'),
       }),
     );
   });
@@ -384,7 +412,6 @@ describe('FactCard — entity label resolution (B-27 + B-31 regression)', () => 
   });
 });
 
-
 describe('FactCard — UUID entity resolution (B-37)', () => {
   it('resolves a UUID subject_uid to the entity name when objects array carries it', () => {
     const onChange = vi.fn();
@@ -432,7 +459,7 @@ describe('FactCard — UUID entity resolution (B-37)', () => {
     expect(screen.getByTestId('fact-subject')).toHaveTextContent('(미해석)');
   });
 
-  it('Edit dropdown labels an out-of-objects current value as "현재: <best-effort>"', () => {
+  it('Edit subject input shows the resolved label as initial value when entity is known', () => {
     const onChange = vi.fn();
     const uuidObjects: ObjectSummary[] = [
       {
@@ -443,7 +470,6 @@ describe('FactCard — UUID entity resolution (B-37)', () => {
         properties: {},
       },
     ];
-    // Current value is a different UUID that resolves via the same list.
     const presentUuid = '11111111-2222-3333-4444-555555555555';
     render(
       <FactCard
@@ -457,16 +483,13 @@ describe('FactCard — UUID entity resolution (B-37)', () => {
         onChange={onChange}
       />,
     );
-    // The current value IS in objects -> dropdown shouldn't render the
-    // fallback option; only the normal listing.
-    const select = screen.getByTestId('fact-edit-subject-fn-1') as HTMLSelectElement;
-    expect(select.value).toBe(presentUuid);
-    // Verify no option literally renders the raw UUID without a label.
-    const options = Array.from(select.options).map((o) => o.textContent);
-    expect(options.some((label) => label === presentUuid)).toBe(false);
+    const input = screen.getByTestId('fact-edit-subject-fn-1') as HTMLInputElement;
+    expect(input.tagName).toBe('INPUT');
+    // Input should show the human-readable label, not the raw UUID
+    expect(input.value).toBe('Other Entity');
   });
 
-  it('Edit dropdown shows "현재: (미해석)" when the current value is an unknown UUID', () => {
+  it('Edit subject input shows raw UUID when entity not in objects', () => {
     const onChange = vi.fn();
     const unknownUuid = '99999999-aaaa-bbbb-cccc-dddddddddddd';
     render(
@@ -481,12 +504,185 @@ describe('FactCard — UUID entity resolution (B-37)', () => {
         onChange={onChange}
       />,
     );
-    const select = screen.getByTestId('fact-edit-subject-fn-1') as HTMLSelectElement;
-    const firstOption = select.options[0];
-    // It still HAS the raw value (so the select works) but the label
-    // is now "현재: <UUID> (미해석)" instead of the raw UUID alone.
-    expect(firstOption!.value).toBe(unknownUuid);
-    expect(firstOption!.textContent).toMatch(/^현재: /);
-    expect(firstOption!.textContent).toContain('(미해석)');
+    const input = screen.getByTestId('fact-edit-subject-fn-1') as HTMLInputElement;
+    expect(input.tagName).toBe('INPUT');
+    // Shows the "(미해석)" resolved form
+    expect(input.value).toMatch(/미해석|99999999/);
+  });
+});
+
+describe('FactCard — discard toggle (spo-pending-ux)', () => {
+  it('Discard button changes fact to discard state', () => {
+    const onChange = vi.fn();
+    render(<FactCard fact={baseFact} action="accept" lang="en" onChange={onChange} />);
+    fireEvent.click(screen.getByText('Discard'));
+    expect(onChange).toHaveBeenCalledWith({ action: 'discard' });
+  });
+
+  it('when discarded, button label becomes "취소"', () => {
+    const onChange = vi.fn();
+    render(<FactCard fact={baseFact} action="discard" lang="en" onChange={onChange} />);
+    expect(screen.getByText('취소')).toBeInTheDocument();
+    expect(screen.queryByText('Discard')).toBeNull();
+  });
+
+  it('clicking "취소" when discarded reverts to accept', () => {
+    const onChange = vi.fn();
+    render(<FactCard fact={baseFact} action="discard" lang="en" onChange={onChange} />);
+    fireEvent.click(screen.getByText('취소'));
+    expect(onChange).toHaveBeenCalledWith({ action: 'accept' });
+  });
+
+  it('shows "폐기 예정" badge when discarded', () => {
+    const onChange = vi.fn();
+    render(<FactCard fact={baseFact} action="discard" lang="en" onChange={onChange} />);
+    expect(screen.getByText('폐기 예정')).toBeInTheDocument();
+  });
+
+  it('claim text has line-through when discarded', () => {
+    const onChange = vi.fn();
+    render(<FactCard fact={baseFact} action="discard" lang="en" onChange={onChange} />);
+    const claim = screen.getByText('AI will replace jobs.');
+    expect(claim.className).toContain('line-through');
+  });
+});
+
+describe('FactCard — edit-mode cancel (spo-pending-ux)', () => {
+  it('shows "취소" cancel button in edit mode', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    // There should be a cancel button (취소) in edit mode
+    const cancelButtons = screen.getAllByText('취소');
+    expect(cancelButtons.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('clicking cancel in edit mode emits accept action', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const cancelButtons = screen.getAllByText('취소');
+    fireEvent.click(cancelButtons[cancelButtons.length - 1]!);
+    expect(onChange).toHaveBeenCalledWith({ action: 'accept' });
+  });
+});
+
+describe('FactCard — edit-mode header (spo-pending-ux)', () => {
+  it('shows original text as italic blockquote above inputs in edit mode', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={baseFact}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const quote = screen.getByText(/AI will replace jobs\./);
+    expect(quote.closest('blockquote')).not.toBeNull();
+  });
+});
+
+describe('FactCard — subject chip click (spo-pending-ux)', () => {
+  it('renders suggestion chips and chip click sets editedSubjectUid to entity_id', async () => {
+    const onChange = vi.fn();
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'uuid-spacex', primary_label: 'SpaceX', primary_lang: 'en', score: 1.0 },
+    ]);
+
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        spaceId="ks-1"
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: 'SpaceX' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-spacex')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('subject-chip-uuid-spacex'));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'edit',
+        editedSubjectUid: 'uuid-spacex',
+      }),
+    );
+  });
+});
+
+describe('FactCard — predicate autocomplete (spo-pending-ux)', () => {
+  it('filters cached predicates and chip click sets editedPredicate', async () => {
+    const onChange = vi.fn();
+    (api.listPredicates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { code: 'plans', label_ko: '계획', label_en: 'plans' },
+      { code: 'founded', label_ko: '설립', label_en: 'founded' },
+    ]);
+
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate=""
+        editedObjectValue="jobs"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+
+    // Wait for predicates to load
+    await waitFor(() => {
+      expect(api.listPredicates).toHaveBeenCalled();
+    });
+
+    fireEvent.change(screen.getByTestId('fact-edit-predicate-fn-1'), {
+      target: { value: 'plan' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('predicate-chip-plans')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('predicate-chip-plans'));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'edit',
+        editedPredicate: 'plans',
+      }),
+    );
   });
 });

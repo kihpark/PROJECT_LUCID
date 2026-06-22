@@ -18,9 +18,11 @@ from api.routes import (
     assistant,
     auth,
     capture,
+    entities,
     graph,
     home,
     jobs,
+    predicates,
     query,
     recall,
     spaces,
@@ -162,6 +164,9 @@ for _router in (
     applications.router,
     admin_applications.router,
     assistant.router,
+    entities.router,
+    predicates.router,
 ):
     app.include_router(_router)
+
 
