@@ -395,3 +395,174 @@ def test_v2_missing_subject_surface_falls_back_to_name_via_resolve_entity() -> N
     body = client.index.call_args.kwargs["document"]
     assert body["primary_label"] == "삼성전자"
     assert body["primary_lang"] == "ko"
+
+
+# ---------------------------------------------------------------------------
+# 7. B-62-fix-v3 (PO 2026-06-22): Mode A defense. LLM omits subject_surface
+#    AND emits English in `name`. The processor's surface-derivation pulls
+#    the Korean substring from the claim text via the curated KO↔EN org
+#    dictionary and the resolver mints a Korean-primary canonical entity.
+# ---------------------------------------------------------------------------
+
+
+def test_mode_a_korean_claim_with_english_llm_name_resolves_to_korean_primary() -> None:
+    """B-62-fix-v3 (PO 2026-06-22): Mode A end-to-end. The LLM emitted
+    `name='Ministry of Commerce of China'` and `subject_surface=None`
+    for a Korean-language claim. The processor's `_match_object` must
+    derive '중국 상무부' from the claim via the dictionary lookup and
+    the resolver must mint that as primary_label."""
+    from unittest.mock import patch as _patch
+
+    from api.models.objects import ObjectClass
+    from api.structure.models import StructureFact, StructureObject, StructureResult
+    from api.structure.processor import _build_surface_map, _match_object
+
+    decomp = StructureResult(
+        objects=[
+            StructureObject(
+                uid="obj-1",
+                **{"class": ObjectClass.ORGANIZATION.value},
+                name="Ministry of Commerce of China",
+                name_en="Ministry of Commerce of China",
+            ),
+        ],
+        facts=[
+            StructureFact(
+                uid="fn-1",
+                **{"type": "proposition"},
+                claim="중국 상무부는 새로운 수출통제 조치를 발표했다.",
+                subject_uid="obj-1",
+                subject_surface=None,  # LLM omitted — Mode A
+                predicate="announces",
+                object_value="새로운 수출통제 조치",
+            ),
+        ],
+        extraction_status="success",
+    )
+    surface_map = _build_surface_map(decomp)
+    assert "obj-1" not in surface_map  # confirm raw_surface is absent
+
+    mock_client = MagicMock()
+    mock_client.search.return_value = {"hits": {"hits": []}}
+    mock_client.exists.return_value = False
+
+    with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
+         _patch("api.storage.elasticsearch.embeddings.get_embedding", return_value=None):
+        result, _ = _match_object(
+            decomp.objects[0],
+            knowledge_space_id="ks-1",
+            surface_map=surface_map,
+            decomp=decomp,  # B-62-fix-v3 enabler
+        )
+    assert result is not None
+    assert result.created_new is True
+    body = mock_client.index.call_args.kwargs["document"]
+    # The dictionary derivation recovered the Korean span from the claim,
+    # so the canonical primary is Korean and the English LLM-name lands
+    # in aliases (via `co_mention_en` on the resolver create path).
+    assert body["primary_label"] == "중국 상무부"
+    assert body["primary_lang"] == "ko"
+    assert "Ministry of Commerce of China" in body["aliases"]
+
+
+def test_mode_a_redcat_holdings_english_claim_stays_english() -> None:
+    """B-62-fix-v3 control: RedCat Holdings is NOT in the dictionary,
+    the claim is English, and there's no Korean to recover. The
+    surface-derivation must return None and the original English flow
+    runs unchanged — no regression for English brands."""
+    from unittest.mock import patch as _patch
+
+    from api.models.objects import ObjectClass
+    from api.structure.models import StructureFact, StructureObject, StructureResult
+    from api.structure.processor import _build_surface_map, _match_object
+
+    decomp = StructureResult(
+        objects=[
+            StructureObject(
+                uid="obj-1",
+                **{"class": ObjectClass.ORGANIZATION.value},
+                name="RedCat Holdings",
+                name_en="RedCat Holdings",
+            ),
+        ],
+        facts=[
+            StructureFact(
+                uid="fn-1",
+                **{"type": "proposition"},
+                claim="RedCat Holdings announced a new drone line.",
+                subject_uid="obj-1",
+                subject_surface="RedCat Holdings",
+                predicate="announces",
+                object_value="a new drone line",
+            ),
+        ],
+        extraction_status="success",
+    )
+    surface_map = _build_surface_map(decomp)
+    mock_client = MagicMock()
+    mock_client.search.return_value = {"hits": {"hits": []}}
+    mock_client.exists.return_value = False
+
+    with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
+         _patch("api.storage.elasticsearch.embeddings.get_embedding", return_value=None):
+        result, _ = _match_object(
+            decomp.objects[0],
+            knowledge_space_id="ks-1",
+            surface_map=surface_map,
+            decomp=decomp,
+        )
+    assert result is not None
+    body = mock_client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "RedCat Holdings"
+    assert body["primary_lang"] == "en"
+
+
+def test_mode_a_export_control_policy_noun_resolves_to_korean() -> None:
+    """B-62-fix-v3: policy nouns the LLM translates ('export control'
+    → 수출통제) are covered too. The Korean form appears verbatim in
+    the claim and is recovered as primary."""
+    from unittest.mock import patch as _patch
+
+    from api.models.objects import ObjectClass
+    from api.structure.models import StructureFact, StructureObject, StructureResult
+    from api.structure.processor import _build_surface_map, _match_object
+
+    decomp = StructureResult(
+        objects=[
+            StructureObject(
+                uid="obj-1",
+                **{"class": ObjectClass.CONCEPT.value},
+                name="export control",
+                name_en="export control",
+            ),
+        ],
+        facts=[
+            StructureFact(
+                uid="fn-1",
+                **{"type": "proposition"},
+                claim="중국이 새 수출통제 조치를 발표했다.",
+                subject_uid="obj-1",
+                subject_surface=None,
+                predicate="is",
+                object_value="강화됨",
+            ),
+        ],
+        extraction_status="success",
+    )
+    surface_map = _build_surface_map(decomp)
+    mock_client = MagicMock()
+    mock_client.search.return_value = {"hits": {"hits": []}}
+    mock_client.exists.return_value = False
+
+    with _patch("api.structure.entity_resolver.get_client", return_value=mock_client), \
+         _patch("api.storage.elasticsearch.embeddings.get_embedding", return_value=None):
+        result, _ = _match_object(
+            decomp.objects[0],
+            knowledge_space_id="ks-1",
+            surface_map=surface_map,
+            decomp=decomp,
+        )
+    body = mock_client.index.call_args.kwargs["document"]
+    assert body["primary_label"] == "수출통제"
+    assert body["primary_lang"] == "ko"
+    assert "export control" in body["aliases"]
