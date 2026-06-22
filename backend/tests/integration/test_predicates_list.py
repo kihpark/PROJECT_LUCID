@@ -30,41 +30,44 @@ def client(pg_engine, alembic_upgrade):
     return TestClient(app)
 
 
-def _seed_predicates(pg_engine, rows):
-    """Insert predicate rows directly via ORM for test setup."""
-    from api.storage.postgres.orm import Predicate
-    sm = sessionmaker(bind=pg_engine, expire_on_commit=False)
-    with sm() as s:
-        for row in rows:
-            s.add(Predicate(**row))
-        s.commit()
-
-
 class TestPredicatesList:
-    def test_returns_all_predicates(self, client, pg_engine, alembic_upgrade):
-        _seed_predicates(pg_engine, [
-            {"code": "plans", "label_ko": "계획", "label_en": "plans", "sort_order": 1},
-            {"code": "founded", "label_ko": "설립", "label_en": "founded", "sort_order": 2},
-        ])
+    def test_returns_bedrock_predicates(self, client):
+        """Alembic migrations 0015 + 0016 seed the OPL vocabulary; the
+        endpoint must surface them so the FactCard predicate
+        autocomplete has data on first paint."""
         r = client.get("/api/predicates")
         assert r.status_code == 200
         items = r.json()["items"]
-        codes = [i["code"] for i in items]
-        assert "plans" in codes
-        assert "founded" in codes
+        assert len(items) >= 10  # 0015 seeds 10, 0016 expands to 30
+        # Every entry has the three required fields
+        for it in items:
+            assert isinstance(it["code"], str) and it["code"]
+            assert isinstance(it["label_ko"], str) and it["label_ko"]
+            assert isinstance(it["label_en"], str) and it["label_en"]
 
-    def test_sorted_by_sort_order_then_code(self, client, pg_engine, alembic_upgrade):
-        _seed_predicates(pg_engine, [
-            {"code": "z_last", "label_ko": "Z", "label_en": "Z", "sort_order": 10},
-            {"code": "a_first", "label_ko": "A", "label_en": "A", "sort_order": 1},
-        ])
+    def test_sorted_by_sort_order_then_code(self, client):
+        """The endpoint returns rows ordered by (sort_order, code)."""
         r = client.get("/api/predicates")
         assert r.status_code == 200
         items = r.json()["items"]
-        if len(items) >= 2:
-            # a_first (sort_order=1) must come before z_last (sort_order=10)
-            codes = [i["code"] for i in items]
-            idx_a = next((i for i, c in enumerate(codes) if c == "a_first"), None)
-            idx_z = next((i for i, c in enumerate(codes) if c == "z_last"), None)
-            if idx_a is not None and idx_z is not None:
-                assert idx_a < idx_z
+        assert len(items) >= 2
+        # Items must already be in non-decreasing sort_order. Since the
+        # response model omits sort_order, we re-query the bedrock rows
+        # from the test DB and verify order alignment.
+        from api.storage.postgres.orm import Predicate
+        from sqlalchemy.orm import sessionmaker
+        from api.storage.postgres.session import make_sessionmaker
+        sm = make_sessionmaker()
+        with sm() as s:
+            db_rows = s.query(Predicate).order_by(
+                Predicate.sort_order, Predicate.code,
+            ).all()
+        endpoint_codes = [i["code"] for i in items]
+        db_codes = [r.code for r in db_rows]
+        assert endpoint_codes == db_codes
+
+    def test_no_auth_required(self, client):
+        """Predicates endpoint is public (no auth header) — used by the
+        FactCard predicate autocomplete which loads on initial render."""
+        r = client.get("/api/predicates")
+        assert r.status_code == 200

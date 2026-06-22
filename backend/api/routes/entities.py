@@ -75,7 +75,15 @@ def suggest_entities(
         "query": {
             "bool": {
                 "must": [
-                    {"term": {"knowledge_space_id": str(ks.id)}},
+                    {
+                        "bool": {
+                            "should": [
+                                {"term": {"knowledge_space_id": str(ks.id)}},
+                                {"term": {"knowledge_space_id.keyword": str(ks.id)}},
+                            ],
+                            "minimum_should_match": 1,
+                        }
+                    },
                 ],
                 "should": [
                     {"match_phrase_prefix": {"name": q}},
@@ -111,3 +119,4 @@ def suggest_entities(
         )
 
     return EntitySuggestionsResponse(items=items)
+

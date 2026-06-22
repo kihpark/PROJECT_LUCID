@@ -18,9 +18,11 @@ from api.routes import (
     assistant,
     auth,
     capture,
+    entities,
     graph,
     home,
     jobs,
+    predicates,
     query,
     recall,
     spaces,
@@ -28,8 +30,6 @@ from api.routes import (
     users,
     validate,
     validation_api,
-    entities,
-    predicates,
 )
 
 logging.basicConfig(level=logging.INFO)
