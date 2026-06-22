@@ -78,6 +78,14 @@ class StructureFact(LucidBaseModel):
     claim: str
     type_: FactType = Field(alias="type")
     subject_uid: UID
+    # B-62-fix-v2 (PO 2026-06-22): the LLM's verbatim source-text span
+    # for the subject (and the object when it is an entity). Used by
+    # the entity resolver so canonical primary_label preserves the
+    # source-language form. Optional for backward compatibility — the
+    # decomposer / processor falls back to the StructureObject's `name`
+    # when the LLM omits the field.
+    subject_surface: str | None = None
+    object_surface: str | None = None
     predicate: str
     object_value: str
     negation_flag: bool = False

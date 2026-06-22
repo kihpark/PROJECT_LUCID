@@ -54,6 +54,33 @@ logger = logging.getLogger("lucid.structure.entity_resolver")
 # "Ministry of Defense" (all multi-word with spaces).
 _BRAND_SHAPE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,15}$")
 
+# B-62-fix-v2 (PO 2026-06-22): strip trailing Korean particles so the
+# surface used for entity lookup matches the canonical entity form.
+# "중국 상무부는" -> "중국 상무부", "삼성전자가" -> "삼성전자".
+# Anchored to END of string only — never strips mid-word, so 우리은행
+# stays 우리은행 (the trailing 행 is not a particle and 은행 is not in
+# the list). The PO directive is conservative — only the common 1-2
+# character postpositions are recognised.
+_KOREAN_PARTICLES_RE = re.compile(
+    r"(은|는|이|가|을|를|의|에|에서|로|으로|와|과|도|만|까지|부터|에게|한테)$"
+)
+
+
+def strip_korean_particles(text: str) -> str:
+    """Return `text` with at most one trailing Korean particle removed.
+
+    Empty / None / non-Korean inputs pass through unchanged. Only matches
+    when the trailing character(s) are a known postposition; whitespace
+    is trimmed after stripping. Idempotent — calling twice on the same
+    input is the same as once (the particles only match once at the
+    very end).
+    """
+    if not text:
+        return text
+    return _KOREAN_PARTICLES_RE.sub("", text).strip()
+
+
+
 
 def _detect_lang(text: str) -> str:
     """Crude heuristic - presence of any Hangul codepoint => ko, else en.
@@ -290,6 +317,141 @@ def _append_alias(
     return True
 
 
+def _repromote_primary_to_surface(
+    *,
+    client,
+    object_uid: str,
+    existing_doc: dict,
+    new_primary: str,
+    new_primary_lang: str,
+) -> None:
+    """B-62-fix-v2 (PO 2026-06-22): swap an existing English primary for
+    the Korean capture surface.
+
+    Pre-conditions are checked by `resolve_entity`:
+      - The existing doc's primary is English and NOT brand-shaped.
+      - The supplied surface is Korean and non-empty.
+      - They are different.
+
+    Side effects on the ES doc:
+      - primary_label <- new_primary
+      - primary_lang  <- new_primary_lang
+      - aliases       <- existing aliases + previous primary (de-duped,
+                         case-insensitive). The new primary is removed
+                         from aliases if it was there.
+      - relabel_history += one audit entry (field shipped in b668bd7).
+      - The legacy `name` field is also rewritten so the recall display
+        path (which reads `name`) reflects the re-promote.
+    """
+    prev_primary = (existing_doc.get("primary_label")
+                    or existing_doc.get("name") or "").strip()
+    prev_primary_lang = (existing_doc.get("primary_lang")
+                         or _detect_lang(prev_primary))
+
+    aliases_in = list(existing_doc.get("aliases") or [])
+    # Aliases may be either strings (the typical shape) or {label: ...}
+    # dicts for cross-language alias metadata; we normalise to strings
+    # for the dedup pass.
+    normalised: list[str] = []
+    seen_lc: set[str] = set()
+    for a in aliases_in:
+        if isinstance(a, dict):
+            label = (a.get("label") or "").strip()
+        else:
+            label = str(a).strip()
+        if not label:
+            continue
+        if label.lower() == new_primary.strip().lower():
+            continue  # the new primary should not also be an alias
+        if label.lower() in seen_lc:
+            continue
+        seen_lc.add(label.lower())
+        normalised.append(label)
+    if (
+        prev_primary
+        and prev_primary.lower() not in seen_lc
+        and prev_primary.lower() != new_primary.strip().lower()
+    ):
+        normalised.append(prev_primary)
+
+    relabel_history = list(existing_doc.get("relabel_history") or [])
+    relabel_history.append({
+        "from_primary": prev_primary,
+        "from_primary_lang": prev_primary_lang,
+        "to_primary": new_primary,
+        "to_primary_lang": new_primary_lang,
+        "reason": "B-62-fix-v2 runtime re-promote on Korean surface reuse",
+    })
+
+    try:
+        client.update(
+            index=LUCID_OBJECTS,
+            id=object_uid,
+            doc={
+                "primary_label": new_primary,
+                "primary_lang": new_primary_lang,
+                "name": new_primary,
+                "aliases": normalised,
+                "relabel_history": relabel_history,
+            },
+            refresh="wait_for",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "entity re-promote update failed for %s: %s", object_uid, exc,
+        )
+
+
+def _maybe_repromote_on_hit(
+    *,
+    client,
+    object_uid: str,
+    surface: str,
+) -> None:
+    """B-62-fix-v2 wrapper around `_repromote_primary_to_surface` that
+    fetches the existing doc, applies the guards, and re-promotes when
+    appropriate. Called from `resolve_entity`'s lookup-hit branches.
+
+    Guards:
+      - The existing doc must exist and be readable.
+      - existing primary must be detected English.
+      - existing primary must NOT be brand-shaped (Toyota / SpaceX stay).
+      - Supplied surface must be detected Korean.
+      - Supplied surface must differ from existing primary (cheap no-op).
+    """
+    surface_stripped = (surface or "").strip()
+    if not surface_stripped:
+        return
+    if _detect_lang(surface_stripped) != "ko":
+        return
+    try:
+        doc = client.get(index=LUCID_OBJECTS, id=object_uid)["_source"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("entity re-promote fetch failed for %s: %s", object_uid, exc)
+        return
+    existing_primary = (doc.get("primary_label") or doc.get("name") or "").strip()
+    if not existing_primary:
+        return
+    if existing_primary == surface_stripped:
+        return
+    existing_lang = (doc.get("primary_lang") or _detect_lang(existing_primary))
+    if existing_lang != "en":
+        return
+    if _looks_like_brand(existing_primary):
+        return
+    if _looks_like_brand(surface_stripped):
+        # Defensive: a brand-shaped surface should never displace an
+        # existing primary, even when language detection misfires.
+        return
+    _repromote_primary_to_surface(
+        client=client,
+        object_uid=object_uid,
+        existing_doc=doc,
+        new_primary=surface_stripped,
+        new_primary_lang="ko",
+    )
+
+
 def resolve_entity(
     surface: str,
     lang: str,
@@ -326,6 +488,10 @@ def resolve_entity(
     """
     client = es_client if es_client is not None else get_client()
     surface = (surface or "").strip()
+    # B-62-fix-v2 (PO 2026-06-22): strip trailing Korean particles so the
+    # surface used for lookup matches the canonical entity form.
+    # "중국 상무부는" -> "중국 상무부", "삼성전자가" -> "삼성전자".
+    surface = strip_korean_particles(surface)
     if not surface:
         # Defensive: return a fresh uid so downstream code never sees
         # the empty string. The caller should not pass empty input.
@@ -341,6 +507,14 @@ def resolve_entity(
         if hit is not None:
             uid = hit.get("object_uid")
             if uid:
+                # B-62-fix-v2: defense (a). If the matched entity's
+                # primary is English (non-brand) and our surface is
+                # Korean, re-promote the Korean surface so the recall
+                # display picks up the source-language form. No-op
+                # when guards reject (brand, language match, equality).
+                _maybe_repromote_on_hit(
+                    client=client, object_uid=uid, surface=surface,
+                )
                 return uid, False
 
     # Cross-language merge: if the LLM gave us the English form alongside
@@ -356,6 +530,13 @@ def resolve_entity(
                 uid = hit.get("object_uid")
                 if uid:
                     _append_alias(client, object_uid=uid, new_alias=surface)
+                    # B-62-fix-v2: defense (a). Same re-promote logic on
+                    # the co_mention path so the Korean capture surface
+                    # becomes primary when the existing doc carries the
+                    # English co-mention as primary.
+                    _maybe_repromote_on_hit(
+                        client=client, object_uid=uid, surface=surface,
+                    )
                     return uid, False
 
     # Nothing matched - mint a fresh canonical entity using the
@@ -382,5 +563,7 @@ def resolve_entity(
 __all__ = [
     "resolve_entity",
     "pick_natural_primary",
+    "strip_korean_particles",
     "_detect_lang",
+    "_looks_like_brand",
 ]

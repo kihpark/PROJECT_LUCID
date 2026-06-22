@@ -449,3 +449,193 @@ def test_prompts_contains_korean_common_noun_rule() -> None:
     assert "우리자산운용" in SYSTEM_PROMPT
     # The brand-allowed exception must be documented.
     assert "SpaceX" in SYSTEM_PROMPT
+
+
+# --- B-62-fix-v2 subject-natlang (PO 2026-06-22) ----------------------------
+# Defense in depth:
+#   (a) re-promote: when reuse hits a non-brand English primary AND the
+#       new surface is Korean, re-promote the Korean surface as primary.
+#   (b) surface-as-original-span: strip trailing Korean particles before
+#       lookup so "중국 상무부는" matches the canonical "중국 상무부".
+
+
+def test_korean_particle_strip_strips_common_postpositions() -> None:
+    from api.structure.entity_resolver import strip_korean_particles
+    assert strip_korean_particles("중국 상무부는") == "중국 상무부"
+    assert strip_korean_particles("삼성전자가") == "삼성전자"
+    assert strip_korean_particles("한국은행이") == "한국은행"
+    assert strip_korean_particles("국방부의") == "국방부"
+    assert strip_korean_particles("정부에서") == "정부"
+
+
+def test_korean_particle_strip_preserves_non_particle_endings() -> None:
+    from api.structure.entity_resolver import strip_korean_particles
+    # 우리은행 ends in 행 (NOT a particle) — preserved.
+    assert strip_korean_particles("우리은행") == "우리은행"
+    # English passes through unchanged.
+    assert strip_korean_particles("SpaceX") == "SpaceX"
+    # Idempotent.
+    assert strip_korean_particles(strip_korean_particles("삼성전자가")) == "삼성전자"
+    # None / empty preserved.
+    assert strip_korean_particles("") == ""
+    assert strip_korean_particles(None) is None  # type: ignore[arg-type]
+
+
+def test_repromote_english_to_korean_on_reuse() -> None:
+    """Existing entity has English primary `Ministry of Commerce of China`
+    (non-brand, multi-word). A fresh Korean capture supplies surface
+    `중국 상무부`. The lookup hits via aliases / name_en, and the resolver
+    re-promotes the Korean surface as primary, demoting the English form
+    to aliases + audit trail."""
+    client = MagicMock()
+    existing = {
+        "object_uid": "uid-moc",
+        "primary_label": "Ministry of Commerce of China",
+        "primary_lang": "en",
+        "name": "Ministry of Commerce of China",
+        "aliases": [],
+        "relabel_history": [],
+    }
+    # Lookup: primary_label miss, name miss, name_en miss, aliases HIT.
+    client.search.side_effect = [
+        _no_hit(),
+        _no_hit(),
+        _no_hit(),
+        {"hits": {"hits": [{"_source": existing}]}},
+    ]
+    client.get.return_value = {"_source": existing}
+
+    uid, was_created = resolve_entity(
+        "중국 상무부", "ko", space_id="ks-1", es_client=client,
+    )
+    assert was_created is False
+    assert uid == "uid-moc"
+    # Re-promote should have called .update() with the new Korean primary.
+    assert client.update.called
+    upd = client.update.call_args.kwargs
+    assert upd["id"] == "uid-moc"
+    doc = upd["doc"]
+    assert doc["primary_label"] == "중국 상무부"
+    assert doc["primary_lang"] == "ko"
+    # The previous English primary lands in aliases.
+    assert "Ministry of Commerce of China" in doc["aliases"]
+    # Audit trail extended.
+    assert any(
+        h["from_primary"] == "Ministry of Commerce of China"
+        and h["to_primary"] == "중국 상무부"
+        for h in doc["relabel_history"]
+    )
+
+
+def test_no_repromote_brand_entity() -> None:
+    """SpaceX (brand-shaped) MUST NOT be displaced even when a Korean
+    capture `스페이스X` lands on it. Brand canonical wins."""
+    client = MagicMock()
+    existing = {
+        "object_uid": "uid-spacex",
+        "primary_label": "SpaceX",
+        "primary_lang": "en",
+        "name": "SpaceX",
+        "aliases": [],
+    }
+    client.search.side_effect = [
+        {"hits": {"hits": [{"_source": existing}]}},
+    ]
+    client.get.return_value = {"_source": existing}
+
+    uid, was_created = resolve_entity(
+        "스페이스X", "ko", space_id="ks-1", es_client=client,
+    )
+    assert uid == "uid-spacex"
+    assert was_created is False
+    # No re-promote: SpaceX is brand-shaped.
+    assert not client.update.called
+
+
+def test_no_repromote_same_primary() -> None:
+    """Surface equals existing primary -> no-op, no update."""
+    client = MagicMock()
+    existing = {
+        "object_uid": "uid-toyota",
+        "primary_label": "Toyota",
+        "primary_lang": "en",
+        "name": "Toyota",
+        "aliases": [],
+    }
+    client.search.side_effect = [
+        {"hits": {"hits": [{"_source": existing}]}},
+    ]
+    client.get.return_value = {"_source": existing}
+
+    uid, _ = resolve_entity(
+        "Toyota", "en", space_id="ks-1", es_client=client,
+    )
+    assert uid == "uid-toyota"
+    assert not client.update.called
+
+
+def test_no_repromote_existing_korean_primary() -> None:
+    """Existing primary is already Korean. No re-promote needed."""
+    client = MagicMock()
+    existing = {
+        "object_uid": "uid-kdef",
+        "primary_label": "국방부",
+        "primary_lang": "ko",
+        "name": "국방부",
+        "aliases": ["국방부"],
+    }
+    client.search.side_effect = [
+        {"hits": {"hits": [{"_source": existing}]}},
+    ]
+    client.get.return_value = {"_source": existing}
+
+    uid, _ = resolve_entity(
+        "국방부", "ko", space_id="ks-1", es_client=client,
+    )
+    assert uid == "uid-kdef"
+    assert not client.update.called
+
+
+def test_repromote_strips_particle_before_lookup() -> None:
+    """Surface `중국 상무부는` (with particle) must strip to `중국 상무부`
+    BEFORE the ES lookup runs, so the lookup hits the canonical entity."""
+    client = MagicMock()
+    existing = {
+        "object_uid": "uid-moc",
+        "primary_label": "Ministry of Commerce of China",
+        "primary_lang": "en",
+        "name": "Ministry of Commerce of China",
+        "aliases": ["중국 상무부"],
+        "relabel_history": [],
+    }
+    seen_values: list[str] = []
+
+    def _search(*, index, query, size):
+        filt = query["bool"]["filter"]
+        _field, value = next(iter(filt[1]["term"].items()))
+        seen_values.append(value)
+        if value == "중국 상무부":
+            return {"hits": {"hits": [{"_source": existing}]}}
+        return _no_hit()
+
+    client.search.side_effect = _search
+    client.get.return_value = {"_source": existing}
+
+    uid, _ = resolve_entity(
+        "중국 상무부는", "ko", space_id="ks-1", es_client=client,
+    )
+    assert uid == "uid-moc"
+    # No query ever used the particle-bearing surface.
+    assert "중국 상무부는" not in seen_values
+
+
+def test_prompts_contains_subject_surface_v2_rule() -> None:
+    """Pin the B-62-fix-v2 prompt clause so a future refactor cannot
+    silently drop it."""
+    from api.structure.prompts import SYSTEM_PROMPT
+    assert "B-62-fix-v2 subject surface" in SYSTEM_PROMPT
+    assert "subject_surface" in SYSTEM_PROMPT
+    assert "원문 텍스트에 실제로 등장한 표현" in SYSTEM_PROMPT
+    assert "중국 상무부" in SYSTEM_PROMPT
+    # object_surface for entity refs too
+    assert "object_surface" in SYSTEM_PROMPT
