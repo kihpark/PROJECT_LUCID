@@ -165,6 +165,77 @@ Run these IN ORDER on the input text:
              으로 적어주세요. literal 값 (숫자, 금액, 날짜 등)은 기존대로
              object_value 를 쓰고 object_surface 는 null 또는 생략합니다.
 
+          ADDITIONAL RULE — B-62-fix-v7 entity_type (PO 2026-06-22):
+
+          각 subject 와 object 에 entity_type 필드를 추가하세요. 이 필드는
+          기존 `class` (13가지 ontology) 와 별개이며, downstream 의
+          언어 판별 dispatch (회사 → 영어 canonical / 인물 → 정체성
+          언어 / 국가·정부 → 한국어) 를 직접 결정합니다.
+
+            "company"      — 기업/브랜드/제품 (AeroVironment, SpaceX,
+                             Lockheed Martin, 에이비옥스, 삼성전자,
+                             현대자동차). 한글 음역으로 등장해도
+                             entity_type="company".
+            "person"       — 개인. 추가로 person_origin 필드:
+                                "ko"      한국인 (안도걸, 윤석열, 이재용)
+                                "en"      영어권 (Donald Trump, Tim Cook)
+                                "zh"      중국 (Xi Jinping, 시진핑)
+                                "ja"      일본
+                                "other"   그 외
+            "country"      — 국가 (일본, 중국, 미국, 대한민국, France)
+            "government"   — 정부 부처/기관 (중국 상무부, 한국은행,
+                             국방부, 백악관, U.S. Treasury)
+            "institution"  — 비정부 기관 (대학, 연구소, NGO, 학회)
+            "concept"      — 추상 개념/정책 (수출통제, 자유무역,
+                             민주주의, loss aversion)
+            "policy"       — 구체 정책/법안 (EU AI Act, IRA, 반도체법)
+            "event"        — 특정 사건/행사 (COVID-19, EU AI Act 통과)
+            "location"     — 지명 (서울, Pittsburgh, EU)
+            "other"        — 그 외
+
+          판별 기준:
+            - 회사명이 한글 음역으로 등장해도 entity_type="company"
+              (예: 에이비옥스, 스페이스X, 오픈AI). person_origin 은
+              entity_type == "person" 일 때만 채웁니다.
+            - government / institution / concept / policy 는 한국어
+              표면 유지가 자연. 동일하게 country, event, location 도.
+            - person 의 nationality 는 텍스트의 단서로 판단:
+                한국 의원/대통령/공무원/한국 회사 인사 → "ko"
+                "Trump"/"Xi Jinping" 같은 영문 표기 → 해당 국가
+                "도널드 트럼프" 같은 한글 음역도 영문 인물 → "en"
+            - name 필드는 LLM 의 canonical 정규화 (영어 정규형 권장).
+              subject_surface 는 원문 substring (verbatim). entity_type
+              은 회사/인물/국가 등 *카테고리*만 표현하며 언어와 무관.
+
+          예시:
+            source: "에이비옥스가 거래 종목에 포함되었다."
+              OK   {"uid":"obj-1","class":"organization","name":"AeroVironment",
+                    "name_en":"AeroVironment","entity_type":"company",
+                    "aliases":["에이비옥스"]}
+                   + fact: subject_surface="에이비옥스"
+            source: "스페이스X가 한국 시장에 진출했다."
+              OK   {"uid":"obj-1","class":"organization","name":"SpaceX",
+                    "name_en":"SpaceX","entity_type":"company",
+                    "aliases":["스페이스X"]}
+            source: "Lockheed Martin이 발표했다."
+              OK   {"uid":"obj-1","class":"organization","name":"Lockheed Martin",
+                    "name_en":"Lockheed Martin","entity_type":"company"}
+            source: "안도걸 더불어민주당 의원이 청문회에서 발언했다."
+              OK   {"uid":"obj-1","class":"person","name":"Ahn Do-geol",
+                    "name_en":"Ahn Do-geol","entity_type":"person",
+                    "person_origin":"ko","aliases":["안도걸 의원"]}
+            source: "Trump signed the executive order."
+              OK   {"uid":"obj-1","class":"person","name":"Donald Trump",
+                    "name_en":"Donald Trump","entity_type":"person",
+                    "person_origin":"en"}
+            source: "22일 중국 상무부는 발표했다."
+              OK   {"uid":"obj-1","class":"organization","name":"Ministry of Commerce of China",
+                    "name_en":"Ministry of Commerce of China",
+                    "entity_type":"government","aliases":["중국 상무부"]}
+            source: "일본은 무기 수출 규제를 완화했다."
+              OK   {"uid":"obj-1","class":"place","name":"Japan",
+                    "name_en":"Japan","entity_type":"country"}
+
   Step 2b. B-53 — KEEP FACT TEXT IN THE SOURCE LANGUAGE.
           The fact's `claim` and `object_value` MUST be written in
           the same language as the source text. Do NOT translate
@@ -292,6 +363,8 @@ it in markdown fences. Do NOT include any prose outside the JSON.
       "class": "person",
       "name": "Daniel Kahneman",
       "name_en": "Daniel Kahneman",
+      "entity_type": "person",
+      "person_origin": "en",
       "aliases": [],
       "properties": {}
     }
@@ -423,7 +496,133 @@ FEW_SHOT_EXAMPLES = [
     },
     {'input': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '한국은행', 'name_en': 'Bank of Korea', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '기준금리', 'name_en': 'base interest rate', 'properties': {'value': 3.0, 'unit': 'percent', 'as_of': '2024-12'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'subject_uid': 'obj-1', 'predicate': 'base_rate_value', 'object_value': '3.0%', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2024-12']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
     {'input': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다. 반도체 부문이 흑자로 전환했고, 디스플레이는 흑자가 축소되었다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성전자', 'name_en': 'Samsung Electronics', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '영업이익', 'name_en': 'operating profit', 'properties': {'value': 23, 'unit': '조원', 'period': '2023Q4'}}, {'uid': 'obj-3', 'class': 'knowledge', 'name': '반도체 부문', 'name_en': 'semiconductor segment', 'properties': {}}, {'uid': 'obj-4', 'class': 'knowledge', 'name': '디스플레이 부문', 'name_en': 'display segment', 'properties': {}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다.', 'subject_uid': 'obj-1', 'predicate': 'operating_profit', 'object_value': '23조원', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2023Q4']}, {'uid': 'fn-2', 'type': 'proposition', 'claim': '반도체 부문이 흑자로 전환했다.', 'subject_uid': 'obj-3', 'predicate': 'transition_to', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}, {'uid': 'fn-3', 'type': 'proposition', 'claim': '디스플레이는 흑자가 축소되었다.', 'subject_uid': 'obj-4', 'predicate': 'profit_change', 'object_value': '축소', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}, {'fact_uid': 'fn-2', 'object_uid': 'obj-3', 'link_type': 'describes_state', 'properties': {}}, {'fact_uid': 'fn-3', 'object_uid': 'obj-4', 'link_type': 'describes_state', 'properties': {}}], 'fact_fact_links': [{'from_uid': 'fn-2', 'to_uid': 'fn-1', 'link_type': 'supports'}, {'from_uid': 'fn-3', 'to_uid': 'fn-1', 'link_type': 'supports'}], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
-    {'input': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성', 'name_en': 'Samsung', 'properties': {'founded_year': 1938, 'country': 'Korea', 'type': 'conglomerate'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'subject_uid': 'obj-1', 'predicate': 'founded_year', 'object_value': '1938', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '1938', 'conglomerate']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [{'fact_uid': 'fn-1', 'mention_text': '삼성', 'candidate_object_uids': [], 'scores': []}], 'extraction_status': 'success', 'failure_reason': None}},
+    {'input': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성', 'name_en': 'Samsung', 'entity_type': 'company', 'properties': {'founded_year': 1938, 'country': 'Korea', 'type': 'conglomerate'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'subject_uid': 'obj-1', 'predicate': 'founded_year', 'object_value': '1938', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '1938', 'conglomerate']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [{'fact_uid': 'fn-1', 'mention_text': '삼성', 'candidate_object_uids': [], 'scores': []}], 'extraction_status': 'success', 'failure_reason': None}},
+    # B-62-fix-v7 few-shot (PO 2026-06-22): entity_type dispatch coverage.
+    # Case A — Korean transliteration of a company, English canonical.
+    {
+        'input': '에이비옥스가 거래 종목에 포함되었다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'organization',
+                 'name': 'AeroVironment', 'name_en': 'AeroVironment',
+                 'entity_type': 'company',
+                 'aliases': ['에이비옥스'], 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '에이비옥스가 거래 종목에 포함되었다.',
+                 'subject_uid': 'obj-1', 'subject_surface': '에이비옥스',
+                 'predicate': 'added_to_index', 'object_value': '거래 종목',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR']},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1',
+                 'link_type': 'involves', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # Case B — Korean person → entity_type=person, person_origin=ko.
+    {
+        'input': '안도걸 더불어민주당 의원이 청문회에서 발언했다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'person',
+                 'name': 'Ahn Do-geol', 'name_en': 'Ahn Do-geol',
+                 'entity_type': 'person', 'person_origin': 'ko',
+                 'aliases': ['안도걸 의원'], 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '안도걸 더불어민주당 의원이 청문회에서 발언했다.',
+                 'subject_uid': 'obj-1',
+                 'subject_surface': '안도걸 더불어민주당 의원',
+                 'predicate': 'spoke_at', 'object_value': '청문회',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR']},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1',
+                 'link_type': 'involves', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # Case C — Country + non-Korean person + government (Korean source).
+    {
+        'input': '22일 중국 상무부는 미국의 수출통제에 대응하기 위해 새 정책을 발표했다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'organization',
+                 'name': 'Ministry of Commerce of China',
+                 'name_en': 'Ministry of Commerce of China',
+                 'entity_type': 'government',
+                 'aliases': ['중국 상무부'], 'properties': {}},
+                {'uid': 'obj-2', 'class': 'place',
+                 'name': 'United States', 'name_en': 'United States',
+                 'entity_type': 'country',
+                 'aliases': ['미국'], 'properties': {}},
+                {'uid': 'obj-3', 'class': 'concept',
+                 'name': 'export controls', 'name_en': 'export controls',
+                 'entity_type': 'concept',
+                 'aliases': ['수출통제'], 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '22일 중국 상무부는 미국의 수출통제에 대응하기 위해 새 정책을 발표했다.',
+                 'subject_uid': 'obj-1',
+                 'subject_surface': '중국 상무부',
+                 'predicate': 'announced_policy_in_response_to',
+                 'object_value': 'obj-3', 'object_surface': '수출통제',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR', 'export_controls']},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1',
+                 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2',
+                 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-3',
+                 'link_type': 'addresses', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # Case D — Non-Korean person in English source (Trump). person_origin=en.
+    {
+        'input': 'President Trump signed the executive order on tariffs.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'person',
+                 'name': 'Donald Trump', 'name_en': 'Donald Trump',
+                 'entity_type': 'person', 'person_origin': 'en',
+                 'aliases': ['Trump', 'President Trump'], 'properties': {}},
+                {'uid': 'obj-2', 'class': 'event',
+                 'name': 'executive order on tariffs',
+                 'name_en': 'executive order on tariffs',
+                 'entity_type': 'event', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': 'President Trump signed the executive order on tariffs.',
+                 'subject_uid': 'obj-1', 'subject_surface': 'President Trump',
+                 'predicate': 'signed', 'object_value': 'obj-2',
+                 'object_surface': 'the executive order on tariffs',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['US']},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1',
+                 'link_type': 'involves', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
 ]
 
 

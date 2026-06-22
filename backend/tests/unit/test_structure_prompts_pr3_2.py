@@ -5,8 +5,15 @@ from api.structure.prompts import FEW_SHOT_EXAMPLES, SYSTEM_PROMPT
 
 
 def test_six_few_shot_examples_total():
-    """PR-3-1 shipped 3, PR-3-2 appends 3 → 6 total."""
-    assert len(FEW_SHOT_EXAMPLES) == 6
+    """PR-3-1 shipped 3, PR-3-2 appended 3 (→ 6), and B-62-fix-v7
+    (feat/spo-subject-language-by-type, PO 2026-06-22) appended 4
+    more entity_type dispatch examples → 10 total.
+
+    Asserted as a lower bound: every subsequent round has appended
+    examples; the earlier examples are still present (verified by
+    the named-substring tests below).
+    """
+    assert len(FEW_SHOT_EXAMPLES) >= 6
 
 
 def test_ko_statistic_example_present():

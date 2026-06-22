@@ -52,6 +52,34 @@ class StructureObject(LucidBaseModel):
     # entity normalized into another language.
     aliases: list[str] = Field(default_factory=list)
     properties: dict[str, Any] = Field(default_factory=dict)
+    # B-62-fix-v7 (PO 2026-06-22, feat/spo-subject-language-by-type):
+    # entity_type is an orthogonal classifier the LLM emits per
+    # subject / object to drive `_match_object`'s type-based language
+    # dispatch. It is distinct from `class_` (the 13-element ontology):
+    # `class_=="organization"` covers BOTH companies (English canonical)
+    # AND government bodies (Korean verbatim), so we cannot reuse it.
+    #
+    # Expected values:
+    #   "company" / "brand" / "product"         — English canonical
+    #   "person"                                — cascade by `person_origin`
+    #   "country" / "government" / "institution"
+    #     / "concept" / "policy" / "event" / "location"
+    #                                           — Korean (claim recovery)
+    #   "other"                                 — passes to else branch
+    #
+    # Optional / nullable for backward compat: older captures (made
+    # before this field landed) have `entity_type=None`, which the
+    # processor handles via the else branch (6th-round behavior).
+    entity_type: str | None = None
+    # When `entity_type=="person"`, the LLM emits the person's identity
+    # language so non-Korean persons stay in English/canonical and
+    # Korean persons fall through to claim recovery.
+    #   "ko"     — Korean person → claim recovery
+    #   "en"/"us"/"uk"  — English-speaking → English canonical
+    #   "zh"/"ja"/"de" / etc. — non-Korean / non-English → English canonical
+    #                            (v2 may add native-script cascade)
+    # Unused when entity_type != "person".
+    person_origin: str | None = None
 
 
 class StructureFact(LucidBaseModel):
