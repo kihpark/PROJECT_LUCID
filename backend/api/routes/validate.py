@@ -38,6 +38,7 @@ import logging
 import uuid
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -103,6 +104,65 @@ def _structure_meta(job: SourceJobORM) -> dict[str, Any]:
     return (job.extracted_metadata or {}).get("structure", {}) or {}
 
 
+def _hostname_from_url(url: str | None) -> str:
+    """Best-effort hostname extraction. Returns the trimmed URL when
+    parsing fails so the caller always has *something* renderable."""
+    if not url:
+        return ""
+    try:
+        host = urlparse(url).hostname
+    except (ValueError, AttributeError):
+        return url
+    return host or url
+
+
+def _resolve_title(job: SourceJobORM, hostname: str) -> str:
+    """Resolve the human-readable card title with a graceful fallback chain.
+
+    pending-card-title-date: PO complaint was that Pending cards showed
+    the hostname ("n.news.naver.com") as the headline. The web_article
+    extractor already discovers the `<title>` (and content-script
+    `page_title`) and surfaces it on ExtractResult.title; the extract
+    processor folds that into `extracted_metadata.title` so this
+    function can find it without a schema migration. The chain is
+    intentionally generous because older capture rows predate the
+    title-persistence change and only carry hostname/body data:
+
+      1. extracted_metadata.title                (post-fix captures)
+      2. extracted_metadata.og_title             (open graph fallback)
+      3. extracted_metadata.structure.title      (defensive — never set today)
+      4. first 60 chars of extracted_metadata.body / structure.body
+      5. hostname (legacy behavior, still useful when the article had no <title>)
+      6. "(제목 없음)" so the card is never empty
+    """
+    md = job.extracted_metadata or {}
+    structure = md.get("structure") or {}
+
+    raw = (
+        md.get("title")
+        or md.get("og_title")
+        or structure.get("title")
+    )
+    if isinstance(raw, str):
+        title = raw.strip()
+        if title:
+            return title
+
+    body = (md.get("body") or structure.get("body") or "")
+    if isinstance(body, str):
+        body_trim = body.strip()
+        if body_trim:
+            # Take the first non-empty line up to 60 chars so noisy
+            # paywall pages don't surface a navbar string.
+            first_line = body_trim.split("\n", 1)[0].strip()
+            if first_line:
+                return first_line[:60]
+
+    if hostname:
+        return hostname
+    return "(제목 없음)"
+
+
 def _job_summary(job: SourceJobORM) -> PendingJobSummary:
     """Build the list-card summary.
 
@@ -139,6 +199,7 @@ def _job_summary(job: SourceJobORM) -> PendingJobSummary:
         for m in facts_summary
         if (m.get("fact_uid") or m.get("uid")) not in decided
     )
+    hostname = _hostname_from_url(job.source_url)
     return PendingJobSummary(
         job_id=str(job.id),
         source_url=job.source_url,
@@ -149,6 +210,8 @@ def _job_summary(job: SourceJobORM) -> PendingJobSummary:
         object_count=objs,
         has_negation=negation,
         has_disambiguation=disambig > 0,
+        title=_resolve_title(job, hostname),
+        hostname=hostname,
     )
 
 

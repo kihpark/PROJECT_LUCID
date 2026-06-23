@@ -145,6 +145,12 @@ interface CaptureMessage {
     | 'youtube'
     | 'pdf'
     | 'image';
+  // pending-card-title-date: popup pulls `chrome.tabs.query` and
+  // forwards the active tab's `title` (the browser's resolved
+  // <title>) so the backend can stamp it into extracted_metadata
+  // *before* the extractor runs. Optional because older popup
+  // builds may not include it; the SW must not crash on absence.
+  page_title?: string;
 }
 
 interface PingMessage {
@@ -180,10 +186,21 @@ chrome.runtime.onMessage.addListener(
       // Async path — keep the channel open until postCapture resolves.
       (async () => {
         try {
+          // pending-card-title-date: forward page_title into
+          // client_metadata so the backend's web_article extractor
+          // can prime ExtractResult.title with it (the extractor
+          // already reads metadata.page_title — see
+          // extractors/web_article.py:281).
+          const clientMetadata: Record<string, string> = {};
+          const title = (msg.page_title ?? '').trim();
+          if (title) clientMetadata.page_title = title;
           const result = await postCapture({
             source_url: msg.source_url,
             source_type: msg.source_type,
             captured_from: 'chrome_ext',
+            ...(Object.keys(clientMetadata).length > 0
+              ? { client_metadata: clientMetadata }
+              : {}),
           });
           // Cache the job id so the popup can show recent captures.
           const cur = await import('@/lib/storage').then((m) => m.readState());

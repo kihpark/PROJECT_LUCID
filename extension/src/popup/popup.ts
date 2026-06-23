@@ -190,10 +190,16 @@ async function onCapture(btn: HTMLButtonElement, body: HTMLElement) {
   }
 
   try {
+    // pending-card-title-date: include the resolved page title so the
+    // backend can stamp it into extracted_metadata pre-extract — the
+    // Pending Queue card then renders the headline instead of the
+    // raw hostname. `tab.title` is the same string the browser shows
+    // in the tab strip; safe to forward without any DOM-script eval.
     const resp = (await chrome.runtime.sendMessage({
       type: "capture",
       source_url: activeTab.url,
       source_type: "web_article",
+      page_title: activeTab.title ?? "",
     })) as CaptureResultMessage;
 
     if (resp?.ok) {

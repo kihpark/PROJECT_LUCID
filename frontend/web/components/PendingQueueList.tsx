@@ -8,9 +8,9 @@ import type { PendingJobSummary, PendingPage } from '@/lib/types';
 
 /**
  * Extract the host (domain) from a URL string, returning null when the
- * input is not parseable. U-1: surface the host on the card header so
- * the user can identify the source at a glance without parsing the
- * full URL.
+ * input is not parseable. Retained as a defensive fallback for the
+ * (rare) case where the backend's `hostname` field is somehow empty —
+ * the typical render reads `job.hostname` directly.
  */
 function hostFromUrl(url: string): string | null {
   try {
@@ -18,6 +18,41 @@ function hostFromUrl(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * pending-card-title-date: PO complained that the capture timestamp
+ * was rendered as a raw ISO string ("2026-05-30T10:00:00Z toLocaleString")
+ * that's hard to scan. Show the relative form prominently ("3시간 전",
+ * "어제", "방금 전") and keep the absolute date in a tooltip so power
+ * users can hover to confirm. Korean copy because the PO uses
+ * Korean-language sources end-to-end.
+ */
+export function formatRelativeKo(iso: string, now: Date = new Date()): string {
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return '';
+  const diffSec = (now.getTime() - dt.getTime()) / 1000;
+  if (diffSec < 0) {
+    // Future timestamps are nonsensical for a capture queue; show the
+    // absolute date so we don't mislead the user with "방금 전".
+    return dt.toLocaleString('ko-KR');
+  }
+  if (diffSec < 60) return '방금 전';
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}분 전`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}시간 전`;
+  if (diffSec < 86400 * 7) return `${Math.floor(diffSec / 86400)}일 전`;
+  return dt.toLocaleDateString('ko-KR', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export function formatAbsoluteKo(iso: string): string {
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return iso;
+  return dt.toLocaleString('ko-KR');
 }
 
 interface Props {
@@ -33,6 +68,14 @@ interface PendingCardProps {
 }
 
 function PendingCard({ job, onDiscardRow }: PendingCardProps) {
+  // pending-card-title-date: prefer the backend-resolved title /
+  // hostname; fall back to URL parsing if (e.g. a stale client cache)
+  // the fields aren't present yet. This keeps the card usable across
+  // a deploy window where the API may have not yet rolled.
+  const displayTitle = job.title || hostFromUrl(job.source_url) || job.source_url;
+  const displayHostname = job.hostname || hostFromUrl(job.source_url) || '';
+  const absoluteCaptured = formatAbsoluteKo(job.captured_at);
+  const relativeCaptured = formatRelativeKo(job.captured_at);
   return (
     <div
       className="relative rounded-lg border border-border-subtle bg-bg-card p-4 hover:bg-bg-card-hover transition-colors"
@@ -42,9 +85,20 @@ function PendingCard({ job, onDiscardRow }: PendingCardProps) {
         href={`/pending/${job.job_id}` as Route}
         className="block"
       >
-        <header className="flex items-baseline justify-between mb-2 gap-3">
-          <h3 className="text-sm font-medium truncate" title={job.source_url}>
-            {hostFromUrl(job.source_url) ?? job.source_url}
+        <header className="flex items-start justify-between mb-2 gap-3">
+          {/*
+           * pending-card-title-date: TITLE is now the article headline
+           * (`job.title`), promoted to text-base + font-semibold so it
+           * dominates the card. The previous render shoved the
+           * hostname here as if it were a title — which is why the
+           * PO saw "n.news.naver.com" everywhere.
+           */}
+          <h3
+            className="text-base font-semibold text-text-primary leading-snug line-clamp-2 break-words"
+            title={job.source_url}
+            data-testid={`pending-card-title-${job.job_id}`}
+          >
+            {displayTitle}
           </h3>
           {/*
            * decide-ux-fix #1: source_type badge moves to a top-right
@@ -63,12 +117,29 @@ function PendingCard({ job, onDiscardRow }: PendingCardProps) {
             {job.source_type}
           </code>
         </header>
-        <p className="text-xxs text-text-muted font-mono mb-1 truncate" title={job.source_url}>
-          {job.source_url}
-        </p>
-        <p className="text-xxs text-text-muted font-mono mb-3">
-          captured {new Date(job.captured_at).toLocaleString()} · from {job.captured_from}
-        </p>
+        {/*
+         * pending-card-title-date: META row. Hostname becomes a
+         * sub-label (NOT the title), capture date is given its own
+         * span with the absolute timestamp in the tooltip. Order
+         * intentionally puts the date right after the hostname so the
+         * user's eye lands on "언제 저장했는가" within a single sweep.
+         */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 text-xs text-text-muted">
+          <span
+            className="font-mono truncate max-w-[18rem]"
+            title={job.source_url}
+            data-testid={`pending-card-hostname-${job.job_id}`}
+          >
+            {displayHostname}
+          </span>
+          <span
+            data-testid={`pending-card-captured-${job.job_id}`}
+            title={absoluteCaptured}
+          >
+            {relativeCaptured}
+          </span>
+          <span className="text-text-muted/70">· {job.captured_from}</span>
+        </div>
         <dl className="flex gap-4 text-xs text-text-secondary">
           <div>
             <dt className="text-text-muted">facts</dt>

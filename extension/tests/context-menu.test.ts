@@ -722,3 +722,121 @@ describe('screenshot capture (B-45.5)', () => {
     expect(errorMsg).not.toMatch(/\[object Object\]/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// pending-card-title-date — the extension must forward `tab.title` so the
+// Pending Queue card can render the article headline. Each capture path
+// (page-save, selection, image, screenshot) had to be patched
+// independently because each builds its own client_metadata block.
+// ---------------------------------------------------------------------------
+describe('context-menu click — forwards tab.title as client_metadata.page_title', () => {
+  it('page-save (web_article) includes page_title when tab.title is present', async () => {
+    stubAuth();
+    chrome.scripting.executeScript.mockResolvedValue([
+      { result: '<html><body><article>x</article></body></html>',
+        frameId: 0, documentId: 'x' },
+    ]);
+    const fetchMock = stubCaptureOk('job-title-1');
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.page,
+        pageUrl: 'https://n.news.naver.com/article/123',
+      } as chrome.contextMenus.OnClickData,
+      {
+        id: 30,
+        url: 'https://n.news.naver.com/article/123',
+        title: '중국 정부, 미국 기업 10곳에 수출통제',
+      } as chrome.tabs.Tab,
+    );
+
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
+    expect(body.client_metadata?.page_title).toBe(
+      '중국 정부, 미국 기업 10곳에 수출통제',
+    );
+  });
+
+  it('page-save omits client_metadata entirely when tab.title is blank', async () => {
+    stubAuth();
+    chrome.scripting.executeScript.mockResolvedValue([
+      { result: '<html><body></body></html>', frameId: 0, documentId: 'x' },
+    ]);
+    const fetchMock = stubCaptureOk('job-title-2');
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.page,
+        pageUrl: 'https://example.com/no-title',
+      } as chrome.contextMenus.OnClickData,
+      { id: 31, url: 'https://example.com/no-title' } as chrome.tabs.Tab,
+    );
+
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
+    // No tab.title supplied -> no page_title key (don't ship "")
+    expect(body.client_metadata).toBeUndefined();
+  });
+
+  it('selection (highlighted_text) includes page_title alongside selection_range_*', async () => {
+    stubAuth();
+    const fetchMock = stubCaptureOk('job-title-3');
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.selection,
+        pageUrl: 'https://example.com/article',
+        selectionText: 'Quoted passage',
+      } as chrome.contextMenus.OnClickData,
+      {
+        id: 32,
+        url: 'https://example.com/article',
+        title: 'Example Article — A News Site',
+      } as chrome.tabs.Tab,
+    );
+
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
+    expect(body.client_metadata.page_title).toBe('Example Article — A News Site');
+    // Existing selection metadata must NOT regress.
+    expect(body.client_metadata.selection_range_start).toBe('0');
+    expect(body.client_metadata.selection_range_end).toBe('14');
+  });
+
+  it('image capture includes page_title alongside source_page_url', async () => {
+    stubAuth();
+    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === 'https://example.com/photo.png') {
+        return { ok: true, arrayBuffer: async () => imageBytes.buffer };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          job_id: 'job-title-4',
+          status_url: '/api/jobs/job-title-4',
+          status: 'pending_extract',
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.image,
+        srcUrl: 'https://example.com/photo.png',
+        pageUrl: 'https://example.com/album',
+      } as chrome.contextMenus.OnClickData,
+      {
+        id: 33,
+        url: 'https://example.com/album',
+        title: 'Album: Trip to Seoul',
+      } as chrome.tabs.Tab,
+    );
+
+    const captureCall = fetchMock.mock.calls.find(
+      (c: unknown[]) => c[0] === 'http://localhost:8000/api/capture',
+    );
+    const body = JSON.parse((captureCall![1] as { body: string }).body);
+    expect(body.client_metadata.page_title).toBe('Album: Trip to Seoul');
+    // Pre-existing image metadata survives.
+    expect(body.client_metadata.source_page_url).toBe('https://example.com/album');
+  });
+});

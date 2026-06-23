@@ -110,6 +110,13 @@ export interface PendingJobSummary {
   object_count: number;
   has_negation: boolean;
   has_disambiguation: boolean;
+  // pending-card-title-date: article headline + source hostname so the
+  // card renders the human-readable title as the primary text instead
+  // of the URL. Backend guarantees both are non-empty strings (it
+  // falls back to the hostname / "(제목 없음)" when the article had
+  // no usable <title>).
+  title: string;
+  hostname: string;
 }
 
 export interface PendingPage {
