@@ -105,6 +105,19 @@ class StructureFact(LucidBaseModel):
     negation_flag: bool = False
     negation_scope: Literal["full", "partial"] | None = None
     tags_suggested: list[str] = Field(default_factory=list)
+    # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split.
+    # PO directive 2026-06-23 — the LLM tags each fact's `fact_type`
+    # so downstream surfaces can distinguish a current-event
+    # ("X did Y") from a one-hop provenance utterance ("X said Y").
+    # Default 'action' on legacy / silent payloads — back-compat.
+    # `speech_act` is intentionally open natural-language (no enum)
+    # so the loose ontology survives unknown verbs.
+    fact_type: Literal["action", "claim"] = "action"
+    speaker_uid: str | None = None
+    speaker_label: str | None = None
+    speech_act: str | None = None
+    content_claim: str | None = None
+    stance: str | None = None
 
 
 class StructureFactObjectLink(LucidBaseModel):

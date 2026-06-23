@@ -22,6 +22,14 @@ export interface FactSummary {
   quantifier?: string | null;
   modal?: string | null;
   tags_suggested?: string[];
+  // v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split. Null
+  // / undefined on legacy facts — FactCard treats absence as 'action'.
+  fact_type?: 'action' | 'claim' | null;
+  speaker_uid?: string | null;
+  speaker_label?: string | null;
+  speech_act?: string | null;
+  content_claim?: string | null;
+  stance?: string | null;
 }
 
 export interface ObjectSummary {
@@ -193,6 +201,14 @@ export interface RecallFact {
   // the predicateLabel() helper falls back to the curated KO map / the
   // canonical predicate surface in that case.
   predicate_label?: string | null;
+  // v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split. Null
+  // on legacy facts; the FactCard treats absence as 'action'.
+  fact_type?: 'action' | 'claim' | null;
+  speaker_uid?: string | null;
+  speaker_label?: string | null;
+  speech_act?: string | null;
+  content_claim?: string | null;
+  stance?: string | null;
 }
 
 export interface EntityFactRef {
@@ -235,9 +251,16 @@ export interface PredicateFacetItem {
   count: number;
 }
 
+export interface FactTypeFacets {
+  action: number;
+  claim: number;
+}
+
 export interface RecallFacets {
   entities: EntityFacets;
   predicates: PredicateFacetItem[];
+  // v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split counts.
+  fact_types?: FactTypeFacets;
 }
 
 export interface RecallResponse {

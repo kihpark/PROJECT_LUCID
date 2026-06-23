@@ -541,6 +541,20 @@ def _serialize_struct_fact(
     # `name` because pre-v2 LLM payloads never emitted *_surface.
     d.setdefault("subject_surface", d.get("subject_surface") or None)
     d.setdefault("object_surface", d.get("object_surface") or None)
+    # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim — back-compat
+    # default 'action' when the LLM omits the field on a legacy payload.
+    # The recall facet aggregation `terms` on fact_type is null-safe but
+    # cleaner buckets fall out when every doc carries a value.
+    d.setdefault("fact_type", d.get("fact_type") or "action")
+    # Claim-only fields. model_dump emits None when unset, which is
+    # fine — ES `keyword` indexes None as missing, the recall facet
+    # doesn't bucket it, and the FactCard branches on `fact_type==claim`
+    # before reading these so missing values never render.
+    d.setdefault("speaker_uid", d.get("speaker_uid"))
+    d.setdefault("speaker_label", d.get("speaker_label"))
+    d.setdefault("speech_act", d.get("speech_act"))
+    d.setdefault("content_claim", d.get("content_claim"))
+    d.setdefault("stance", d.get("stance"))
     # feat/spo-decide-payload-wire (PO 2026-06-23): propagate the
     # corrected canonical surface from `match_per_object` so the
     # Decide UI sees the brand-canonical / claim-recovered form (not
