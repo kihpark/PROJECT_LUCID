@@ -58,7 +58,19 @@ class CandidateMatch(LucidBaseModel):
 
 
 class MatchResult(LucidBaseModel):
-    """The matcher's verdict for one decomposer-emitted Object."""
+    """The matcher's verdict for one decomposer-emitted Object.
+
+    `primary_label` (feat/spo-decide-payload-wire, PO 2026-06-23) carries
+    the **corrected canonical surface** the matcher chose for this entity.
+    For `resolve_entity_*` paths this is what `pick_natural_primary`
+    selected (and what was persisted to ES as `primary_label`). For
+    legacy exact / knn / create_new paths it is the candidate name we
+    matched against. The processor uses this string when serialising
+    the Decide-UI payload so the corrected surface (Korean recovered
+    via claim_recovery, brand-canonical via brand_resolver) propagates
+    to the user — fixing the prior bug where `_match_object` corrected
+    ES but the JSONB payload still carried the LLM's raw English.
+    """
 
     matched_object_uid: UID | None = None
     disambiguation_required: bool = False
@@ -66,10 +78,42 @@ class MatchResult(LucidBaseModel):
     created_new: bool = False
     new_object_uid: UID | None = None
     decision_reason: str = ""  # human-readable: "exact_match", "knn_auto", etc.
+    primary_label: str | None = None
 
 
 def _auto_threshold_for(object_class: ObjectClass) -> float:
     return AUTO_THRESHOLD_TIGHT if object_class in TIGHT_CLASSES else AUTO_THRESHOLD_STANDARD
+
+
+def _try_lookup_primary_label(object_uid: str) -> str | None:
+    """Best-effort read of `primary_label` from ES for `object_uid`.
+
+    feat/spo-decide-payload-wire (PO 2026-06-23): the matcher's
+    `MatchResult.primary_label` is consumed by the Decide UI payload
+    serializer to surface the corrected entity surface. For
+    `resolve_entity_match` we want the persisted primary_label of the
+    EXISTING entity (not whatever surface we passed in this call), so
+    cross-job alias accretion stays consistent.
+
+    Any error degrades to None — callers fall back to the surface they
+    already have. Never raises out.
+    """
+    from api.storage.elasticsearch.client import LUCID_OBJECTS, get_client
+
+    try:
+        client = get_client()
+        resp = client.get(index=LUCID_OBJECTS, id=object_uid)
+    except Exception:  # noqa: BLE001 - never break the matcher on lookup
+        return None
+    if not isinstance(resp, dict):
+        return None
+    src = resp.get("_source") or {}
+    if not isinstance(src, dict):
+        return None
+    pl = src.get("primary_label") or src.get("name")
+    if isinstance(pl, str) and pl.strip():
+        return pl
+    return None
 
 
 def _exact_name_search(
@@ -151,15 +195,28 @@ def match_or_create_object(
                 "falling back to legacy exact+kNN path", surface, exc,
             )
         else:
+            # feat/spo-decide-payload-wire (PO 2026-06-23): also read
+            # back the persisted primary_label so callers can propagate
+            # the corrected surface into the Decide UI payload. For
+            # the create path, `pick_natural_primary` already decided
+            # the primary; for the match path the existing entity's
+            # primary_label is the source of truth. We try a quick
+            # lookup; on any failure we fall back to `surface` (the
+            # corrected input we just passed in — the recovered Korean
+            # form when claim_recovery fired).
+            persisted_label = _try_lookup_primary_label(entity_uid)
+            chosen_label = persisted_label or surface
             if was_created:
                 return MatchResult(
                     created_new=True,
                     new_object_uid=entity_uid,
                     decision_reason="resolve_entity_create",
+                    primary_label=chosen_label,
                 )
             return MatchResult(
                 matched_object_uid=entity_uid,
                 decision_reason="resolve_entity_match",
+                primary_label=chosen_label,
             )
 
     # Step 1 — exact name match (case-insensitive happens at the
@@ -172,6 +229,8 @@ def match_or_create_object(
         return MatchResult(
             matched_object_uid=match["object_uid"],
             decision_reason="exact_match",
+            primary_label=match.get("primary_label") or match.get("name")
+            or candidate_name,
         )
     if len(exact) > 1:
         candidates = [
@@ -187,6 +246,7 @@ def match_or_create_object(
             disambiguation_required=True,
             candidates=candidates,
             decision_reason="exact_match_multi",
+            primary_label=candidate_name,
         )
 
     # Step 2 — vector kNN (only if we have an embedding).
@@ -213,6 +273,8 @@ def match_or_create_object(
                 return MatchResult(
                     matched_object_uid=top["object_uid"],
                     decision_reason=f"knn_auto (score={top_score:.3f}, thr={auto_threshold:.2f})",
+                    primary_label=top.get("primary_label") or top.get("name")
+                    or candidate_name,
                 )
 
             disambig_hits = [
@@ -232,6 +294,7 @@ def match_or_create_object(
                     disambiguation_required=True,
                     candidates=candidates,
                     decision_reason=f"knn_disambig (top={top_score:.3f}, thr={auto_threshold:.2f})",
+                    primary_label=candidate_name,
                 )
 
     # Step 3 — nothing matched; mark for create
@@ -239,4 +302,5 @@ def match_or_create_object(
         created_new=True,
         new_object_uid=new_uid(),
         decision_reason="create_new",
+        primary_label=candidate_name,
     )

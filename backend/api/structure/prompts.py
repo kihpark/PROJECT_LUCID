@@ -120,17 +120,25 @@ Run these IN ORDER on the input text:
                  "name_en":"Samsung Electronics", "aliases":[]}
 
   Step 2b. B-53 — KEEP FACT TEXT IN THE SOURCE LANGUAGE.
-          The fact's `claim` and `object_value` MUST be written in
-          the same language as the source text. Do NOT translate
-          numbers, units, idioms, or quoted phrases into English
-          when the source is Korean (or vice versa).
-          ONLY EXCEPTION: `predicate` stays in English snake_case
-          regardless of source language — predicate vocabulary is a
-          stable graph-key surface, not user-facing prose.
+          The fact's `claim`, `predicate`, and `object_value` MUST all
+          be written in the same language as the source text. Do
+          NOT translate numbers, units, idioms, or quoted phrases.
+
+          PREDICATE 도 동사구 그대로 (PO 2026-06-23, decide-payload-wire):
+          predicate 는 source 언어의 동사·서술어를 그대로 사용:
+            한국어 기사: "선출했다", "출신이다", "발표했다", "올렸다",
+                         "조달했다", "축소되었다"
+            영어  기사: "elected", "is_former_member_of", "announced",
+                         "raised_funding"
+          한국어 기사에 snake_case 영어 predicate (예: "elected_president",
+          "imposed_export_control_on", "announces_export_control") 출력
+          금지. 한국어 기사면 한국어 동사구만, 영어 기사면 영어만.
+
           One example to anchor the rule:
             source: "SpaceX는 750억달러를 조달했다."
-              OK    "object_value":"750억달러"
-              NOT   "object_value":"75 billion USD"  # translation
+              OK    "predicate":"조달했다", "object_value":"750억달러"
+              NOT   "predicate":"raised_funding"           # English on Korean
+              NOT   "object_value":"75 billion USD"        # translation
 
   Step 3. Decompose every assertion into one or more AtomicFact
           candidates (proposition or procedure). Each fact must be a
@@ -287,7 +295,7 @@ FEW_SHOT_EXAMPLES = [
                  "negation_scope": None, "tags_suggested": ["1979"]},
                 {"uid": "fn-2", "type": "proposition",
                  "claim": "프로스펙트 이론에서 손실 회피 계수는 평균 2.25다.",
-                 "subject_uid": "obj-2", "predicate": "average_value_of",
+                 "subject_uid": "obj-2", "predicate": "평균이다",
                  "object_value": "2.25", "negation_flag": False,
                  "negation_scope": None, "tags_suggested": []},
             ],
@@ -320,8 +328,8 @@ FEW_SHOT_EXAMPLES = [
             "facts": [
                 {"uid": "fn-1", "type": "proposition",
                  "claim": "EU AI Act는 군사 분야에는 적용되지 않는다.",
-                 "subject_uid": "obj-1", "predicate": "applies_to",
-                 "object_value": "military",
+                 "subject_uid": "obj-1", "predicate": "적용되지 않는다",
+                 "object_value": "군사 분야",
                  "negation_flag": True, "negation_scope": "partial",
                  "tags_suggested": ["EU", "military"]},
             ],
@@ -349,9 +357,9 @@ FEW_SHOT_EXAMPLES = [
             "failure_reason": "opinion_content",
         },
     },
-    {'input': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '한국은행', 'name_en': 'Bank of Korea', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '기준금리', 'name_en': 'base interest rate', 'properties': {'value': 3.0, 'unit': 'percent', 'as_of': '2024-12'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'subject_uid': 'obj-1', 'predicate': 'base_rate_value', 'object_value': '3.0%', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2024-12']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
-    {'input': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다. 반도체 부문이 흑자로 전환했고, 디스플레이는 흑자가 축소되었다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성전자', 'name_en': 'Samsung Electronics', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '영업이익', 'name_en': 'operating profit', 'properties': {'value': 23, 'unit': '조원', 'period': '2023Q4'}}, {'uid': 'obj-3', 'class': 'knowledge', 'name': '반도체 부문', 'name_en': 'semiconductor segment', 'properties': {}}, {'uid': 'obj-4', 'class': 'knowledge', 'name': '디스플레이 부문', 'name_en': 'display segment', 'properties': {}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다.', 'subject_uid': 'obj-1', 'predicate': 'operating_profit', 'object_value': '23조원', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2023Q4']}, {'uid': 'fn-2', 'type': 'proposition', 'claim': '반도체 부문이 흑자로 전환했다.', 'subject_uid': 'obj-3', 'predicate': 'transition_to', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}, {'uid': 'fn-3', 'type': 'proposition', 'claim': '디스플레이는 흑자가 축소되었다.', 'subject_uid': 'obj-4', 'predicate': 'profit_change', 'object_value': '축소', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}, {'fact_uid': 'fn-2', 'object_uid': 'obj-3', 'link_type': 'describes_state', 'properties': {}}, {'fact_uid': 'fn-3', 'object_uid': 'obj-4', 'link_type': 'describes_state', 'properties': {}}], 'fact_fact_links': [{'from_uid': 'fn-2', 'to_uid': 'fn-1', 'link_type': 'supports'}, {'from_uid': 'fn-3', 'to_uid': 'fn-1', 'link_type': 'supports'}], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
-    {'input': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성', 'name_en': 'Samsung', 'properties': {'founded_year': 1938, 'country': 'Korea', 'type': 'conglomerate'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'subject_uid': 'obj-1', 'predicate': 'founded_year', 'object_value': '1938', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '1938', 'conglomerate']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [{'fact_uid': 'fn-1', 'mention_text': '삼성', 'candidate_object_uids': [], 'scores': []}], 'extraction_status': 'success', 'failure_reason': None}},
+    {'input': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '한국은행', 'name_en': 'Bank of Korea', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '기준금리', 'name_en': 'base interest rate', 'properties': {'value': 3.0, 'unit': 'percent', 'as_of': '2024-12'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'subject_uid': 'obj-1', 'predicate': '기준금리였다', 'object_value': '3.0%', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2024-12']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
+    {'input': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다. 반도체 부문이 흑자로 전환했고, 디스플레이는 흑자가 축소되었다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성전자', 'name_en': 'Samsung Electronics', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '영업이익', 'name_en': 'operating profit', 'properties': {'value': 23, 'unit': '조원', 'period': '2023Q4'}}, {'uid': 'obj-3', 'class': 'knowledge', 'name': '반도체 부문', 'name_en': 'semiconductor segment', 'properties': {}}, {'uid': 'obj-4', 'class': 'knowledge', 'name': '디스플레이 부문', 'name_en': 'display segment', 'properties': {}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다.', 'subject_uid': 'obj-1', 'predicate': '기록했다', 'object_value': '23조원', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2023Q4']}, {'uid': 'fn-2', 'type': 'proposition', 'claim': '반도체 부문이 흑자로 전환했다.', 'subject_uid': 'obj-3', 'predicate': '전환했다', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}, {'uid': 'fn-3', 'type': 'proposition', 'claim': '디스플레이는 흑자가 축소되었다.', 'subject_uid': 'obj-4', 'predicate': '축소되었다', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}, {'fact_uid': 'fn-2', 'object_uid': 'obj-3', 'link_type': 'describes_state', 'properties': {}}, {'fact_uid': 'fn-3', 'object_uid': 'obj-4', 'link_type': 'describes_state', 'properties': {}}], 'fact_fact_links': [{'from_uid': 'fn-2', 'to_uid': 'fn-1', 'link_type': 'supports'}, {'from_uid': 'fn-3', 'to_uid': 'fn-1', 'link_type': 'supports'}], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
+    {'input': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성', 'name_en': 'Samsung', 'properties': {'founded_year': 1938, 'country': 'Korea', 'type': 'conglomerate'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'subject_uid': 'obj-1', 'predicate': '설립되었다', 'object_value': '1938년', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '1938', 'conglomerate']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [{'fact_uid': 'fn-1', 'mention_text': '삼성', 'candidate_object_uids': [], 'scores': []}], 'extraction_status': 'success', 'failure_reason': None}},
 ]
 
 
