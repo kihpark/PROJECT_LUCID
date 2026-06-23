@@ -79,11 +79,69 @@ describe('toast polling', () => {
     __test__.renderInitial('pending_extract', 'job-y', undefined);
     __test__.startPolling('job-y');
 
-    await vi.advanceTimersByTimeAsync(61_000);
+    // feat/capture-complete-toast: window is now ~180 s (30 fast
+    // ticks at 1 s + 50 slow ticks at 3 s). Advance past the cap.
+    await vi.advanceTimersByTimeAsync(181_000);
     await vi.runOnlyPendingTimersAsync();
 
     const status = document.querySelector('.lucid-toast-status');
     expect(status?.textContent).toMatch(/처리 지연/);
+  });
+
+  it('does not surrender to 처리 지연 inside the 60 s legacy window', async () => {
+    // feat/capture-complete-toast regression guard: pre-fix users
+    // saw 처리 지연 at 60 s even when structure finished at 90 s.
+    // The widened window must NOT fire 처리 지연 before ~3 min.
+    vi.useFakeTimers();
+    chrome.runtime.sendMessage.mockResolvedValue({
+      ok: true,
+      body: { status: 'structuring' },
+    });
+
+    __test__.renderInitial('pending_extract', 'job-window', undefined);
+    __test__.startPolling('job-window');
+
+    await vi.advanceTimersByTimeAsync(90_000); // 90 s of polling
+    await vi.runOnlyPendingTimersAsync();
+
+    const status = document.querySelector('.lucid-toast-status');
+    expect(status?.textContent).not.toMatch(/처리 지연/);
+    expect(status?.textContent).toMatch(/분석 중/);
+  });
+
+  it('escalates a structured terminal to a system notification via the SW', async () => {
+    vi.useFakeTimers();
+    chrome.runtime.sendMessage.mockImplementation((msg: { type: string }) => {
+      if (msg.type === 'get_job_status') {
+        return Promise.resolve({ ok: true, body: { status: 'structured' } });
+      }
+      if (msg.type === 'get_structured_summary') {
+        return Promise.resolve({
+          ok: true,
+          summary: { fact_count: 4, object_count: 2, has_disambiguation: false },
+        });
+      }
+      if (msg.type === 'announce_terminal') {
+        return Promise.resolve({ ok: true });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    __test__.renderInitial('pending_extract', 'job-announce', undefined);
+    __test__.startPolling('job-announce');
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.runOnlyPendingTimersAsync();
+
+    const announce = chrome.runtime.sendMessage.mock.calls.find(
+      (call: unknown[]) => (call[0] as { type?: string })?.type === 'announce_terminal',
+    );
+    expect(announce).toBeDefined();
+    expect(announce?.[0]).toMatchObject({
+      type: 'announce_terminal',
+      job_id: 'job-announce',
+      status: 'structured',
+      fact_count: 4,
+    });
   });
 });
 

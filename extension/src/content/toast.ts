@@ -28,8 +28,17 @@
  */
 
 const WEB_BASE = 'http://localhost:3000';
-const POLL_INTERVAL_MS = 1000;
-const POLL_MAX_ATTEMPTS = 60;
+// feat/capture-complete-toast: extend the polling window so slow
+// structure-stage runs (multi-object Korean articles can take 60–120 s
+// when entity resolution fans out per object) still resolve to "분석
+// 완료" instead of "처리 지연". Step-down schedule: fast for the
+// median path, then slow tail polling out to ~3 min total. The
+// "처리 지연" fallback still fires after the full window — it's just
+// a true-stuck signal now rather than a Claude-API-latency artifact.
+const POLL_INTERVAL_FAST_MS = 1000;
+const POLL_INTERVAL_SLOW_MS = 3000;
+const POLL_FAST_ATTEMPTS = 30; // 30 s of fast polling
+const POLL_MAX_ATTEMPTS = 80;  // + 50 × 3 s = 150 s; total ~180 s
 const FADE_OUT_MS = 12000;
 
 type Status =
@@ -179,13 +188,25 @@ function makeReviewLink(jobId: string): HTMLButtonElement {
   btn.type = 'button';
   btn.className = 'lucid-toast-link';
   btn.textContent = '검토하기 →';
-  btn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({
-      type: 'open_review',
-      job_id: jobId,
-    }).catch(() => {});
-    // Fall-through: also open directly in case the SW message fails.
-    window.open(`${WEB_BASE}/pending/${jobId}`, '_blank');
+  btn.addEventListener('click', async () => {
+    // feat/capture-complete-toast: prefer the SW route (focuses the
+    // existing Lucid tab instead of piling up new ones); only fall
+    // back to window.open if the SW route reports failure or is
+    // unreachable. Pre-fix BOTH routes ran every click which spawned
+    // duplicate /pending tabs.
+    let opened = false;
+    try {
+      const resp = (await chrome.runtime.sendMessage({
+        type: 'open_review',
+        job_id: jobId,
+      })) as { ok?: boolean } | undefined;
+      opened = !!resp?.ok;
+    } catch {
+      opened = false;
+    }
+    if (!opened) {
+      window.open(`${WEB_BASE}/pending/${jobId}`, '_blank');
+    }
   });
   return btn;
 }
@@ -271,6 +292,10 @@ async function updateFromStatus(body: JobStatusBody, jobId: string): Promise<voi
     wrapper.appendChild(makeReviewLink(jobId));
     setDetail(wrapper);
     stopPolling();
+    // feat/capture-complete-toast: escalate to system notification
+    // so a backgrounded tab (where Chrome throttles or hides the
+    // in-page toast) still sees "분석 완료".
+    announceTerminal(jobId, 'structured', factCount);
     scheduleFadeOut();
   } else if (
     status === 'extract_failed'
@@ -279,24 +304,56 @@ async function updateFromStatus(body: JobStatusBody, jobId: string): Promise<voi
     setStatusText('저장 실패', true);
     setDetail(body.error_message || 'Pending Queue 에서 확인하세요.');
     stopPolling();
+    announceTerminal(jobId, status, null);
     scheduleFadeOut();
   } else {
     renderInitial(status, jobId, undefined);
   }
 }
 
-function startPolling(jobId: string): void {
-  stopPolling();
-  attempts = 0;
-  pollTimer = window.setInterval(async () => {
-    attempts++;
-    if (attempts > POLL_MAX_ATTEMPTS) {
-      stopPolling();
-      setStatusText('처리 지연');
-      setDetail('Pending Queue 에서 최신 상태를 확인하세요.');
-      scheduleFadeOut();
-      return;
-    }
+/**
+ * Ask the service worker to fire a system notification when a
+ * terminal status is observed. Best-effort — the SW handler
+ * silently no-ops if the `notifications` permission is missing.
+ * This is the only out-of-tab feedback path for users who have
+ * switched tabs (and so Chrome has throttled the content script).
+ */
+function announceTerminal(
+  jobId: string,
+  status: Status,
+  factCount: number | null,
+): void {
+  try {
+    chrome.runtime.sendMessage({
+      type: 'announce_terminal',
+      job_id: jobId,
+      status,
+      fact_count: factCount,
+    }).catch(() => {});
+  } catch {
+    // SW may be momentarily unreachable — ignore.
+  }
+}
+
+function pollTick(jobId: string): void {
+  attempts++;
+  if (attempts > POLL_MAX_ATTEMPTS) {
+    stopPolling();
+    setStatusText('처리 지연');
+    setDetail('Pending Queue 에서 최신 상태를 확인하세요.');
+    scheduleFadeOut();
+    return;
+  }
+  // Step down to a slower cadence after the fast-poll budget is
+  // exhausted, so a slow structure stage isn't an API hammer.
+  if (attempts === POLL_FAST_ATTEMPTS && pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = window.setInterval(
+      () => pollTick(jobId),
+      POLL_INTERVAL_SLOW_MS,
+    );
+  }
+  (async () => {
     try {
       const resp = (await chrome.runtime.sendMessage({
         type: 'get_job_status',
@@ -310,7 +367,16 @@ function startPolling(jobId: string): void {
       // swallow transient failures; keep polling until attempts cap.
       console.debug('[lucid] poll failed', err);
     }
-  }, POLL_INTERVAL_MS);
+  })();
+}
+
+function startPolling(jobId: string): void {
+  stopPolling();
+  attempts = 0;
+  pollTimer = window.setInterval(
+    () => pollTick(jobId),
+    POLL_INTERVAL_FAST_MS,
+  );
 }
 
 function onShowToast(msg: ShowToastMessage): void {
