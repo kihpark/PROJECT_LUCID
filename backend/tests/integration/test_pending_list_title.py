@@ -164,10 +164,11 @@ def test_pending_list_falls_back_to_hostname_when_title_missing(client, auth_con
     assert item["hostname"] == "n.news.naver.com"
 
 
-def test_pending_list_falls_back_to_placeholder_when_url_unparseable(client, auth_context):
-    """Final fallback: neither title nor a parseable URL is available.
-    The endpoint must return the localized placeholder rather than
-    serializing None / an empty string (Pydantic would otherwise 500)."""
+def test_pending_list_uses_unparseable_url_string_as_last_resort(client, auth_context):
+    """When the URL has no scheme `urlparse` returns `hostname=None`;
+    we fall back to the URL string itself so the card is never empty
+    nor a literal "None". Title and hostname end up the same — the
+    UI still has *something* to render."""
     headers, user_id, space_id = auth_context
     job_id = _seed_job(
         user_id,
@@ -179,8 +180,30 @@ def test_pending_list_falls_back_to_placeholder_when_url_unparseable(client, aut
     resp = client.get(f"/api/spaces/{space_id}/pending", headers=headers)
     assert resp.status_code == 200, resp.text
     item = _find_item(resp.json()["items"], job_id)
-    assert item["title"] == "(제목 없음)"
+    # Both title and hostname collapse to the raw URL string — better
+    # than None / "(제목 없음)" since the user can still tell rows apart.
+    assert item["title"] == "not-a-real-url"
     assert item["hostname"] == "not-a-real-url"
+
+
+def test_resolve_title_returns_placeholder_when_everything_empty():
+    """Unit-level final-fallback check: when both metadata and hostname
+    are empty, `_resolve_title` returns the localized placeholder.
+    Lives next to the integration tests because it pins the same
+    contract; running it via pytest is cheaper than spinning up a
+    TestClient just to verify the last branch."""
+    from api.routes.validate import _resolve_title
+
+    class _Stub:
+        extracted_metadata = {}
+
+    assert _resolve_title(_Stub(), "") == "(제목 없음)"
+
+    class _StubBody:
+        extracted_metadata = {"body": "First line of body.\nSecond line."}
+
+    # Body fallback: first line, no trailing newline.
+    assert _resolve_title(_StubBody(), "") == "First line of body."
 
 
 def test_pending_list_prefers_metadata_title_over_og_title(client, auth_context):
