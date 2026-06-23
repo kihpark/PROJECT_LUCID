@@ -188,6 +188,13 @@ def match_or_create_object(
                 space_id=knowledge_space_id,
                 co_mention_en=llm_name_en,
                 llm_name=candidate_name,
+                # feat/entity-layer-restore (PO 2026-06-23): thread the
+                # LLM-classified ObjectClass into the resolver so the
+                # create path writes `class` + `entity_type` and the
+                # lookup path can backfill stale "concept" defaults on
+                # existing docs. The string value is the StrEnum's
+                # underlying value ("person", "organization", ...).
+                entity_class=candidate_class.value,
             )
         except Exception as exc:  # noqa: BLE001 - matcher must never raise out
             logger.warning(
