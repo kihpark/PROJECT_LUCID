@@ -52,6 +52,51 @@ def test_lucid_objects_has_nested_connected_objects():
     assert "link_type" in inner
 
 
+def test_lucid_facts_has_entity_layer_fields():
+    """feat/mappings-sync-permanent (2026-06-23): codify B-62 entity-
+    layer fields on lucid_facts. Without these declarations, the next
+    fresh-index create would reproduce the strict_dynamic_mapping_exception
+    that crashed every bulk_create_facts call on PO's dev ES.
+    """
+    props = LUCID_FACTS_MAPPING["mappings"]["properties"]
+    for must_have in (
+        # spo-decide-payload-wire (this PR)
+        "subject_label",
+        "object_label",
+        "predicate_violation",
+        # earlier B-62 natural-spo / structure-resolve fields the
+        # runtime put_mapping also patched (already declared in file,
+        # asserted here so regressions surface immediately):
+        "predicate_code",
+        "predicate_label",
+        "original_surface",
+        "capture_lang",
+        "tags",
+        "canonical_key",
+        "object_canonical",
+        "needs_review",
+    ):
+        assert must_have in props, f"missing {must_have} on lucid_facts"
+    # Type sanity on the three new fields:
+    assert props["subject_label"]["type"] == "keyword"
+    assert props["object_label"]["type"] == "keyword"
+    assert props["predicate_violation"]["type"] == "boolean"
+
+
+def test_lucid_objects_has_entity_layer_fields():
+    """feat/mappings-sync-permanent (2026-06-23): codify B-62 entity-
+    layer fields on lucid_objects (`primary_label` + `primary_lang`).
+    """
+    props = LUCID_OBJECTS_MAPPING["mappings"]["properties"]
+    for must_have in (
+        "primary_label",
+        "primary_lang",
+        "entity_type",
+    ):
+        assert must_have in props, f"missing {must_have} on lucid_objects"
+    assert props["primary_lang"]["type"] == "keyword"
+
+
 def test_lucid_sources_minimal_shape():
     props = LUCID_SOURCES_MAPPING["mappings"]["properties"]
     for must_have in (
