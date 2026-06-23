@@ -314,8 +314,11 @@ describe('FactCard — structured S/P/O editor (B-34)', () => {
         onChange={onChange}
       />,
     );
+    // decide-frontend-prefer-name: preview surfaces the backend-corrected
+    // primary name (obj.name) regardless of UI lang. Previously asserted
+    // the English alias (obj.name_en).
     expect(screen.getByTestId('fact-edit-preview-fn-1')).toHaveTextContent(
-      /Seoul FX Market Operations Council\s*\|\s*will_replace\s*\|\s*jobs/,
+      /서울외환시장운영협의회\s*\|\s*will_replace\s*\|\s*jobs/,
     );
   });
 });
@@ -338,7 +341,13 @@ describe('FactCard — entity label resolution (B-27 + B-31 regression)', () => 
     expect(screen.getByTestId('fact-subject')).not.toHaveTextContent('obj-1');
   });
 
-  it('resolves subject_uid to name_en in EN mode', () => {
+  it('resolves subject_uid to the backend-corrected name even when lang=en (decide-frontend-prefer-name)', () => {
+    // decide-frontend-prefer-name: the backend (feat/spo-decide-payload-wire)
+    // places the source-language corrected surface in obj.name. The Decide UI
+    // must surface that — not the LLM-raw name_en alias — regardless of UI
+    // lang. Previously this test asserted the English name_en, which masked
+    // the correction (e.g. "Ministry of Commerce of China" displayed instead
+    // of the corrected "중국 상무부").
     const onChange = vi.fn();
     render(
       <FactCard
@@ -350,6 +359,9 @@ describe('FactCard — entity label resolution (B-27 + B-31 regression)', () => 
       />,
     );
     expect(screen.getByTestId('fact-subject')).toHaveTextContent(
+      '서울외환시장운영협의회',
+    );
+    expect(screen.getByTestId('fact-subject')).not.toHaveTextContent(
       'Seoul FX Market Operations Council',
     );
   });
@@ -748,8 +760,10 @@ describe('FactCard — decide-ux-fix #3: 저장 button', () => {
       />,
     );
     fireEvent.click(screen.getByTestId('fact-save-fn-1'));
-    // Edited values surface in the read-only dl
-    expect(screen.getByTestId('fact-subject')).toHaveTextContent('operating hours');
+    // Edited values surface in the read-only dl. decide-frontend-prefer-name:
+    // backend-corrected obj.name ("운영시간") wins over obj.name_en
+    // ("operating hours") regardless of UI lang.
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('운영시간');
     expect(screen.getByTestId('fact-predicate')).toHaveTextContent('may_replace');
   });
 
@@ -1090,6 +1104,96 @@ describe('FactCard - decide-ux-v3: autocomplete LIVE path', () => {
     await new Promise((r) => setTimeout(r, 250));
     const calls1 = (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(calls1).toBe(calls0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// decide-frontend-prefer-name — backend-corrected name precedence
+// ---------------------------------------------------------------------------
+// PO observed: a captured Korean article had perfect Korean in objects.name
+// ("중국 상무부") but the Decide UI displayed the LLM-raw English
+// ("Ministry of Commerce of China"). Root cause: resolveEntity's
+// `lang === 'en'` branch returned obj.name_en, defeating the backend's
+// _match_object correction. The content language is the source language;
+// obj.name is always the primary surface. obj.name_en is at best a fallback.
+// ---------------------------------------------------------------------------
+describe('FactCard - decide-frontend-prefer-name: prefer backend-corrected name', () => {
+  it('prefers obj.name over obj.name_en for Korean entities even when lang=en', () => {
+    const onChange = vi.fn();
+    const fact: FactSummary = {
+      ...baseFact,
+      subject_uid: 'obj-mocchina',
+      predicate: 'restricted_export_of',
+      object_value: 'gallium',
+    };
+    const objects: ObjectSummary[] = [
+      {
+        uid: 'obj-mocchina',
+        class: 'organization',
+        name: '중국 상무부',
+        name_en: 'Ministry of Commerce of China',
+        properties: {},
+      },
+    ];
+    render(
+      <FactCard
+        fact={fact}
+        objects={objects}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('중국 상무부');
+    expect(screen.getByTestId('fact-subject')).not.toHaveTextContent(
+      'Ministry of Commerce of China',
+    );
+  });
+
+  it('falls back to obj.name_en when obj.name is empty', () => {
+    const onChange = vi.fn();
+    const fact: FactSummary = {
+      ...baseFact,
+      subject_uid: 'obj-openai',
+    };
+    const objects: ObjectSummary[] = [
+      {
+        uid: 'obj-openai',
+        class: 'organization',
+        name: '',
+        name_en: 'OpenAI',
+        properties: {},
+      },
+    ];
+    render(
+      <FactCard
+        fact={fact}
+        objects={objects}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('OpenAI');
+  });
+
+  it('still shows the (미해석)/(unresolved) marker when obj-N has no match in objects', () => {
+    // Regression guard for the lang parameter's remaining role: the marker
+    // micro-strings ("(unresolved)" vs "(미해석)") still toggle on lang;
+    // only the entity-surface choice no longer does.
+    const onChange = vi.fn();
+    const fact: FactSummary = { ...baseFact, subject_uid: 'obj-77' };
+    render(
+      <FactCard
+        fact={fact}
+        objects={[]}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('obj-77');
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('(unresolved)');
   });
 });
 

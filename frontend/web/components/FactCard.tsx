@@ -63,8 +63,16 @@ function resolveEntity(
   if (!value) return '—';
   const obj = labelMap.get(value);
   if (obj) {
-    if (lang === 'en' && obj.name_en) return obj.name_en;
-    return obj.name;
+    // decide-frontend-prefer-name: prefer the backend-corrected primary
+    // surface (obj.name). Per feat/spo-decide-payload-wire, the backend
+    // places the source-language verbatim surface here, including the
+    // _match_object correction. The previous `lang === 'en'` branch
+    // returned the LLM-raw name_en alias and masked that correction
+    // (e.g. displaying "Ministry of Commerce of China" instead of
+    // the corrected "중국 상무부"). name_en stays a valid fallback when
+    // name is empty, and remains in ObjectSummary for cross-lingual
+    // search consumers.
+    return obj.name || obj.name_en || value;
   }
   if (OBJECT_REF_PATTERN.test(value)) {
     return lang === 'en' ? `${value} (unresolved)` : `${value} (미해석)`;
