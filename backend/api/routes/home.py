@@ -372,11 +372,16 @@ def home_brief(
     # every request, so cache-busting on the response keeps the client
     # honest. `no-store` defeats the browser disk cache; `Pragma`
     # covers older proxies.
-    response.headers["Cache-Control"] = (
-        "no-store, no-cache, must-revalidate, max-age=0"
-    )
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
+    # Defensive: tests call this route as a plain function (no FastAPI
+    # dependency injection), so `response` can arrive as None. Skip the
+    # header writes in that case — they're a UX defense for browsers,
+    # not part of the response model.
+    if response is not None:
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
 
     return HomeBrief(
         totals=totals,

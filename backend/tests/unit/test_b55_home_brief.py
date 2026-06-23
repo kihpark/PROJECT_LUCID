@@ -127,7 +127,7 @@ def test_home_brief_empty_ks_returns_is_empty_true():
     ), patch(
         "api.routes.home.get_client", return_value=fake_client,
     ):
-        result = home_brief(space_id=None, user=user)
+        result = home_brief(response=None, space_id=None, user=user)
 
     assert result.is_empty is True
     assert result.totals.facts == 0
@@ -229,7 +229,7 @@ def test_home_brief_populated_returns_real_shape():
     ), patch(
         "api.routes.home.get_client", return_value=fake_client,
     ):
-        result = home_brief(space_id=None, user=user)
+        result = home_brief(response=None, space_id=None, user=user)
 
     assert result.is_empty is False
     assert result.totals.facts == 42
@@ -288,7 +288,7 @@ def test_home_brief_uses_space_id_query_param():
     ), patch(
         "api.routes.home.get_client", return_value=fake_client,
     ):
-        result = home_brief(space_id=target_ks_id, user=user)
+        result = home_brief(response=None, space_id=target_ks_id, user=user)
 
     # Sanity: result rendered against target_ks (counters zero — empty),
     # and the default-chain was NOT consulted (first() never called).
@@ -318,7 +318,7 @@ def test_home_brief_404_on_unknown_space():
         "api.routes.home._new_session", return_value=session,
     ):
         with pytest.raises(HTTPException) as exc:
-            home_brief(space_id=uuid4(), user=user)
+            home_brief(response=None, space_id=uuid4(), user=user)
 
     assert exc.value.status_code == 404
 
@@ -341,7 +341,7 @@ def test_home_brief_403_on_other_user_space():
         "api.routes.home._new_session", return_value=session,
     ):
         with pytest.raises(HTTPException) as exc:
-            home_brief(space_id=foreign_ks_id, user=user)
+            home_brief(response=None, space_id=foreign_ks_id, user=user)
 
     assert exc.value.status_code == 403
 
@@ -371,7 +371,7 @@ def test_home_brief_degrades_to_zero_on_es_failure():
     ), patch(
         "api.routes.home.get_client", return_value=fake_client,
     ):
-        result = home_brief(space_id=None, user=user)
+        result = home_brief(response=None, space_id=None, user=user)
 
     assert result.is_empty is True
     assert result.totals.facts == 0
