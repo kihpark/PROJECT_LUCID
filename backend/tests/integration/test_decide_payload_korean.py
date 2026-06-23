@@ -199,12 +199,50 @@ def test_decide_payload_spacex_preserves_english_brand() -> None:
     "English stays English" case (verbatim substring of source AND
     brand-shaped). The Decide UI must see 'SpaceX', not some Korean
     fallback.
+
+    Note: feat/spo-decomp-completeness now runs a content-token coverage
+    check inside _serialize_struct_fact. To keep this test's
+    needs_review=False contract (which proves no anglicization / brand
+    violation fired), the mock decomp's SPO must cover the claim's
+    content tokens — otherwise the completeness validator legitimately
+    flags it (a separate concern from the brand-anglicization rule).
     """
     claim = "SpaceX는 보통주를 매각해 750억달러를 조달했다."
-    decomp = _decomp_anglicized_subject(
-        claim=claim,
-        llm_name="SpaceX",
-        name_en="SpaceX",
+    # SPO that covers the claim — predicate carries the verb phrase,
+    # object carries the value. This isolates the brand-anglicization
+    # path from the completeness path; we're only testing the former.
+    decomp = StructureResult(
+        objects=[
+            StructureObject(
+                uid="obj-1",
+                **{"class": ObjectClass.ORGANIZATION.value},
+                name="SpaceX",
+                name_en="SpaceX",
+            ),
+        ],
+        facts=[
+            StructureFact(
+                uid="fn-1",
+                **{"type": "proposition"},
+                claim=claim,
+                subject_uid="obj-1",
+                subject_surface="SpaceX",
+                predicate="보통주를 매각해 조달했다",
+                object_value="750억달러",
+            ),
+        ],
+        fact_object_links=[
+            StructureFactObjectLink(
+                fact_uid="fn-1", object_uid="obj-1",
+                link_type="involves", properties={},
+            ),
+        ],
+        fact_fact_links=[],
+        disambiguation_candidates=[],
+        extraction_status="success",
+        failure_reason=None,
+        model_used="claude-sonnet-4-5",
+        latency_ms=100,
     )
     structure = _drive_pipeline(decomp, claim)
 
@@ -214,5 +252,5 @@ def test_decide_payload_spacex_preserves_english_brand() -> None:
     # subject_label reflects same — no spurious Korean rewrite.
     assert facts[0]["subject_label"] == "SpaceX"
     # And needs_review is False because there is no violation
-    # (substring + brand-shape both exempt).
+    # (substring + brand-shape both exempt) AND completeness covers.
     assert facts[0]["needs_review"] is False

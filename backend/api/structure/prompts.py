@@ -134,6 +134,37 @@ Run these IN ORDER on the input text:
           "imposed_export_control_on", "announces_export_control") 출력
           금지. 한국어 기사면 한국어 동사구만, 영어 기사면 영어만.
 
+          RULE — 완전성 (PO 2026-06-23, decomp-completeness):
+
+          각 fact 의 subject, predicate, object 가 **합쳐서 원문 문장의
+          핵심 의미를 보존**해야 합니다. 핵심 명사·수식구가 셋 중 어디에도
+          안 들어가면 분해 부실입니다.
+
+            - predicate = **의미적으로 완전한 술어구** (동사만 자르지 마세요)
+              "10곳을 수출통제 대상에 올렸다" → predicate = "수출통제 대상에 올렸다"
+              NOT "올렸다" (수식·목적구 누락)
+
+            - object = **완전한 명사구** (빈약 토막 아님)
+              "미국 기업 10곳을" → object = "미국 기업 10곳"
+              NOT "10곳" (수식어 누락)
+
+            - 의미 변형·요약 금지. 원문에 있는 단어만 사용.
+              자르기만, 내용 추가 금지.
+
+          원칙: subject + predicate + object 텍스트를 합치면 원문의 핵심을
+          누락 없이 담아야 합니다. 동사 하나, 명사 한 토막으로 줄이지 마세요.
+
+          예 1:
+            source: "중국 정부가 미국 기업 10곳을 수출통제 대상에 올렸다."
+              OK    S="중국 정부", P="수출통제 대상에 올렸다", O="미국 기업 10곳"
+              NOT   S="중국",       P="올렸다",                 O="10곳"
+          예 2:
+            source: "중국 정부가 미국 방산·드론·희토류 관련 기업에 대한
+                     추가 제재에 나섰다."
+              OK    S="중국 정부", P="추가 제재에 나섰다",
+                    O="미국 방산·드론·희토류 관련 기업"
+              NOT   S="중국",       P="제재",                   O="추가 제재"
+
           One example to anchor the rule:
             source: "SpaceX는 750억달러를 조달했다."
               OK    "predicate":"조달했다", "object_value":"750억달러"
