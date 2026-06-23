@@ -57,6 +57,17 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+# feat/selection-save-backstop: when the chrome extension's
+# selection-save action ships a real-text selection in
+# client_metadata, the URL-extractor chain (trafilatura, readability,
+# newspaper3k) is BYPASSED entirely. The selection text is
+# authoritative — "보이는 화면 = 만능 백스톱". 50 chars is the floor;
+# below that the selection is too short to be a meaningful capture
+# and we fall through to the standard extractor (which may still
+# succeed via per-host selectors or readability).
+_SELECTION_MIN_CHARS = 50
+
+
 def _build_metadata(job: SourceJobORM) -> dict[str, Any]:
     """Translate the SourceJob row into the metadata dict the extractors expect."""
     meta: dict[str, Any] = {
@@ -114,6 +125,16 @@ def process_source_job(job_id: uuid.UUID | str) -> None:
         raw = decompress_payload(compressed)
         metadata = _build_metadata(job)
 
+        # feat/selection-save-backstop: selection_text in client_metadata
+        # short-circuits the entire extractor chain. This is the only
+        # path that survives when the URL extractor would fail (newsis
+        # JS-rendered SPA, CSP-locked pages, paywalls). We synthesize
+        # an ExtractResult inline from the selection text + page title
+        # and skip straight to _record_success → structure dispatch.
+        if _try_selection_bypass(session, job, metadata):
+            _enqueue_structure_async(job.id)
+            return
+
         try:
             source_type = SourceType(job.source_type)
         except ValueError:
@@ -152,6 +173,88 @@ def process_source_job(job_id: uuid.UUID | str) -> None:
 
     finally:
         session.close()
+
+
+def _detect_language_bypass(text: str) -> str:
+    """Lightweight language sniff for selection-bypass results.
+
+    Mirrors the heuristic in `HighlightedTextExtractor` (which we do
+    NOT call here because the whole point of the bypass is to skip
+    the extractor abstraction). Keeps the dependency surface small.
+    """
+    if not text:
+        return "mixed"
+    hangul = sum(1 for c in text if "가" <= c <= "힣")
+    latin = sum(1 for c in text if c.isascii() and c.isalpha())
+    total = hangul + latin
+    if total == 0:
+        return "mixed"
+    ratio = hangul / total
+    if ratio > 0.85:
+        return "ko"
+    if ratio < 0.05:
+        return "en"
+    return "mixed"
+
+
+def _hostname_for(url: str | None) -> str:
+    """Hostname for use as a fallback title when no page_title was sent."""
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc
+        return host or ""
+    except (ValueError, TypeError):
+        return ""
+
+
+def _try_selection_bypass(
+    session: Any, job: SourceJobORM, metadata: dict[str, Any],
+) -> bool:
+    """If the selection text is present and >= 50 chars, build an
+    ExtractResult inline and record success. Returns True when the
+    bypass fired (caller must NOT continue down the extractor path).
+
+    Implementation notes:
+      - `selection_text` is the ONLY trigger. `capture_mode` is also
+        sent by the extension but the floor on text length already
+        gates accidental click-drags, so we don't double-check.
+      - The selection text is normalized (.strip()) before length
+        check and ExtractResult construction — leading/trailing
+        whitespace from chrome's selection API would otherwise inflate
+        the count by 1-2 chars and produce a sloppy body.
+      - HTML tags inside the selection are NOT stripped here: chrome's
+        `info.selectionText` already returns text-only (no tags) for
+        the user-visible selection. If a future caller posts raw HTML
+        we'll need a sanitizer step, but that's not in scope for this
+        PR.
+    """
+    selection_text = (metadata.get("selection_text") or "").strip()
+    if len(selection_text) < _SELECTION_MIN_CHARS:
+        return False
+
+    page_title = (metadata.get("page_title") or "").strip()
+    if not page_title:
+        page_title = _hostname_for(metadata.get("source_url")) or "(선택 영역)"
+
+    result = ExtractResult(
+        merged_text=selection_text,
+        title=page_title,
+        language=_detect_language_bypass(selection_text),  # type: ignore[arg-type]
+        extracted_metadata={
+            "capture_mode": "selection",
+            "extractor": "selection-bypass",
+            "selection_length": len(selection_text),
+            "source_url": metadata.get("source_url"),
+        },
+    )
+    logger.info(
+        "process_source_job: job %s selection-bypass fired (%d chars, url=%s)",
+        job.id, len(selection_text), metadata.get("source_url"),
+    )
+    _record_success(session, job, result)
+    return True
 
 
 def _record_success(

@@ -95,6 +95,45 @@ def _resolve_policy(session: Session, user: User, source_url: str) -> str:
     return row.policy if row is not None else "careful"
 
 
+# feat/selection-save-backstop: minimum selection length below which
+# we still defer to URL extraction. Below 50 chars selection is
+# probably an accidental click-drag (one word, a phone number) and
+# would produce a low-signal capture. Above 50 chars the user
+# meaningfully selected something — trust them.
+_SELECTION_MIN_CHARS = 50
+
+_TERMINAL_FAILED_STATUSES = frozenset({
+    SourceStatus.EXTRACT_FAILED.value,
+    SourceStatus.STRUCTURE_FAILED.value,
+})
+
+
+def _selection_overrides_failed(req: "CaptureRequest", existing: SourceJobORM) -> bool:
+    """Return True when an explicit selection-save should be allowed
+    to create a new job for a URL whose prior job failed.
+
+    Three conditions:
+      1. `existing.status` is in a terminal failure state.
+      2. The new request carries `client_metadata.capture_mode='selection'`.
+      3. The selection_text on the request is at least
+         `_SELECTION_MIN_CHARS` long.
+
+    All three must be true. Length is checked on the client_metadata
+    string (which equals the selection text on the wire); the
+    raw_payload_b64 is not re-decoded here — the processor will
+    enforce the same threshold before bypassing the extractor.
+    """
+    meta = req.client_metadata or {}
+    if meta.get("capture_mode") != "selection":
+        return False
+    selection_text = (meta.get("selection_text") or "").strip()
+    if len(selection_text) < _SELECTION_MIN_CHARS:
+        return False
+    if existing.status not in _TERMINAL_FAILED_STATUSES:
+        return False
+    return True
+
+
 def _enqueue_extract(job_id: uuid.UUID) -> None:
     """BackgroundTasks entry point — call the real processor.
 
@@ -136,6 +175,17 @@ def capture(
         # can route the user there instead of piling empty cards into
         # the queue. The (ii) re-analyse policy is deferred pending
         # PO sign-off.
+        #
+        # feat/selection-save-backstop exception: when a prior job for
+        # this URL is in a TERMINAL failure state (`extract_failed`
+        # or `structure_failed`) AND the new request is an explicit
+        # selection-save (`client_metadata.capture_mode == 'selection'`
+        # with a >= 50-char `selection_text`), let the new job through.
+        # This is the "보이는 화면 = 만능 백스톱" contract — the user's
+        # drag-selection always overrides a previously-failed URL
+        # extraction. Successful (extracted / structured) jobs still
+        # dedup; we never want a selection retry to clobber a working
+        # capture.
         existing = (
             session.query(SourceJobORM)
             .filter(
@@ -146,7 +196,7 @@ def capture(
             .order_by(SourceJobORM.created_at.desc())
             .first()
         )
-        if existing is not None:
+        if existing is not None and not _selection_overrides_failed(req, existing):
             logger.info(
                 "capture: duplicate suppressed user=%s ks=%s url=%s -> existing job %s",
                 user.id, ks.id, req.source_url, existing.id,
@@ -156,6 +206,11 @@ def capture(
                 status=SourceStatus(existing.status),
                 status_url=f"/api/jobs/{existing.id}",
                 duplicate=True,
+            )
+        if existing is not None:
+            logger.info(
+                "capture: selection backstop overrides failed job %s for url=%s",
+                existing.id, req.source_url,
             )
 
         policy = _resolve_policy(session, user, req.source_url)

@@ -188,6 +188,14 @@ function buildSyncPayload(
     // is rare (chrome://urls, transient sad-tab) and falls through
     // cleanly because we omit the key when empty.
     const pageTitle = (tab?.title ?? '').trim();
+    // feat/selection-save-backstop: explicit `capture_mode='selection'`
+    // + `selection_text` give the backend an unambiguous signal to
+    // (a) bypass the URL-extractor chain in `process_source_job`
+    // and (b) override the B-29 dedup so a prior failed page-save
+    // for the SAME URL does not swallow this selection retry.
+    // The selection text rides as both `raw_payload_b64` (preserves
+    // the pre-existing wire contract) AND `client_metadata.selection_text`
+    // (the new bypass key). They MUST match: tests assert it.
     return {
       source_url: url,
       source_type: 'highlighted_text',
@@ -196,6 +204,8 @@ function buildSyncPayload(
       client_metadata: {
         selection_range_start: '0',
         selection_range_end: String(selected.length),
+        selection_text: selected,
+        capture_mode: 'selection',
         ...(pageTitle ? { page_title: pageTitle } : {}),
       },
     };

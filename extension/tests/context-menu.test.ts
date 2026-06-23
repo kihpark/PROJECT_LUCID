@@ -279,6 +279,72 @@ describe('context-menu click — non-page items (regression)', () => {
     );
   });
 
+  // feat/selection-save-backstop: the selection payload MUST include
+  // both `selection_text` and `capture_mode='selection'` in
+  // client_metadata so the backend bypasses the URL-extractor chain
+  // entirely AND the dedup guard allows the retry for a URL whose
+  // prior page-save failed.
+  it('★ selection payload includes selection_text and capture_mode=selection', async () => {
+    stubAuth();
+    const fetchMock = stubCaptureOk('job-sel-3');
+
+    const longSelection =
+      '대선 후보의 발언 — 첫 번째 문장입니다. 두 번째 문장도 같이 드래그됐고, '
+      + '세 번째 문장도 본문의 핵심 주장입니다.';
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.selection,
+        pageUrl: 'https://www.newsis.com/view/NIS-XYZ',
+        selectionText: longSelection,
+      } as chrome.contextMenus.OnClickData,
+      {
+        id: 80,
+        url: 'https://www.newsis.com/view/NIS-XYZ',
+        title: 'PO 기사 헤드라인',
+      } as chrome.tabs.Tab,
+    );
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as { body: string }).body,
+    );
+    expect(body.source_type).toBe('highlighted_text');
+    expect(body.client_metadata.capture_mode).toBe('selection');
+    expect(body.client_metadata.selection_text).toBe(longSelection);
+    expect(body.client_metadata.page_title).toBe('PO 기사 헤드라인');
+    // executeScript MUST NOT fire — the rendered DOM is never read
+    // on the selection path; the backstop relies on the user's drag,
+    // not on the page DOM.
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  // The raw_payload_b64 path stays so existing
+  // HighlightedTextExtractor unit tests don't regress. We assert
+  // selection_text in client_metadata == decoded raw_payload_b64.
+  it('★ selection_text in client_metadata matches the decoded raw_payload_b64', async () => {
+    stubAuth();
+    const fetchMock = stubCaptureOk('job-sel-4');
+
+    const selection = '본문에서 드래그한 문장이 정확히 같은 바이트로 페이로드와 일치해야 합니다.';
+    await handleContextMenuClick(
+      {
+        menuItemId: MENU_IDS.selection,
+        pageUrl: 'https://example.com/x',
+        selectionText: selection,
+      } as chrome.contextMenus.OnClickData,
+      { id: 81, url: 'https://example.com/x' } as chrome.tabs.Tab,
+    );
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as { body: string }).body,
+    );
+    // UTF-8 decode the base64 payload and compare to selection_text.
+    const decoded = new TextDecoder().decode(
+      Uint8Array.from(atob(body.raw_payload_b64), (c) => c.charCodeAt(0)),
+    );
+    expect(decoded).toBe(selection);
+    expect(body.client_metadata.selection_text).toBe(selection);
+  });
+
   // B-45: the image capture now fetches the image bytes first and
   // ships them as `raw_payload_b64` so the backend has the snapshot
   // (not just a URL that may rot) AND so the vision extractor can
