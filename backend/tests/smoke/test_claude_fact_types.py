@@ -29,7 +29,7 @@ _KO_QUOTATION_ARTICLE = (
 
 _KO_PURE_ACTION_ARTICLE = (
     "중국 상무부는 22일 미국 군 관련 기업 10곳을 수출통제 관리 명단에 "
-    "올렸다고 발표했다."
+    "올렸다."
 )
 
 _KO_MIXED_ARTICLE = (
