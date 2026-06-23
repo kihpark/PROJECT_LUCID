@@ -80,6 +80,29 @@ function resolveLabel(value: string | undefined, label: string | null | undefine
   return value;
 }
 
+// feat/recall-card-original-claim — PO directive 7.
+// Legacy edited facts have `claim` persisted as the pipe-joined
+// "S | P | O" surface that FactCard.regenerateClaim() emits when the
+// user edits in Decide UI. PO wants the recall card title to show the
+// ORIGINAL sentence, not the pipe artefact. We can't recover the
+// original from the stored claim (it was overwritten), but we can:
+//   1. Detect the pipe-artefact shape so the card title doesn't pretend
+//      this string is a natural sentence; surface a small "(재구성됨)"
+//      marker so the user knows this card was edited and the original
+//      sentence is no longer the title.
+//   2. Fall through to the resolved S → P → O surface (which the same
+//      card already shows in its metadata strip below the title) so
+//      the user still sees something readable.
+// Going forward, Decide should stop overwriting `claim` with the pipe
+// surface — but that's a separate change; this is purely the display
+// repair PO asked for in directive 7.
+const PIPE_CLAIM_RE = /^[^|]+ \| [^|]+ \| [^|]+$/;
+
+function isReconstructedClaim(claim: string | null | undefined): boolean {
+  if (!claim) return false;
+  return PIPE_CLAIM_RE.test(claim.trim());
+}
+
 function MatchKindBadge({ kind }: { kind: 'embedding' | 'entity_link' | undefined }) {
   if (kind === 'entity_link') {
     return (
@@ -109,10 +132,21 @@ function RecallFactCard({
   const sourceUrls = fact.source_uids.filter((s) => s.startsWith('http'));
   const subjectDisplay = resolveLabel(fact.subject_uid, fact.subject_label);
   const objectDisplay = resolveLabel(fact.object_value, fact.object_label);
+  // feat/recall-card-original-claim — PO directive 7.
+  // Prefer the original claim verbatim; if `claim` is missing or is the
+  // legacy pipe artefact, fall back to a natural S → P → O surface and
+  // flag the card with a "재구성됨" marker so the user understands the
+  // title is not the original sentence.
+  const claimText = (fact.claim ?? '').trim();
+  const reconstructed = !claimText || isReconstructedClaim(claimText);
+  const titleText = reconstructed
+    ? `${subjectDisplay} → ${predicateLabel(fact.predicate, fact.predicate_label)} → ${objectDisplay}`
+    : claimText;
   return (
     <article
       data-testid={`recall-fact-${fact.fact_uid}`}
       data-match-kind={fact.match_kind ?? 'embedding'}
+      data-claim-reconstructed={reconstructed ? 'true' : 'false'}
       className="rounded-lg border border-border-subtle bg-bg-card p-4 mb-3"
     >
       <header className="flex items-center justify-between mb-2">
@@ -133,10 +167,30 @@ function RecallFactCard({
           className="text-left text-base mb-3 hover:underline"
           lang="ko"
         >
-          {fact.claim}
+          {titleText}
+          {reconstructed && (
+            <span
+              data-testid={`recall-fact-${fact.fact_uid}-reconstructed`}
+              className="ml-2 italic text-xxs font-mono text-text-muted"
+              title="원문이 보존되지 않은 편집 사실 — 주체·술어·객체로 재구성"
+            >
+              (재구성됨)
+            </span>
+          )}
         </button>
       ) : (
-        <p className="text-base mb-3" lang="ko">{fact.claim}</p>
+        <p className="text-base mb-3" lang="ko">
+          {titleText}
+          {reconstructed && (
+            <span
+              data-testid={`recall-fact-${fact.fact_uid}-reconstructed`}
+              className="ml-2 italic text-xxs font-mono text-text-muted"
+              title="원문이 보존되지 않은 편집 사실 — 주체·술어·객체로 재구성"
+            >
+              (재구성됨)
+            </span>
+          )}
+        </p>
       )}
       <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-2 mb-3">
         <div>
@@ -397,13 +451,39 @@ function FactDetailModal({
           <p className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-2">
             Fact 상세
           </p>
-          <p
-            data-testid="fact-detail-claim"
-            className="text-xl leading-relaxed font-medium"
-            lang="ko"
-          >
-            {fact.claim}
-          </p>
+          {/* feat/recall-card-original-claim — same pipe-artefact repair
+              as the recall card title; the detail hero is the same surface
+              from the user's POV. */}
+          {(() => {
+            const claimText = (fact.claim ?? '').trim();
+            const reconstructed = !claimText || isReconstructedClaim(claimText);
+            const subjectName =
+              subject?.name ?? fact.subject_label ?? fact.subject_uid;
+            const objectName =
+              object?.name ?? fact.object_label ?? fact.object_value;
+            const titleText = reconstructed
+              ? `${subjectName} → ${predicateLabel(fact.predicate)} → ${objectName}`
+              : claimText;
+            return (
+              <p
+                data-testid="fact-detail-claim"
+                data-claim-reconstructed={reconstructed ? 'true' : 'false'}
+                className="text-xl leading-relaxed font-medium"
+                lang="ko"
+              >
+                {titleText}
+                {reconstructed && (
+                  <span
+                    data-testid="fact-detail-claim-reconstructed"
+                    className="ml-2 italic text-xxs font-mono text-text-muted align-middle"
+                    title="원문이 보존되지 않은 편집 사실 — 주체·술어·객체로 재구성"
+                  >
+                    (재구성됨)
+                  </span>
+                )}
+              </p>
+            );
+          })()}
           {fact.claim_en && (
             <p className="text-sm text-text-muted mt-2 leading-relaxed">
               {fact.claim_en}

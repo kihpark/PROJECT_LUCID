@@ -168,6 +168,108 @@ describe('RecallView', () => {
     // The English canonical key is NOT leaked into the rendered card.
     expect(card.textContent).not.toContain('decided_to_remove');
   });
+
+  // feat/recall-card-original-claim — PO directive 7.
+  // Old edited facts have `claim` overwritten with the pipe-joined
+  // `S | P | O` artefact emitted by FactCard.regenerateClaim() in
+  // Decide. The recall card title MUST show the original sentence when
+  // available; the pipe artefact is a legacy data shape, not a valid
+  // sentence — when detected, render a natural S → P → O surface and
+  // flag it with a "(재구성됨)" marker.
+  it('renders the original claim verbatim as the card title (no pipes injected)', async () => {
+    const RECALL_ORIGINAL: RecallResponse = {
+      signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
+      total: 1,
+      facts: [
+        {
+          fact_uid: 'fn-original',
+          claim: '중국 정부는 미국 기업을 제재했다',
+          claim_en: null,
+          subject_uid: 'obj-china',
+          subject_label: '중국 정부',
+          predicate: 'sanctions',
+          object_value: 'obj-us-co',
+          object_label: '미국 기업',
+          source_uids: [],
+          validated_at: new Date('2026-06-15T10:00:00Z').toISOString(),
+          validator_id: 'user-x',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.91,
+        },
+      ],
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_ORIGINAL);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '중국' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+
+    const card = await screen.findByTestId('recall-fact-fn-original');
+    // Original sentence is rendered verbatim.
+    expect(card.textContent).toContain('중국 정부는 미국 기업을 제재했다');
+    // The card is NOT flagged as reconstructed.
+    expect(card.getAttribute('data-claim-reconstructed')).toBe('false');
+    expect(
+      screen.queryByTestId('recall-fact-fn-original-reconstructed'),
+    ).toBeNull();
+  });
+
+  it('falls back to S → P → O with a 재구성됨 marker when claim is a pipe artefact', async () => {
+    const RECALL_PIPE: RecallResponse = {
+      signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
+      total: 1,
+      facts: [
+        {
+          fact_uid: 'fn-pipe',
+          // PO's exact bug report: edited fact whose `claim` was
+          // overwritten with the pipe-joined S | P | O surface.
+          claim: '중국 | 나섰다 | 미국 방산·드론·희토류 관련 기업에 대한 추가 제재',
+          claim_en: null,
+          subject_uid: 'obj-china',
+          subject_label: '중국',
+          predicate: 'sanctions',
+          predicate_label: '제재',
+          object_value: 'obj-us-co',
+          object_label: '미국 방산·드론·희토류 관련 기업에 대한 추가 제재',
+          source_uids: [],
+          validated_at: new Date('2026-06-15T10:00:00Z').toISOString(),
+          validator_id: 'user-x',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.83,
+        },
+      ],
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_PIPE);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '중국' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+
+    const card = await screen.findByTestId('recall-fact-fn-pipe');
+    // The raw pipe artefact is NOT shown as the card title.
+    expect(card.textContent).not.toContain(
+      '중국 | 나섰다 | 미국 방산·드론·희토류 관련 기업에 대한 추가 제재',
+    );
+    // The card is flagged as reconstructed and the marker is rendered.
+    expect(card.getAttribute('data-claim-reconstructed')).toBe('true');
+    expect(
+      await screen.findByTestId('recall-fact-fn-pipe-reconstructed'),
+    ).toBeInTheDocument();
+    // The natural S → P → O surface is used as the title fallback —
+    // resolved labels + Korean predicate, joined by "→" not "|".
+    expect(card.textContent).toContain('중국');
+    expect(card.textContent).toContain('→');
+    expect(card.textContent).toContain('제재');
+    expect(card.textContent).toContain('미국 방산·드론·희토류 관련 기업에 대한 추가 제재');
+  });
 });
 
 
