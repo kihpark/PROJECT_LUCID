@@ -82,7 +82,14 @@ function regenerateClaim(subjectLabel: string, predicate: string, objectLabel: s
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delay);
+    const id = setTimeout(() => {
+      setDebounced(value);
+      // decide-ux-v3 instrumentation (step 2): debounce fired
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.debug('[FactCard] debounce fired', { value, delay });
+      }
+    }, delay);
     return () => clearTimeout(id);
   }, [value, delay]);
   return debounced;
@@ -140,6 +147,10 @@ export function FactCard({
   );
   const [subjectSuggestions, setSubjectSuggestions] = useState<EntitySuggestion[]>([]);
   const debouncedSubjectQuery = useDebounce(subjectQuery, 200);
+  // decide-ux-v3: suppress the initial auto-fetch when subjectQuery is just
+  // the resolved label of the currently-selected subject. The first time the
+  // user actually types in the input, this flips true and stays true.
+  const [subjectUserTyped, setSubjectUserTyped] = useState(false);
 
   // Entity suggestion state — object
   const [objectQuery, setObjectQuery] = useState(() =>
@@ -147,6 +158,7 @@ export function FactCard({
   );
   const [objectSuggestions, setObjectSuggestions] = useState<EntitySuggestion[]>([]);
   const debouncedObjectQuery = useDebounce(objectQuery, 200);
+  const [objectUserTyped, setObjectUserTyped] = useState(false);
 
   // Predicate autocomplete state
   const [predicateQuery, setPredicateQuery] = useState(currentPredicate);
@@ -198,21 +210,50 @@ export function FactCard({
   }, [currentPredicate]);
 
   // Fetch subject suggestions
+  // decide-ux-v3 instrumentation (steps 3-5): the gate condition values are
+  // logged on every run; the fetch result is logged on resolve. Open DevTools
+  // verbose console to trace the live path on each keystroke.
   useEffect(() => {
-    if (!isEditing || !debouncedSubjectQuery.trim() || !spaceId) {
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('[FactCard] subject fetch gate', {
+        isEditing,
+        debouncedSubjectQuery,
+        spaceId,
+        subjectUserTyped,
+      });
+    }
+    if (!isEditing || !debouncedSubjectQuery.trim() || !spaceId || !subjectUserTyped) {
       setSubjectSuggestions([]);
       return;
     }
     let cancelled = false;
+    const url = `/api/spaces/${spaceId}/entities/suggest?q=${encodeURIComponent(debouncedSubjectQuery)}&limit=5`;
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('[FactCard] subject fetch fire', { url });
+    }
     searchEntitySuggestions(debouncedSubjectQuery, spaceId, 5)
-      .then((items) => { if (!cancelled) setSubjectSuggestions(items); })
-      .catch(() => { if (!cancelled) setSubjectSuggestions([]); });
+      .then((items) => {
+        if (process.env.NODE_ENV === 'development') {
+          // eslint-disable-next-line no-console
+          console.debug('[FactCard] subject fetch result', { cancelled, count: items.length, items });
+        }
+        if (!cancelled) setSubjectSuggestions(items);
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV === 'development') {
+          // eslint-disable-next-line no-console
+          console.debug('[FactCard] subject fetch error', err);
+        }
+        if (!cancelled) setSubjectSuggestions([]);
+      });
     return () => { cancelled = true; };
-  }, [debouncedSubjectQuery, isEditing, spaceId]);
+  }, [debouncedSubjectQuery, isEditing, spaceId, subjectUserTyped]);
 
   // Fetch object suggestions
   useEffect(() => {
-    if (!isEditing || !debouncedObjectQuery.trim() || !spaceId) {
+    if (!isEditing || !debouncedObjectQuery.trim() || !spaceId || !objectUserTyped) {
       setObjectSuggestions([]);
       return;
     }
@@ -221,7 +262,7 @@ export function FactCard({
       .then((items) => { if (!cancelled) setObjectSuggestions(items); })
       .catch(() => { if (!cancelled) setObjectSuggestions([]); });
     return () => { cancelled = true; };
-  }, [debouncedObjectQuery, isEditing, spaceId]);
+  }, [debouncedObjectQuery, isEditing, spaceId, objectUserTyped]);
 
   // Emit helpers
   const emitEdit = (next: { subject?: string; predicate?: string; object?: string }) => {
@@ -291,12 +332,14 @@ export function FactCard({
   const onSubjectChipClick = (suggestion: EntitySuggestion) => {
     setSubjectQuery(suggestion.primary_label);
     setSubjectSuggestions([]);
+    setSubjectUserTyped(false); // chip-click selects an entity; suppress refetch
     emitEdit({ subject: suggestion.entity_id });
   };
 
   const onObjectChipClick = (suggestion: EntitySuggestion) => {
     setObjectQuery(suggestion.primary_label);
     setObjectSuggestions([]);
+    setObjectUserTyped(false);
     emitEdit({ object: suggestion.entity_id });
   };
 
@@ -333,17 +376,10 @@ export function FactCard({
                 폐기 예정
               </span>
             )}
-            {fact.negation_flag && (
-              <span
-                className="inline-flex items-center gap-1 text-xxs text-accent-error"
-                aria-label="부정 진술"
-                role="status"
-                title="이 사실은 '~할 수 없다 / 금지 / ~지 않다' 를 담은 부정 진술입니다."
-                data-testid={`fact-negation-${factUid}`}
-              >
-                ⚠ 부정 진술
-              </span>
-            )}
+            {/* decide-ux-v3: negation badge UI removed per PO ("필요 없다"). */}
+            {/* The underlying fact.negation_flag + negation_scope data is */}
+            {/* preserved on the FactNode in storage — kept as substrate for */}
+            {/* future contradiction detection. UI surface only is removed. */}
           </div>
         </div>
       </header>
@@ -402,7 +438,13 @@ export function FactCard({
               value={subjectQuery}
               onChange={(e) => {
                 const val = e.target.value;
+                // decide-ux-v3 instrumentation (step 1): subject onChange fired
+                if (process.env.NODE_ENV === 'development') {
+                  // eslint-disable-next-line no-console
+                  console.debug('[FactCard] subject onChange', { val });
+                }
                 setSubjectQuery(val);
+                setSubjectUserTyped(true);
                 emitEdit({ subject: val });
               }}
               placeholder="entity name or uid"
@@ -485,6 +527,7 @@ export function FactCard({
               onChange={(e) => {
                 const val = e.target.value;
                 setObjectQuery(val);
+                setObjectUserTyped(true);
                 emitEdit({ object: val });
               }}
               placeholder="entity name or literal value"

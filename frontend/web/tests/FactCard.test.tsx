@@ -66,7 +66,11 @@ describe('FactCard — claim display', () => {
     expect(screen.getByText('AI 가 일자리를 대체한다.')).toBeInTheDocument();
   });
 
-  it('shows a negation warning when negation_flag is true', () => {
+  it('does NOT show a negation badge even when negation_flag is true (decide-ux-v3)', () => {
+    // decide-ux-v3: PO declared the negation badge unnecessary
+    // ("필요 없다"). The negation_flag data is still persisted on
+    // the FactNode in storage — substrate for future contradiction
+    // detection — but the UI badge is removed.
     const onChange = vi.fn();
     render(
       <FactCard
@@ -76,11 +80,8 @@ describe('FactCard — claim display', () => {
         onChange={onChange}
       />,
     );
-    // decide-ux-v2 (2): user-facing Korean label; internal
-    // negation_flag (full) token is no longer surfaced.
-    expect(screen.getByRole('status')).toHaveTextContent('부정 진술');
-    expect(screen.getByRole('status')).not.toHaveTextContent('negation_flag');
-    expect(screen.getByRole('status')).not.toHaveTextContent('partial');
+    expect(screen.queryByTestId('fact-negation-fn-1')).toBeNull();
+    expect(screen.queryByText(/부정 진술/)).toBeNull();
   });
 });
 
@@ -793,8 +794,8 @@ describe('FactCard — decide-ux-fix #3: 저장 button', () => {
 });
 
 
-describe('FactCard - decide-ux-v2 (2): negation user explanation', () => {
-  it('renders Korean label instead of raw negation_flag token', () => {
+describe('FactCard - decide-ux-v3: negation badge removed', () => {
+  it('renders NO negation badge when negation_flag=true, scope=full', () => {
     const onChange = vi.fn();
     render(
       <FactCard
@@ -804,28 +805,23 @@ describe('FactCard - decide-ux-v2 (2): negation user explanation', () => {
         onChange={onChange}
       />,
     );
-    const badge = screen.getByTestId('fact-negation-fn-1');
-    expect(badge).toHaveTextContent('부정 진술');
+    expect(screen.queryByTestId('fact-negation-fn-1')).toBeNull();
   });
 
-  it('exposes a Korean tooltip via the title attribute', () => {
+  it('renders NO negation badge when negation_flag=true, scope=partial', () => {
     const onChange = vi.fn();
     render(
       <FactCard
-        fact={{ ...baseFact, negation_flag: true, negation_scope: 'full' }}
+        fact={{ ...baseFact, negation_flag: true, negation_scope: 'partial' }}
         action="accept"
         lang="en"
         onChange={onChange}
       />,
     );
-    const badge = screen.getByTestId('fact-negation-fn-1');
-    expect(badge).toHaveAttribute(
-      'title',
-      expect.stringContaining('부정 진술'),
-    );
+    expect(screen.queryByTestId('fact-negation-fn-1')).toBeNull();
   });
 
-  it('hides the internal (full) scope token from user-visible text', () => {
+  it('no user-visible 부정 진술 text appears anywhere on the card', () => {
     const onChange = vi.fn();
     render(
       <FactCard
@@ -835,9 +831,26 @@ describe('FactCard - decide-ux-v2 (2): negation user explanation', () => {
         onChange={onChange}
       />,
     );
-    const badge = screen.getByTestId('fact-negation-fn-1');
-    expect(badge.textContent).not.toMatch(/\(full\)/);
-    expect(badge.textContent).not.toMatch(/negation_flag/);
+    expect(screen.queryByText(/부정 진술/)).toBeNull();
+  });
+
+  it('fact.negation_flag data is still readable on the fact object (substrate preserved)', () => {
+    // Smoke check: a fact carrying negation_flag still renders fully —
+    // the field stays on FactSummary; only the UI badge is gone.
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{ ...baseFact, negation_flag: true, negation_scope: 'full' }}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    // Card still renders normally:
+    expect(screen.getByTestId('fact-card-fn-1')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-claim-fn-1')).toHaveTextContent(
+      'AI will replace jobs.',
+    );
   });
 });
 
@@ -966,3 +979,117 @@ describe('FactCard - decide-ux-v2 (4): claim preservation after save', () => {
     expect(claim.textContent).not.toMatch(/\|/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// decide-ux-v3 — autocomplete LIVE-path coverage
+// ---------------------------------------------------------------------------
+// PO observed "edit subject 타이핑 시 실시간 ES 제안이 안 뜸." The prior PR
+// claimed wiring + tests pass, but live path didn't fire. This block walks
+// the full handler chain (onChange → setState → debounce → useEffect →
+// searchEntitySuggestions → setSuggestions → render) end-to-end, and pins
+// the fix that:
+//
+//   (a) the auto-fetch on edit-open is now suppressed unless the user has
+//       actually typed in the input (subjectUserTyped flag), so the chip
+//       area no longer surfaces a duplicate-of-current-selection chip;
+//   (b) the API IS called on the first real keystroke;
+//   (c) chips render after debounce settles.
+// ---------------------------------------------------------------------------
+describe('FactCard - decide-ux-v3: autocomplete LIVE path', () => {
+  it('does NOT fetch suggestions on edit-open before the user types', async () => {
+    const onChange = vi.fn();
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'uuid-x', primary_label: 'X', primary_lang: 'en', score: 1.0 },
+    ]);
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        spaceId="ks-1"
+        onChange={onChange}
+      />,
+    );
+    // Wait past the debounce window without typing.
+    await new Promise((r) => setTimeout(r, 250));
+    expect(api.searchEntitySuggestions).not.toHaveBeenCalled();
+    // And no chip is rendered (we don't surface a duplicate of the current
+    // selection back to the user).
+    expect(screen.queryByTestId('subject-chip-uuid-x')).toBeNull();
+  });
+
+  it('LIVE path: typing -> debounce -> API call -> setState -> chips render', async () => {
+    const onChange = vi.fn();
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'uuid-acme', primary_label: 'ACME Corp', primary_lang: 'en', score: 0.9 },
+      { entity_id: 'uuid-acme2', primary_label: 'ACME Inc', primary_lang: 'en', score: 0.85 },
+      { entity_id: 'uuid-acme3', primary_label: 'ACME LLC', primary_lang: 'en', score: 0.8 },
+    ]);
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        spaceId="ks-1"
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: 'ACME' },
+    });
+
+    // Debounce + microtask flush
+    await waitFor(() => {
+      expect(api.searchEntitySuggestions).toHaveBeenCalledWith('ACME', 'ks-1', 5);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-acme')).toBeInTheDocument();
+      expect(screen.getByTestId('subject-chip-uuid-acme2')).toBeInTheDocument();
+      expect(screen.getByTestId('subject-chip-uuid-acme3')).toBeInTheDocument();
+    });
+  });
+
+  it('chip-click suppresses an immediate re-fetch (subjectUserTyped resets)', async () => {
+    const onChange = vi.fn();
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'uuid-acme', primary_label: 'ACME Corp', primary_lang: 'en', score: 0.9 },
+    ]);
+    render(
+      <FactCard
+        fact={baseFact}
+        objects={baseObjects}
+        action="edit"
+        editedSubjectUid="obj-1"
+        editedPredicate="will_replace"
+        editedObjectValue="jobs"
+        lang="en"
+        spaceId="ks-1"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: 'ACME' },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-acme')).toBeInTheDocument();
+    });
+    const calls0 = (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mock.calls.length;
+    fireEvent.click(screen.getByTestId('subject-chip-uuid-acme'));
+    // After chip-click, wait past the debounce window — no new API call
+    // should fire just because the input's value changed to the chip label.
+    await new Promise((r) => setTimeout(r, 250));
+    const calls1 = (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(calls1).toBe(calls0);
+  });
+});
+
