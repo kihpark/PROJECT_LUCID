@@ -48,6 +48,7 @@ import {
   ApiError,
   detachSource as apiDetachSource,
   getFactDetail as apiGetFactDetail,
+  modifyFact as apiModifyFact,
   restoreFact as apiRestoreFact,
   retractFact as apiRetractFact,
 } from '@/lib/api';
@@ -57,6 +58,7 @@ import type {
   EntityBriefGroup,
   EntityFacetItem,
   FactDetailResponse,
+  ModifyFactRequest,
   PredicateFacetItem,
   RecallFact,
   RecallFacets,
@@ -389,11 +391,39 @@ interface FactDetailModalProps {
   onDetachSource: (sourceUid: string) => Promise<void>;
   onRetract: () => Promise<void>;
   onRestore: () => Promise<void>;
+  // feat/fact-detail-modify — PO directive 2026-06-22. The Recall
+  // detail modal lets the user correct surface-level errors in place
+  // (typos in the claim, an off gloss for the predicate). Identity
+  // fields (subject_uid / predicate_code) are NEVER editable here.
+  onModify: (payload: ModifyFactRequest) => Promise<void>;
   busy: boolean;
 }
 
+// Internal edit-form state. We mirror the FactDetailHeader fields the
+// user is allowed to edit. `''` is the empty string the form coerces
+// down to undefined on submit so we don't send "" to the backend when
+// the user hasn't touched a field.
+interface FactEditDraft {
+  claim: string;
+  predicate_label: string;
+  object_value: string;
+}
+
+function draftFromDetail(detail: FactDetailResponse): FactEditDraft {
+  return {
+    claim: detail.fact.claim ?? '',
+    // predicate_label is the natural-English gloss. The detail GET
+    // doesn't currently surface it (the recall card uses it via
+    // predicate_label on RecallFact). We seed with the canonical
+    // predicate so the user can re-type. The backend update goes
+    // through update_fact which writes the new value verbatim.
+    predicate_label: detail.fact.predicate ?? '',
+    object_value: detail.fact.object_value ?? '',
+  };
+}
+
 function FactDetailModal({
-  detail, onClose, onDetachSource, onRetract, onRestore, busy,
+  detail, onClose, onDetachSource, onRetract, onRestore, onModify, busy,
 }: FactDetailModalProps) {
   const { fact, entities, sources } = detail;
   const retracted = !!fact.retracted_at;
@@ -401,14 +431,71 @@ function FactDetailModal({
   const subject = entities.find((e) => e.role === 'subject');
   const object = entities.find((e) => e.role === 'object');
 
-  // ESC closes — global listener while the modal is mounted.
+  // feat/fact-detail-modify — edit mode flips the body from read-only
+  // chrome to an inline form. State is local: a draft seeded from the
+  // current detail; 저장 dispatches to onModify(), 취소 discards.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<FactEditDraft>(() => draftFromDetail(detail));
+
+  // Re-seed the draft when the upstream detail changes (after a save,
+  // after a retract/restore) so a re-open of the edit panel reflects
+  // the latest state, not the stale snapshot from the first render.
+  useEffect(() => {
+    setDraft(draftFromDetail(detail));
+  }, [detail]);
+
+  const onStartEdit = () => {
+    setDraft(draftFromDetail(detail));
+    setEditing(true);
+  };
+
+  const onCancelEdit = () => {
+    setDraft(draftFromDetail(detail));
+    setEditing(false);
+  };
+
+  const onSubmitEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // Build the patch payload: only fields the user actually changed,
+    // and never identity fields (the form doesn't expose them). An
+    // empty payload means the user clicked save without editing —
+    // close edit mode without a network round-trip.
+    const payload: ModifyFactRequest = {};
+    if (draft.claim.trim() !== (fact.claim ?? '').trim()) {
+      payload.claim = draft.claim.trim();
+    }
+    if (draft.predicate_label.trim() !== (fact.predicate ?? '').trim()) {
+      payload.predicate_label = draft.predicate_label.trim();
+    }
+    if (draft.object_value.trim() !== (fact.object_value ?? '').trim()) {
+      payload.object_value = draft.object_value.trim();
+    }
+    if (Object.keys(payload).length === 0) {
+      setEditing(false);
+      return;
+    }
+    await onModify(payload);
+    setEditing(false);
+  };
+
+  // ESC closes — global listener while the modal is mounted. In edit
+  // mode, ESC cancels the edit instead of closing the modal so the
+  // user doesn't lose typing on a stray keypress.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (editing) {
+        onCancelEdit();
+      } else {
+        onClose();
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    // onClose / onCancelEdit are stable enough — the editing flag is
+    // the only field that actually changes the handler dispatch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, onClose]);
 
   return (
     <div
@@ -491,44 +578,143 @@ function FactDetailModal({
           )}
         </header>
 
-        {/* S → P → O relationship */}
-        <section className="px-8 py-5 border-b border-border-subtle">
+        {/* S → P → O relationship — read mode renders the chip row;
+            edit mode replaces it with an inline form for surface
+            fields. Identity (subject) stays read-only because changing
+            it requires the entity-resolver path (Decide). */}
+        <section
+          className="px-8 py-5 border-b border-border-subtle"
+          data-testid="fact-detail-relationship"
+          data-editing={editing ? 'true' : 'false'}
+        >
           <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-3">
             관계
           </h3>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span
-              data-testid="fact-detail-subject"
-              className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
+          {editing ? (
+            <form
+              data-testid="fact-detail-edit-form"
+              onSubmit={onSubmitEdit}
+              className="space-y-3"
             >
-              <span className="font-medium">
-                {subject?.name ?? fact.subject_label ?? fact.subject_uid}
-              </span>
-              {subject?.class && (
-                <span className="ml-2 text-xxs text-text-muted font-mono">
-                  {subject.class}
+              <div>
+                <label
+                  className="block text-xxs uppercase tracking-wider text-text-muted font-mono mb-1"
+                  htmlFor="fact-edit-claim"
+                >
+                  claim
+                </label>
+                <textarea
+                  id="fact-edit-claim"
+                  data-testid="fact-detail-edit-claim"
+                  value={draft.claim}
+                  onChange={(e) =>
+                    setDraft((d) => ({ ...d, claim: e.target.value }))
+                  }
+                  rows={2}
+                  className="w-full rounded border border-border-subtle bg-bg-card px-3 py-2 text-sm focus:outline-none focus:border-accent-cool"
+                  disabled={busy}
+                  lang="ko"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label
+                    className="block text-xxs uppercase tracking-wider text-text-muted font-mono mb-1"
+                    htmlFor="fact-edit-predicate"
+                  >
+                    predicate (gloss)
+                  </label>
+                  <input
+                    id="fact-edit-predicate"
+                    data-testid="fact-detail-edit-predicate"
+                    type="text"
+                    value={draft.predicate_label}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, predicate_label: e.target.value }))
+                    }
+                    className="w-full rounded border border-border-subtle bg-bg-card px-3 py-2 text-sm focus:outline-none focus:border-accent-cool"
+                    disabled={busy}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="block text-xxs uppercase tracking-wider text-text-muted font-mono mb-1"
+                    htmlFor="fact-edit-object"
+                  >
+                    object
+                  </label>
+                  <input
+                    id="fact-edit-object"
+                    data-testid="fact-detail-edit-object"
+                    type="text"
+                    value={draft.object_value}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, object_value: e.target.value }))
+                    }
+                    className="w-full rounded border border-border-subtle bg-bg-card px-3 py-2 text-sm focus:outline-none focus:border-accent-cool"
+                    disabled={busy}
+                    lang="ko"
+                  />
+                </div>
+              </div>
+              <p className="text-xxs text-text-muted font-mono">
+                주체(subject)는 편집 불가 — 변경하려면 사실을 철회한 뒤 새로 검증하세요.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  data-testid="fact-detail-edit-cancel"
+                  onClick={onCancelEdit}
+                  disabled={busy}
+                  className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5 text-xs"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  data-testid="fact-detail-edit-save"
+                  disabled={busy}
+                  className="rounded-md border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-3 py-1.5 text-xs font-medium"
+                >
+                  저장
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span
+                data-testid="fact-detail-subject"
+                className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
+              >
+                <span className="font-medium">
+                  {subject?.name ?? fact.subject_label ?? fact.subject_uid}
                 </span>
-              )}
-            </span>
-            <span className="text-text-muted font-mono text-xs">→</span>
-            <span className="rounded-md bg-accent-cool/10 border border-accent-cool/30 text-accent-cool px-3 py-1.5 font-mono text-xs">
-              {predicateLabel(fact.predicate)}
-            </span>
-            <span className="text-text-muted font-mono text-xs">→</span>
-            <span
-              data-testid="fact-detail-object"
-              className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
-            >
-              <span className="font-medium">
-                {object?.name ?? fact.object_label ?? fact.object_value}
+                {subject?.class && (
+                  <span className="ml-2 text-xxs text-text-muted font-mono">
+                    {subject.class}
+                  </span>
+                )}
               </span>
-              {object?.class && (
-                <span className="ml-2 text-xxs text-text-muted font-mono">
-                  {object.class}
+              <span className="text-text-muted font-mono text-xs">→</span>
+              <span className="rounded-md bg-accent-cool/10 border border-accent-cool/30 text-accent-cool px-3 py-1.5 font-mono text-xs">
+                {predicateLabel(fact.predicate)}
+              </span>
+              <span className="text-text-muted font-mono text-xs">→</span>
+              <span
+                data-testid="fact-detail-object"
+                className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
+              >
+                <span className="font-medium">
+                  {object?.name ?? fact.object_label ?? fact.object_value}
                 </span>
-              )}
-            </span>
-          </div>
+                {object?.class && (
+                  <span className="ml-2 text-xxs text-text-muted font-mono">
+                    {object.class}
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
         </section>
 
         {/* Sources — the meat of the modal */}
@@ -657,29 +843,49 @@ function FactDetailModal({
           </dl>
         </section>
 
-        {/* Action bar */}
-        <footer className="px-8 py-4 border-t border-border-subtle bg-bg-card/40 flex justify-end gap-2">
-          {retracted ? (
-            <button
-              type="button"
-              data-testid="fact-detail-restore"
-              onClick={onRestore}
-              disabled={busy}
-              className="rounded-md border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-4 py-2 text-sm font-medium"
-            >
-              복구
-            </button>
-          ) : (
-            <button
-              type="button"
-              data-testid="fact-detail-retract"
-              onClick={onRetract}
-              disabled={busy}
-              className="rounded-md border border-accent-error/40 bg-accent-error/5 text-accent-error px-4 py-2 text-sm font-medium"
-            >
-              사실 철회
-            </button>
-          )}
+        {/* Action bar — feat/fact-detail-modify adds the 수정 button on
+            the LEFT (less prominent than the retract / restore actions
+            which sit at the right). The button hides in edit mode and
+            when the fact is retracted (a retracted fact must be
+            restored before its surface can be edited). */}
+        <footer className="px-8 py-4 border-t border-border-subtle bg-bg-card/40 flex justify-between items-center gap-2">
+          <div>
+            {!retracted && !editing && (
+              <button
+                type="button"
+                data-testid="fact-detail-edit"
+                onClick={onStartEdit}
+                disabled={busy}
+                className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary"
+                title="claim / predicate gloss / object 텍스트만 편집 가능"
+              >
+                수정
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {retracted ? (
+              <button
+                type="button"
+                data-testid="fact-detail-restore"
+                onClick={onRestore}
+                disabled={busy}
+                className="rounded-md border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-4 py-2 text-sm font-medium"
+              >
+                복구
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="fact-detail-retract"
+                onClick={onRetract}
+                disabled={busy || editing}
+                className="rounded-md border border-accent-error/40 bg-accent-error/5 text-accent-error px-4 py-2 text-sm font-medium"
+              >
+                사실 철회
+              </button>
+            )}
+          </div>
         </footer>
       </div>
     </div>
@@ -1408,6 +1614,29 @@ export function RecallView({ spaceId }: Props) {
     }
   };
 
+  // feat/fact-detail-modify — PATCH surface fields. The backend
+  // returns the refreshed detail so we swap state from the response
+  // directly (no extra GET). After save, also refetch the recall
+  // list so the card title (which pulls from `claim`) is current.
+  const onDetailModify = async (payload: ModifyFactRequest) => {
+    if (!detail) return;
+    setDetailBusy(true);
+    setError(null);
+    try {
+      const updated = await apiModifyFact(
+        spaceId, detail.fact.fact_uid, payload,
+      );
+      setDetail(updated);
+      refreshRecall();
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;
+      setError(msg);
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
   // Controls dispatcher: server-affecting controls re-fire recall.
   // B-50-fix: matchKinds is no longer in that set — it's a pure
   // display filter, so changing the toggle never round-trips. keyword2
@@ -1490,6 +1719,7 @@ export function RecallView({ spaceId }: Props) {
           onDetachSource={onDetailDetachSource}
           onRetract={onDetailRetract}
           onRestore={onDetailRestore}
+          onModify={onDetailModify}
           busy={detailBusy}
         />
       )}

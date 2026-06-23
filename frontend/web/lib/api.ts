@@ -14,6 +14,7 @@ import type {
   KnowledgeSpacePublic,
   LoginRequest,
   LoginResponse,
+  ModifyFactRequest,
   PendingJobDetail,
   PendingListFilters,
   PendingPage,
@@ -298,6 +299,18 @@ export function detachSource(
   return request<FactMutationResponse>(
     `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}/detach-source`,
     { method: 'POST', body: JSON.stringify({ source_uid: sourceUid }) },
+  );
+}
+
+// feat/fact-detail-modify — PATCH surface fields of a validated fact.
+// Returns the refreshed FactDetailResponse so the caller can swap the
+// modal state without a second GET round-trip.
+export function modifyFact(
+  spaceId: string, factUid: string, payload: ModifyFactRequest,
+): Promise<FactDetailResponse> {
+  return request<FactDetailResponse>(
+    `/api/spaces/${spaceId}/facts/${encodeURIComponent(factUid)}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
   );
 }
 

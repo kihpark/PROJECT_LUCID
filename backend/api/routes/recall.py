@@ -45,6 +45,7 @@ from api.models.recall import (
     FactDetailSource,
     FactMutationResponse,
     FactsList,
+    ModifyFactRequest,
     PredicateFacetItem,
     RecallFacets,
     RecallFact,
@@ -1140,6 +1141,113 @@ def fact_detail(
         _resolve_space(session, space_id, user)
     finally:
         session.close()
+    detail = _build_fact_detail(fact_uid, str(space_id))
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+    return detail
+
+
+# ---------------------------------------------------------------------------
+# feat/fact-detail-modify — PO directive 2026-06-22.
+#
+# PO wants the Recall Fact-detail modal to be EDITABLE — same affordance
+# as Decide's edit mode, but limited to surface fields. Identity stays
+# immutable (subject_uid / predicate_code / validation_method); the
+# user-visible chrome (claim / predicate_label / object_value / tags)
+# can be corrected in-place. Structural changes still require a retract
+# + new-fact flow.
+#
+# The endpoint is PATCH (idempotent semantics — a re-PATCH with the
+# same body is a no-op against ES because `update_fact` recomputes
+# embedding only when the claim text changed). The mutation goes
+# through `update_fact`, which already appends the prior claim to
+# `aliases` and writes an `edit_history` row so the audit trail is
+# preserved automatically.
+# ---------------------------------------------------------------------------
+
+_MODIFIABLE_FIELDS: frozenset[str] = frozenset({
+    "claim", "predicate_label", "object_value", "tags",
+})
+
+
+@router.patch(
+    "/facts/{fact_uid}",
+    response_model=FactDetailResponse,
+)
+def modify_fact(
+    space_id: uuid.UUID,
+    fact_uid: str,
+    body: ModifyFactRequest,
+    user: User = Depends(get_current_user),
+) -> FactDetailResponse:
+    """Modify a validated fact's surface fields.
+
+    Editable: claim, predicate_label, object_value, tags. Identity
+    fields (subject_uid, predicate_code, validation_method,
+    validator_id) are NEVER changed by this endpoint — a structural
+    change goes through retract + re-validate.
+
+    400 when no editable fields are present (empty patch).
+    404 when the fact does not exist OR belongs to a different KS.
+    403 when the KS belongs to a different user.
+
+    Audit trail: claim changes propagate through the existing
+    `update_fact` helper, which appends the prior claim to the
+    `aliases` list AND writes an `edit_history` row. Other fields
+    (predicate_label / object_value / tags) update in place — they
+    do NOT generate an `edit_history` entry because the surface-only
+    edit is a typo-fix affordance, not a semantic claim revision.
+    The PO accepted this trade-off (per directive).
+    """
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+
+    fact_doc = get_fact_by_uid(fact_uid)
+    if fact_doc is None or fact_doc.get("knowledge_space_id") != str(space_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="fact_not_found",
+        )
+
+    # model_dump(exclude_unset=True) so we only see fields the client
+    # actually set — a None value the client explicitly sent (e.g.
+    # "clear the predicate_label") is preserved, while a field the
+    # client omitted is left alone.
+    payload = body.model_dump(exclude_unset=True)
+    # Filter to the allow-list; ignore (don't 400) on unknown keys so
+    # forward-compat clients can send fields newer servers understand.
+    updates = {k: v for k, v in payload.items() if k in _MODIFIABLE_FIELDS}
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no_modifiable_fields",
+        )
+
+    # Skip the storage call entirely if nothing actually changed —
+    # the request was a no-op (same value re-sent). This is friendly
+    # to optimistic clients that re-PATCH on every edit-mode close.
+    changed = {
+        k: v for k, v in updates.items()
+        if fact_doc.get(k) != v
+    }
+    if changed:
+        from api.storage.elasticsearch.facts import update_fact as _update_fact
+        try:
+            _update_fact(fact_uid, changed, editor_uid=str(user.id))
+        except ValueError:
+            # update_fact raises ValueError when the fact disappears
+            # between our get + write — racing edit. Surface as 404.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="fact_not_found",
+            )
+
+    # Return the refreshed detail so the client can swap state in one
+    # round-trip (no second GET needed).
     detail = _build_fact_detail(fact_uid, str(space_id))
     if detail is None:
         raise HTTPException(
