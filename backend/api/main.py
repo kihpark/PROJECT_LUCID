@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import (
     capture_video,
     admin_applications,
+    admin_entities,
     applications,
     assistant,
     auth,
@@ -174,6 +175,7 @@ for _router in (
     validation_api.router,
     applications.router,
     admin_applications.router,
+    admin_entities.router,
     assistant.router,
     entities.router,
     predicates.router,
