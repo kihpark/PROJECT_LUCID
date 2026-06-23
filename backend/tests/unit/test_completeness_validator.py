@@ -18,7 +18,6 @@ from api.structure.completeness_validator import (
     check_completeness,
 )
 
-
 # ---------------------------------------------------------------------------
 # 1-3 — PO's live evidence cases
 # ---------------------------------------------------------------------------
