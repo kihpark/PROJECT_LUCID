@@ -148,4 +148,72 @@ describe('AssistantView', () => {
     // No verified section, no inference card with content
     expect(screen.queryAllByTestId('verified-fact-card')).toHaveLength(0);
   });
+
+  // 6. Inference block renders BEFORE verified facts (UX inference-first reorder)
+  it('renders inference card before verified facts in DOM order', async () => {
+    vi.mocked(api.postAssistantBrief).mockResolvedValue(MOCK_GROUNDED_RESPONSE);
+
+    render(<AssistantView spaceId={SPACE_ID} />);
+
+    fireEvent.change(screen.getByTestId('assistant-query-input'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByTestId('assistant-submit-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('inference-card')).toBeDefined();
+      expect(screen.getByTestId('verified-section')).toBeDefined();
+    });
+
+    const inferenceCard = screen.getByTestId('inference-card');
+    const verifiedSection = screen.getByTestId('verified-section');
+
+    // inference must precede verified in the document
+    const pos = inferenceCard.compareDocumentPosition(verifiedSection);
+    expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // 7. Inference card has prominent (primary) variant styling
+  it('marks inference card as primary variant with prominent body styling', async () => {
+    vi.mocked(api.postAssistantBrief).mockResolvedValue(MOCK_GROUNDED_RESPONSE);
+
+    render(<AssistantView spaceId={SPACE_ID} />);
+
+    fireEvent.change(screen.getByTestId('assistant-query-input'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByTestId('assistant-submit-button'));
+
+    await waitFor(() => {
+      const inferenceCard = screen.getByTestId('inference-card');
+      expect(inferenceCard.getAttribute('data-variant')).toBe('primary');
+
+      // "AI 답변" chip is present alongside the existing 미보증 label
+      const answerChip = screen.getByTestId('inference-answer-chip');
+      expect(answerChip.textContent).toBe('AI 답변');
+
+      // Body uses larger font size for prominence
+      const body = screen.getByTestId('inference-body');
+      const fontSize = parseInt((body as HTMLElement).style.fontSize, 10);
+      expect(fontSize).toBeGreaterThanOrEqual(16);
+    });
+  });
+
+  // 8. Verified header reframed as "근거 사실 N건" (supporting evidence framing)
+  it('renders verified section header with 근거 사실 framing', async () => {
+    vi.mocked(api.postAssistantBrief).mockResolvedValue(MOCK_GROUNDED_RESPONSE);
+
+    render(<AssistantView spaceId={SPACE_ID} />);
+
+    fireEvent.change(screen.getByTestId('assistant-query-input'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByTestId('assistant-submit-button'));
+
+    await waitFor(() => {
+      const header = screen.getByTestId('verified-section-header');
+      expect(header.textContent).toContain('근거 사실');
+      expect(header.textContent).toContain('2');
+    });
+  });
 });
