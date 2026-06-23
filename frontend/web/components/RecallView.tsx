@@ -1047,6 +1047,9 @@ interface SearchControlsState {
   dateTo: string;
   matchKinds: Record<MatchKind, boolean>;
   keyword2: string;
+  // v0.2.0 step 1 (fact-claim-layer-v1) — display-only filter that
+  // hides action rows so the user can drill into "who said what" only.
+  claimOnly: boolean;
 }
 
 const DEFAULT_CONTROLS: SearchControlsState = {
@@ -1055,6 +1058,7 @@ const DEFAULT_CONTROLS: SearchControlsState = {
   dateTo: '',
   matchKinds: { embedding: true, entity_link: true },
   keyword2: '',
+  claimOnly: false,
 };
 
 // B-50-fix (PO A direction): `matchKinds` is no longer a server param.
@@ -1193,6 +1197,28 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
             }
           />
           <span>🔗 엔티티 연결</span>
+        </label>
+      </div>
+
+      {/* v0.2.0 step 1 (fact-claim-layer-v1) — 화자 인용 (claim) filter.
+          Display-only client-side filter: hides action rows so the user
+          can drill into "who said what" without re-querying the server. */}
+      <div className="mb-4">
+        <h3 className="text-xs font-medium mb-1">화자 인용</h3>
+        <p className="text-xxs text-text-muted font-mono mb-1">
+          결과 표시 필터 (서버 재검색 없음)
+        </p>
+        <label
+          data-testid="control-claim-only"
+          className="flex items-center gap-2 text-xs py-0.5"
+        >
+          <input
+            type="checkbox"
+            checked={state.claimOnly}
+            data-testid="control-claim-only-checkbox"
+            onChange={(e) => onChange({ ...state, claimOnly: e.target.checked })}
+          />
+          <span>💬 화자 인용만 (claim)</span>
         </label>
       </div>
 
@@ -1456,8 +1482,19 @@ export function RecallView({ spaceId }: Props) {
     if (!controls.matchKinds.entity_link) {
       out = out.filter((f) => (f.match_kind ?? 'embedding') !== 'entity_link');
     }
+    // v0.2.0 step 1 (fact-claim-layer-v1) — hide action rows when
+    // the 화자 인용만 chip is on. Legacy facts (fact_type undefined)
+    // are treated as action — the FactCard renders them identically.
+    if (controls.claimOnly) {
+      out = out.filter((f) => f.fact_type === 'claim');
+    }
     return out;
-  }, [sortedFacts, controls.keyword2, controls.matchKinds.entity_link]);
+  }, [
+    sortedFacts,
+    controls.keyword2,
+    controls.matchKinds.entity_link,
+    controls.claimOnly,
+  ]);
 
   // Build the "active filter chips" view: walk the current facets to
   // find the name + bucket for each active uid (the backend already
