@@ -67,6 +67,97 @@ const ForceGraph3D = ForceGraph3DLazy as unknown as React.ComponentType<Record<s
 const ACCENT = '#3fe0c6';
 const EMPTY_SET = new Set<string>();
 
+// ---------------------------------------------------------------------------
+// feat/stellar-camera-focus — density-aware layout helpers.
+//
+// PO repro: when the real graph holds only a handful of facts, nodes spread
+// across the universe sphere as tiny dots and left-click rotation becomes a
+// frustrating hunt-and-peck. The fix is density-aware tuning: when node
+// count is small, pull nodes harder toward the centre, shorten link
+// distances, and grow the node radius so each fact reads as a clearly
+// targetable disc. As node count rises, the tuning ramps back toward the
+// dense-galaxy defaults already set for synthetic mode.
+//
+// All three helpers are pure functions of `totalNodes`; the engine-ready
+// hook below feeds the live d3-force instances from these. Pure-function
+// shape was chosen so vitest can exercise the layout policy without ever
+// mounting three.js (jsdom can't render WebGL).
+// ---------------------------------------------------------------------------
+
+/** Charge (n-body repulsion) strength for the d3-force `charge` simulation.
+ *
+ *  Convention: more negative ⇒ stronger repulsion ⇒ nodes spread further.
+ *  Less negative ⇒ weaker repulsion ⇒ nodes huddle closer.
+ *
+ *  Small graphs (n<30) get -50 — weak repulsion so the few facts cluster
+ *  around the centre instead of drifting to the universe sphere. Dense
+ *  graphs (n≥120) keep the established -150 so cluster centroids stay
+ *  legibly apart. A smooth log-ish ramp connects the two regimes. */
+export function computeChargeStrength(totalNodes: number): number {
+  const n = Math.max(0, totalNodes | 0);
+  if (n < 30) return -50;
+  if (n >= 120) return -150;
+  // Linear ramp between -50 (n=30) and -150 (n=120).
+  const t = (n - 30) / 90;
+  return Math.round(-50 - 100 * t);
+}
+
+/** Link distance for the d3-force `link` simulation. Smaller → connected
+ *  nodes sit physically closer, which compounds with the weaker charge
+ *  above to pull the whole layout into a tighter ball when there are few
+ *  facts. */
+export function computeLinkDistance(totalNodes: number): number {
+  const n = Math.max(0, totalNodes | 0);
+  if (n < 30) return 12;
+  if (n >= 120) return 18;
+  const t = (n - 30) / 90;
+  return Math.round(12 + 6 * t);
+}
+
+/** Center force strength — pulls every node toward the scene origin.
+ *
+ *  d3-force's `center` force does not normally take a strength scalar
+ *  (it just re-centres the centroid each tick). ForceGraph3D exposes a
+ *  `.strength(x)` setter on its center force as a convenience so callers
+ *  can lean on it for "huddle the nodes" effects without writing a
+ *  custom force. For small graphs we apply a noticeable inward tug; for
+ *  large graphs we leave it at 0 so cluster structure dominates. */
+export function computeCenterStrength(totalNodes: number): number {
+  const n = Math.max(0, totalNodes | 0);
+  if (n < 30) return 0.08;
+  if (n >= 60) return 0;
+  // Soft taper from 0.08 (n=30) to 0 (n=60).
+  const t = (n - 30) / 30;
+  return Number((0.08 * (1 - t)).toFixed(3));
+}
+
+/** Per-node base radius (before focus/selected/highlighted scaling).
+ *
+ *  This is the "how big is a fact, given the graph holds N facts" floor
+ *  used by `nodeSize`. Small graphs win a bigger floor so each disc is
+ *  trivially clickable. Larger graphs taper toward the dense-mode floor
+ *  of 2.0 (kept from B-62-search-legibility). Formula: inverse-sqrt of
+ *  n/10, clamped to [2.0, 5.0]. Reference points:
+ *      n=1   → 5.0       n=10  → 5.0       n=30  → 3.65
+ *      n=60  → 2.58      n=100 → 2.0       n=300 → 2.0
+ */
+export function computeNodeSizeFloor(totalNodes: number): number {
+  const n = Math.max(1, totalNodes | 0);
+  const raw = 5.0 / Math.sqrt(Math.max(1, n / 10));
+  return Math.max(2.0, Math.min(5.0, Number(raw.toFixed(3))));
+}
+
+/** Camera initial distance from the origin.
+ *
+ *  Previously a smooth ramp from 180 (cold start) → 900 (full synthetic
+ *  galaxy). The 180 floor was set when small graphs scattered across the
+ *  universe sphere; now that they huddle toward the centre we can sit
+ *  closer (130) so the first frame doesn't read as "tiny dots far away". */
+export function computeInitialCameraDistance(totalNodes: number): number {
+  const n = Math.max(0, totalNodes | 0);
+  return Math.round(Math.max(130, Math.min(900, 30 + 18 * Math.sqrt(n))));
+}
+
 export interface StellarGraphProps {
   /** Graph payload. Updating swaps the canvas data; the camera is preserved. */
   data: StellarGraphData;
@@ -327,15 +418,21 @@ export function StellarGraph(props: StellarGraphProps) {
   // auto-fits to whatever's there. Held in a ref so the zoom-poll +
   // applyZoom paths see the latest value without forcing re-renders.
   const initialDistRef = useRef(900);
+  // feat/stellar-camera-focus — node-count ref. Read by `handleEngineReady`
+  // (single-shot at first attach) so the d3-force tuning and the initial
+  // camera distance both react to the current graph size without making
+  // handleEngineReady depend on `data` (which would defeat the single-shot
+  // guard and reset the camera on every data update).
+  const nodeCountRef = useRef(data.nodes.length);
   // Derive the dist once per data swap and stash in the ref. The
   // handleEngineReady single-shot guard means this only affects the
   // camera at first mount; subsequent toggles/refetches update the
   // zoom-readout reference frame but do not snap the camera.
   useEffect(() => {
-    const n = data.nodes.length;
-    initialDistRef.current = Math.round(
-      Math.max(180, Math.min(900, 30 + 18 * Math.sqrt(n))),
-    );
+    // feat/stellar-camera-focus — floor lowered 180 → 130 (small graphs
+    // sit closer now that they huddle inward; see computeInitialCameraDistance).
+    nodeCountRef.current = data.nodes.length;
+    initialDistRef.current = computeInitialCameraDistance(data.nodes.length);
   }, [data]);
   // B-62-fix-zoom-reset — single-shot guard for handleEngineReady. PO
   // repro: wheel zoom snapped back to ~1.0× within ~150ms. Root cause:
@@ -520,18 +617,16 @@ export function StellarGraph(props: StellarGraphProps) {
       controls.dampingFactor = 0.08;
     }
 
-    // B-62-demo-clusters-edges — tune d3-force-3d charge so clusters
-    // don't collapse to a central hairball. ForceGraph3D wraps the
-    // d3 simulation; .d3Force(name) returns the live force instance.
-    // We bump:
-    //   charge.strength: -30 (default) → -150 — stronger global
-    //     repulsion pushes nodes (and therefore clusters) apart.
-    //   link.distance: ~30 → 18 — keeps intra-cluster ties short so
-    //     each cluster stays compact while the centroids spread.
-    // The synthetic generator pre-seeds positions on a spread sphere
-    // (R=540), tighter halos (σ=32), and 92% intra-cluster ratio —
-    // the force tuning here makes that topology read on the canvas
-    // instead of dissolving once the simulation runs.
+    // B-62-demo-clusters-edges + feat/stellar-camera-focus — d3-force tune
+    // is now density-aware (see compute* helpers at module top).
+    //
+    // Dense graphs (≥120 nodes) keep the B-62 defaults: charge -150 and
+    // link distance 18, which let cluster centroids spread visibly on the
+    // synthetic galaxy. Small graphs (<30 nodes, the PO repro) get
+    // charge -50, link distance 12, AND a gentle inward `center` force —
+    // those three knobs together huddle the few facts toward the origin
+    // so left-click rotation has something to grab onto instead of dust
+    // scattered across the universe sphere.
     type ForceLike = {
       strength?: (s: number) => unknown;
       distance?: (d: number) => unknown;
@@ -540,8 +635,18 @@ export function StellarGraph(props: StellarGraphProps) {
       d3Force?: (name: string) => ForceLike | undefined;
     };
     const inst = handle as unknown as ForceGraphForcedExt;
-    inst.d3Force?.('charge')?.strength?.(-150);
-    inst.d3Force?.('link')?.distance?.(18);
+    // Read via the ref so this stays a stable, prop-independent callback
+    // (the single-shot guard must run with zero `data` deps).
+    const totalNodes = nodeCountRef.current;
+    inst.d3Force?.('charge')?.strength?.(computeChargeStrength(totalNodes));
+    inst.d3Force?.('link')?.distance?.(computeLinkDistance(totalNodes));
+    const centerStrength = computeCenterStrength(totalNodes);
+    if (centerStrength > 0) {
+      // ForceGraph3D mounts a `center` force at the origin by default;
+      // its `.strength(x)` setter is exposed so callers can drive an
+      // explicit inward tug. No-op on engines that don't expose it.
+      inst.d3Force?.('center')?.strength?.(centerStrength);
+    }
 
     // B-62-search-legibility — pull-back uses data-aware initial dist
     // so a 65-node real graph doesn't open as dust at z=900.
@@ -932,14 +1037,18 @@ export function StellarGraph(props: StellarGraphProps) {
   // Focus signals stay in the deps — focus changes are rare and
   // intentional (click only), so the reheat there is acceptable and
   // actually helps re-balance the focal subgraph.
+  const totalNodes = data.nodes.length;
+  const sizeFloor = computeNodeSizeFloor(totalNodes);
   const nodeSize = useCallback(
     (node: StellarNode): number => {
       const importance = node.degree ?? node.weight ?? 1;
-      // B-62-search-legibility — size floor 2.0. Sparse-degree real
-      // facts (degree 0–2) were sub-pixel against the starfield; a
-      // hard floor makes every fact a clearly visible disc, then the
-      // sqrt(importance) ramp still gives important nodes presence.
-      const base = Math.max(2.0, 0.9 + Math.sqrt(importance));
+      // B-62-search-legibility + feat/stellar-camera-focus — size floor
+      // is now density-aware (see computeNodeSizeFloor). PO repro: with
+      // only a handful of facts the discs were tiny against the starfield
+      // and hard to click while orbiting. Small graphs win up to a 5.0
+      // floor; once the count crosses ~100 the floor falls back to the
+      // established 2.0 so a dense galaxy doesn't smother the layout.
+      const base = Math.max(sizeFloor, 0.9 + Math.sqrt(importance));
       // B-62-focus-select-actions — size mirrors the brightness tiers:
       //   focused 1.6 > selected 1.4 > highlighted 1.25 > distant 1.0
       // Selected sits clearly above highlighted on the geometry channel
@@ -950,7 +1059,7 @@ export function StellarGraph(props: StellarGraphProps) {
       else if (focusedId !== null && neighborSet.has(node.id)) scale = 1.25;
       return base * scale;
     },
-    [focusedId, neighborSet, selectedId],
+    [focusedId, neighborSet, selectedId, sizeFloor],
   );
 
   // B-62-v1-fix1 — straight forward to the parent. We no longer hold a
