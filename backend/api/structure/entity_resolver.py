@@ -235,13 +235,24 @@ def _create_entity(
     name_en: str | None = None,
     primary_label: str | None = None,
     primary_lang: str | None = None,
+    entity_class: str | None = None,
 ) -> str:
     """Insert a fresh canonical entity. Returns its object_uid.
 
     Writes BOTH the legacy `name` field (so the recall display path keeps
     working) AND the new canonical `primary_label` / `primary_lang` /
-    `aliases` fields. `class` defaults to "concept" - the canonical
-    entity_type ontology is a separate later ticket.
+    `aliases` fields.
+
+    feat/entity-layer-restore (PO 2026-06-23): `entity_class` is the
+    LLM-classified ObjectClass value as a plain string ("person" /
+    "organization" / "place" / "concept" / ...). When supplied it
+    lands on BOTH the legacy `class` field (back-compat — `recall.py::
+    _facets_for` reads `src.get("class")` for facet bucketing) AND
+    the canonical `entity_type` field (the mapping has
+    `entity_type: keyword`; Recall now prefers `entity_type` and falls
+    back to `class`). When `entity_class` is None we keep the prior
+    "concept" default — this preserves backward compatibility for
+    legacy callers (tests, migrations) that don't carry a class hint.
 
     B-62 natural-spo-display: when `primary_label` is supplied the
     canonical surface picks up that value (the LLM's natural name);
@@ -251,13 +262,17 @@ def _create_entity(
     object_uid = new_uid()
     chosen_primary = primary_label or surface
     chosen_lang = primary_lang or lang
+    chosen_class = entity_class or "concept"
     # B-62 data bedrock: lucid_objects mapping has dynamic=strict, so we
     # only write fields it knows about. Skip embedding for now (the
     # processor will compute it on the object_matcher path; entity
     # resolution itself does not need to embed).
     body: dict[str, Any] = {
         "object_uid": object_uid,
-        "class": "concept",
+        "class": chosen_class,
+        # feat/entity-layer-restore (PO 2026-06-23): canonical metadata
+        # field — Recall facets prefer this over the legacy `class`.
+        "entity_type": chosen_class,
         # `name` carries the canonical natural surface so the recall
         # display path keeps working unchanged.
         "name": chosen_primary,
@@ -325,6 +340,66 @@ def _append_alias(
         logger.warning("entity alias-append update failed for %s: %s", object_uid, exc)
         return False
     return True
+
+
+def _maybe_backfill_class(
+    *,
+    client: Any,
+    object_uid: str,
+    existing: dict[str, Any],
+    entity_class: str | None,
+) -> None:
+    """feat/entity-layer-restore (PO 2026-06-23): when a lookup hit
+    lands on an entity that has the stale "concept" default (or no
+    `entity_type` at all) and the LLM is telling us this surface is a
+    person / organization / place / event / etc., promote the doc.
+
+    No-op when:
+      - The LLM didn't supply a class (legacy callers / migrations).
+      - The LLM's class equals "concept" (no information gained).
+      - The existing doc ALREADY carries a non-concept class that
+        matches the LLM (idempotent — protects the live data from
+        oscillating between two classifiers).
+
+    Writes BOTH `class` (back-compat) and `entity_type` (canonical).
+    Quietly degrades on any ES error — the matcher / processor must
+    never break on a metadata backfill.
+    """
+    if not entity_class or entity_class == "concept":
+        return
+    existing_class = (existing.get("class") or "").strip()
+    existing_entity_type = (existing.get("entity_type") or "").strip()
+    # Idempotent: if BOTH fields already agree with the LLM, nothing
+    # to do. If only one disagrees (or is missing), we backfill.
+    if existing_class == entity_class and existing_entity_type == entity_class:
+        return
+    # Defensive: only PROMOTE concept → real class; don't downgrade an
+    # already-real class to a different one (LLM disagreement should
+    # not silently rewrite history).
+    if existing_class and existing_class != "concept" and existing_class != entity_class:
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "entity-layer-restore SKIP backfill: existing class %r "
+                "differs from llm %r for uid=%s — keeping existing",
+                existing_class, entity_class, object_uid,
+            )
+        return
+    update_doc: dict[str, Any] = {
+        "class": entity_class,
+        "entity_type": entity_class,
+    }
+    try:
+        client.update(
+            index=LUCID_OBJECTS,
+            id=object_uid,
+            doc=update_doc,
+            refresh="wait_for",
+        )
+    except Exception as exc:  # noqa: BLE001 - never break the matcher
+        logger.warning(
+            "entity-layer-restore: class backfill failed for %s: %s",
+            object_uid, exc,
+        )
 
 
 def _repromote_primary_to_surface(
@@ -512,6 +587,7 @@ def resolve_entity(
     co_mention_en: str | None = None,
     llm_name: str | None = None,
     es_client: Any | None = None,
+    entity_class: str | None = None,
 ) -> tuple[str, bool]:
     """Resolve a (surface, lang) entity reference to a canonical entity_id.
 
@@ -581,6 +657,16 @@ def resolve_entity(
                 _maybe_repromote_on_hit(
                     client=client, object_uid=uid, surface=surface,
                 )
+                # feat/entity-layer-restore (PO 2026-06-23): backfill
+                # entity_type / class on legacy docs that landed with
+                # the hardcoded "concept" default. The LLM is the
+                # authoritative classifier here — when it tells us this
+                # entity is a person/organization/place and the doc
+                # carries the stale concept value, promote it.
+                _maybe_backfill_class(
+                    client=client, object_uid=uid,
+                    existing=hit, entity_class=entity_class,
+                )
                 return uid, False
 
     # Cross-language merge: if the LLM gave us the English form alongside
@@ -614,6 +700,12 @@ def resolve_entity(
                     _maybe_repromote_on_hit(
                         client=client, object_uid=uid, surface=surface,
                     )
+                    # feat/entity-layer-restore (PO 2026-06-23): same
+                    # entity_type backfill on co-mention hit path.
+                    _maybe_backfill_class(
+                        client=client, object_uid=uid,
+                        existing=hit, entity_class=entity_class,
+                    )
                     return uid, False
 
     # Nothing matched - mint a fresh canonical entity using the
@@ -645,6 +737,7 @@ def resolve_entity(
         name_en=co_mention_en if co_mention_en and co_mention_en != primary_label else None,
         primary_label=primary_label,
         primary_lang=primary_lang,
+        entity_class=entity_class,
     )
     return object_uid, True
 

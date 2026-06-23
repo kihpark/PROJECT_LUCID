@@ -29,6 +29,15 @@ logger = logging.getLogger("lucid.es.objects")
 
 def _serialize_object(obj: Object, with_embedding: bool = True) -> dict[str, Any]:
     body = obj.model_dump(by_alias=True, mode="json")
+    # feat/entity-layer-restore (PO 2026-06-23): mirror the legacy
+    # `class` value onto the canonical `entity_type` field so every
+    # write path (validate's _upsert_referenced_objects + this writer)
+    # populates both fields. Recall facets prefer `entity_type` and
+    # fall back to `class`. The Pydantic Object model carries
+    # `class_` only; entity_type is a write-side projection.
+    cls_value = body.get("class")
+    if isinstance(cls_value, str) and cls_value.strip():
+        body["entity_type"] = cls_value
     if with_embedding:
         emb = get_embedding(obj.name)
         if emb is not None:

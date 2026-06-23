@@ -125,7 +125,7 @@ def test_korean_common_noun_routes_surface_to_resolver():
     captured: dict = {}
 
     def resolve_entity_mock(surface, lang, *, space_id, co_mention_en=None,
-                            llm_name=None, es_client=None):
+                            llm_name=None, es_client=None, entity_class=None):
         captured["surface"] = surface
         captured["lang"] = lang
         captured["space_id"] = space_id
@@ -163,7 +163,7 @@ def test_brand_subject_surface_normalizes_to_english_canonical():
     captured: dict = {}
 
     def resolve_entity_mock(surface, lang, *, space_id, co_mention_en=None,
-                            llm_name=None, es_client=None):
+                            llm_name=None, es_client=None, entity_class=None):
         captured["surface"] = surface
         captured["llm_name"] = llm_name
         return ("entity-uid-spx", True)
@@ -205,7 +205,7 @@ def test_no_surface_emitted_falls_back_to_obj_name():
     captured: dict = {}
 
     def resolve_entity_mock(surface, lang, *, space_id, co_mention_en=None,
-                            llm_name=None, es_client=None):
+                            llm_name=None, es_client=None, entity_class=None):
         captured["surface"] = surface
         captured["llm_name"] = llm_name
         return ("entity-uid-toy", True)
@@ -253,7 +253,7 @@ def test_object_surface_also_threaded_for_obj_placeholder_object_values():
     captured_surfaces: list[str] = []
 
     def resolve_entity_mock(surface, lang, *, space_id, co_mention_en=None,
-                            llm_name=None, es_client=None):
+                            llm_name=None, es_client=None, entity_class=None):
         captured_surfaces.append(surface)
         return (f"entity-uid-{surface}", True)
 
@@ -276,7 +276,7 @@ def test_resolve_entity_result_flows_into_match_result():
     )
 
     def resolve_entity_mock(surface, lang, *, space_id, co_mention_en=None,
-                            llm_name=None, es_client=None):
+                            llm_name=None, es_client=None, entity_class=None):
         # First call: existing match (was_created=False)
         return ("existing-entity-uid", False)
 

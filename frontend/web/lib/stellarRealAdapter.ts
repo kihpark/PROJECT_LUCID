@@ -44,10 +44,34 @@ interface NodeAccumulator {
   links: StellarLink[];
 }
 
+// feat/entity-layer-restore (PO 2026-06-23): UUID-shape guard so an
+// unresolved entity ref (mget miss on the backend's _enrich_with_labels)
+// never surfaces in the UI as the raw UUID. We render "(엔티티 미해결)"
+// instead. Literals (numbers, dates, Korean strings) are unaffected
+// because they don't match the UUID-4 regex.
+const UUID4_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function displaySubject(fact: RecallFact): string {
+  if (fact.subject_label) return fact.subject_label;
+  if (fact.subject_uid && UUID4_RE.test(fact.subject_uid)) {
+    return '(엔티티 미해결)';
+  }
+  return fact.subject_uid || '(주체 없음)';
+}
+
+function displayObject(fact: RecallFact): string {
+  if (fact.object_label) return fact.object_label;
+  if (fact.object_value && UUID4_RE.test(fact.object_value)) {
+    return '(엔티티 미해결)';
+  }
+  return fact.object_value || '(객체 없음)';
+}
+
 function pushFactAsNode(acc: NodeAccumulator, fact: RecallFact, clusterHint: number): void {
   if (acc.byId.has(fact.fact_uid)) return;
-  const subject = fact.subject_label || fact.subject_uid;
-  const object = fact.object_label || fact.object_value;
+  const subject = displaySubject(fact);
+  const object = displayObject(fact);
   const label = `${subject} · ${predicateLabel(fact.predicate, fact.predicate_label)} · ${object}`;
   const sourceCount = Math.max(1, fact.source_uids?.length ?? 1);
   // B-62-v1 — "검증된 팩트일수록 빛난다" — source count drives the

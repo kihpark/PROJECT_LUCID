@@ -31,7 +31,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from api.models.recall import (
     HomeBrief,
@@ -312,6 +312,7 @@ def _top_cluster(ks_id: str, now: datetime) -> HomeBriefTopCluster:
 
 @router.get("/brief", response_model=HomeBrief)
 def home_brief(
+    response: Response,
     space_id: uuid.UUID | None = Query(
         default=None,
         description="Optional KS override. Defaults to the user's earliest KS.",
@@ -363,6 +364,24 @@ def home_brief(
         sources=sources,
         this_week_validated=this_week_validated,
     )
+
+    # feat/entity-layer-restore (PO 2026-06-23): the home brief is the
+    # nav-badge data source. After a wipe (or any retract / detach)
+    # the user MUST see the new totals immediately; a cached response
+    # makes the badge lie. Backend is already a fresh DB+ES read on
+    # every request, so cache-busting on the response keeps the client
+    # honest. `no-store` defeats the browser disk cache; `Pragma`
+    # covers older proxies.
+    # Defensive: tests call this route as a plain function (no FastAPI
+    # dependency injection), so `response` can arrive as None. Skip the
+    # header writes in that case — they're a UX defense for browsers,
+    # not part of the response model.
+    if response is not None:
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
 
     return HomeBrief(
         totals=totals,

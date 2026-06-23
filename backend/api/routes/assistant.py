@@ -13,9 +13,12 @@ from api.models.assistant import (
     VerifiedFactEntry,
 )
 from api.routes.recall import (
+    _enrich_with_labels,
+    _facts_for_entity,
     _hit_to_fact,
     _knn_facts_validated_only,
     _new_session,
+    _resolve_entities_by_name,
     _resolve_space,
 )
 from api.security import get_current_user
@@ -42,7 +45,26 @@ SYSTEM_PROMPT = """\
 
 
 def _retrieve_candidates(query: str, space_id: str, k: int) -> list[dict[str, Any]]:
-    """Return up to k candidate hits as plain dicts."""
+    """Return up to k candidate hits as plain dicts.
+
+    feat/entity-layer-restore (PO 2026-06-23): mirror Recall's three-
+    stage retrieval so the assistant never returns empty when Recall
+    has hits. Stages:
+
+      1. Semantic kNN over `lucid_facts.embedding` (same as before).
+      2. Entity-name fallback: when kNN returns no above-floor hits,
+         resolve the query as an entity name in `lucid_objects` and
+         pull every fact where that uid sits on subject_uid or
+         object_value (the same path `recall.py` lines 867-891 uses).
+      3. Labels are enriched after the union so the assistant sees
+         the corrected primary_label rather than the raw uid in the
+         subject / object fields it shows the LLM.
+
+    Asymmetry repro: "중국 상무부" — kNN scores ≤ 0.56 (below recall's
+    0.72 floor). Pre-fix: assistant returned empty. Post-fix: the
+    entity lookup returns 4 facts (same as Recall), the LLM gets a
+    populated candidate set, and the briefing returns grounded.
+    """
     embedding = get_embedding(query)
     if embedding is None:
         return []
@@ -50,13 +72,69 @@ def _retrieve_candidates(query: str, space_id: str, k: int) -> list[dict[str, An
         hits = _knn_facts_validated_only(list(embedding), space_id, k)
     except Exception as exc:  # noqa: BLE001
         logger.warning("assistant: ES kNN failed: %s", exc)
-        return []
-    candidates: list[dict[str, Any]] = []
+        hits = []
+
+    # Stage 1 — kNN results, deduped by fact_uid.
+    seen: set[str] = set()
+    facts: list[Any] = []
+    src_by_uid: dict[str, dict[str, Any]] = {}
     for hit in hits:
         fact = _hit_to_fact(hit)
         if fact is None:
             continue
-        src = hit.get("_source") or {}
+        if fact.fact_uid in seen:
+            continue
+        seen.add(fact.fact_uid)
+        facts.append(fact)
+        src_by_uid[fact.fact_uid] = hit.get("_source") or {}
+
+    # Stage 2 — entity-name fallback when kNN found nothing.
+    if not facts:
+        try:
+            matched_entities = _resolve_entities_by_name(query, space_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("assistant: name-lookup fallback failed: %s", exc)
+            matched_entities = []
+        entity_uids = [
+            uid for uid in (
+                doc.get("object_uid") for doc in matched_entities
+            )
+            if isinstance(uid, str)
+        ]
+        if entity_uids:
+            try:
+                seed_hits = _facts_for_entity(
+                    entity_uids, space_id, max_hits=k * 3,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "assistant: name-lookup fact fetch failed: %s", exc,
+                )
+                seed_hits = []
+            for hit in seed_hits:
+                fact = _hit_to_fact(hit)
+                if fact is None or fact.fact_uid in seen:
+                    continue
+                seen.add(fact.fact_uid)
+                facts.append(fact)
+                src_by_uid[fact.fact_uid] = hit.get("_source") or {}
+                if len(facts) >= k:
+                    break
+
+    if not facts:
+        return []
+
+    # Enrich labels (subject_label / object_label) so the LLM sees the
+    # corrected primary_label rather than raw UUIDs. Same path Recall
+    # uses; safe to call on a small list.
+    try:
+        facts = _enrich_with_labels(facts, space_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("assistant: label enrichment failed: %s", exc)
+
+    candidates: list[dict[str, Any]] = []
+    for fact in facts[:k]:
+        src = src_by_uid.get(fact.fact_uid, {})
         candidates.append({
             "fact_uid": fact.fact_uid,
             "claim": fact.claim,

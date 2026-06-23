@@ -650,6 +650,13 @@ def _build_entity_brief(
     )
 
 
+# feat/entity-layer-restore (PO 2026-06-23): facet bucketing. The facet
+# pane in Recall surfaces 4 named buckets (organization / person /
+# place / other). Everything not in the named buckets — concept,
+# service, product, event, procedure, task, metric, resource, problem,
+# knowledge — falls into "other". This is by design: the named buckets
+# are the journalist's first-class entity categories; concept-side
+# entities are still surfaced, just under the catch-all heading.
 _OBJECT_CLASS_BUCKET = {
     "organization": "organization",
     "person": "person",
@@ -661,6 +668,20 @@ def _bucket_for(class_name: str | None) -> str:
     if not class_name:
         return "other"
     return _OBJECT_CLASS_BUCKET.get(class_name.lower(), "other")
+
+
+def _entity_type_of(src: dict[str, Any]) -> str | None:
+    """feat/entity-layer-restore (PO 2026-06-23): prefer the canonical
+    `entity_type` metadata field; fall back to legacy `class` for docs
+    that predate the entity-layer restore. Returns None when neither
+    field carries a usable string."""
+    et = src.get("entity_type")
+    if isinstance(et, str) and et.strip():
+        return et
+    cls = src.get("class")
+    if isinstance(cls, str) and cls.strip():
+        return cls
+    return None
 
 
 def _facets_for(
@@ -722,7 +743,10 @@ def _facets_for(
     if not counts:
         return RecallFacets(predicates=predicates)
 
-    # Single mget for entity {name, class}.
+    # Single mget for entity {name, entity_type|class}. feat/entity-
+    # layer-restore (PO 2026-06-23): prefer `entity_type`, fall back
+    # to `class` so legacy docs (created before the entity-layer
+    # restore) still bucket correctly.
     label_class: dict[str, tuple[str, str | None]] = {}
     try:
         from api.storage.elasticsearch.client import LUCID_OBJECTS
@@ -734,7 +758,7 @@ def _facets_for(
             src = d.get("_source") or {}
             uid = src.get("object_uid") or d.get("_id")
             if uid and src.get("name"):
-                label_class[uid] = (src["name"], src.get("class"))
+                label_class[uid] = (src["name"], _entity_type_of(src))
     except Exception as exc:  # noqa: BLE001
         logger.warning("recall: facet label mget failed: %s", exc)
 
