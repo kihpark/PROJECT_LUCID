@@ -360,13 +360,22 @@ class SourceJobORM(Base):
     only the Sprint 2C lifecycle values; Sprint 3 extends the CHECK
     via a separate migration when 'pending_structure' and downstream
     states land.
+
+    Lifecycle (post-decide-status-transition, 0018):
+      pending_extract → extracting → extracted → extract_failed
+                                     ↓
+                                  structuring → structured → structure_failed
+                                                ↓
+                                              validated    (terminal: Submit
+                                                            in DecideOverlay
+                                                            flipped the row)
     """
 
     __tablename__ = "source_jobs"
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending_extract', 'extracting', 'extracted', 'extract_failed', "
-            "'structuring', 'structured', 'structure_failed')",
+            "'structuring', 'structured', 'structure_failed', 'validated')",
             name="ck_source_job_status",
         ),
         CheckConstraint(

@@ -63,6 +63,14 @@ logger = logging.getLogger("lucid.routes.validate")
 
 router = APIRouter(prefix="/api/spaces/{space_id}", tags=["validate"])
 
+# decide-status-transition: terminal state set after Submit. The home
+# brief's _pending_validation_count filters by status='structured', so
+# flipping to 'validated' is what makes the "검증 대기" count actually
+# drop. DO NOT add 'validated' to the pending-queue filters in
+# list_pending / list_disambig — those are decide-ready filters and
+# validated rows have already been decided.
+VALIDATED_STATUS = "validated"
+
 
 def _new_session():
     return make_sessionmaker()()
@@ -681,6 +689,24 @@ def decide(
         s["last_decided_at"] = datetime.utcnow().isoformat()
         meta_out["structure"] = s
         job.extracted_metadata = meta_out
+
+        # decide-status-transition: flip the SourceJob to the terminal
+        # 'validated' state so the home brief's "검증 대기" count drops
+        # to reflect what the user actually completed.
+        #
+        # Frontend contract (DecideOverlay.onSubmit): every pending
+        # fact carries a default decision (action='accept'), so a
+        # single Submit click sends decisions for ALL pending facts on
+        # the job. There is no partial-Submit UI today, so reaching
+        # this point means the job is fully decided. We still trust
+        # the contract rather than counting validation_logs because:
+        #   (1) ValidationLogORM has no job_id column — counting back
+        #       to a job requires URL+timestamp heuristics that are
+        #       fragile under concurrent submits, and
+        #   (2) accept-all and discard_job already mark the whole job
+        #       'done' implicitly via decided_fact_uids; flipping
+        #       status on Submit puts /decide on the same footing.
+        _mark_job_validated(job)
         session.commit()
 
         return DecideResponse(
@@ -694,6 +720,20 @@ def decide(
         )
     finally:
         session.close()
+
+
+def _mark_job_validated(job: SourceJobORM) -> None:
+    """Flip a SourceJob to the terminal `validated` state.
+
+    Idempotent: re-marking an already-validated job is a no-op (the
+    DB CHECK constraint accepts the same value). We DO NOT downgrade
+    a job whose status is not 'structured' (defensive: if a future
+    flow lands us here with an unexpected status — e.g. a manual DB
+    edit — we leave it alone rather than overwrite). The expected
+    pre-state is 'structured' or 'validated'.
+    """
+    if job.status in ("structured", "validated"):
+        job.status = VALIDATED_STATUS
 
 
 @router.post("/pending/{job_id}/accept-all", response_model=DecideResponse)
@@ -790,6 +830,9 @@ def accept_all(
         s["last_decided_at"] = datetime.utcnow().isoformat()
         meta_out["structure"] = s
         job.extracted_metadata = meta_out
+        # decide-status-transition: accept-all also terminates validation
+        # for the job — flip status so the home count drops.
+        _mark_job_validated(job)
         session.commit()
 
         return DecideResponse(
@@ -832,6 +875,9 @@ def discard_job(
         s["last_decided_at"] = datetime.utcnow().isoformat()
         meta_out["structure"] = s
         job.extracted_metadata = meta_out
+        # decide-status-transition: whole-job discard also terminates
+        # validation — flip status so the home count drops.
+        _mark_job_validated(job)
         session.commit()
 
         return DecideResponse(
