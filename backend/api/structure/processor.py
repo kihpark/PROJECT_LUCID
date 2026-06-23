@@ -50,6 +50,7 @@ from api.storage.elasticsearch.embeddings import get_embedding
 from api.storage.postgres.orm import SourceJobORM
 from api.storage.postgres.session import make_sessionmaker
 from api.structure.brand_resolver import resolve_korean_brand
+from api.structure.completeness_validator import check_completeness
 from api.structure.decomposer import decompose
 from api.structure.entity_resolver import _detect_lang
 from api.structure.link_creator import LinkCreationResult, create_links
@@ -613,6 +614,48 @@ def _serialize_struct_fact(
                 or _was_corrected(obj_val_raw, d.get("object_surface"))
             ):
                 d["object_surface"] = object_label
+    # feat/spo-decomp-completeness (PO 2026-06-23): deterministic
+    # completeness check. Verifies the SPO surface (subject_label +
+    # predicate + object_value/label) covers the claim's content
+    # tokens. PO directive: 자르기만, 내용 추가 금지 — we ONLY flag,
+    # never re-decompose. The Decide UI surfaces incomplete facts so
+    # the human can repair manually.
+    #
+    # Use the CORRECTED surfaces (subject_label / object_label) when
+    # available — those are post-recovery / post-brand-canonicalization
+    # so the coverage check measures what the user will actually see
+    # in the Decide UI, not the LLM's raw output.
+    subject_for_check = (
+        d.get("subject_label") or d.get("subject_surface") or ""
+    )
+    object_for_check_raw = d.get("object_label") or d.get("object_surface") or ""
+    # When object_value is a literal (e.g. "750억달러", "흑자"), use it.
+    # When object_value is an obj-N reference, prefer the resolved label.
+    if not object_for_check_raw and isinstance(f.object_value, str):
+        if _OBJ_PLACEHOLDER_RE.match(f.object_value):
+            # No resolved label and it's just a placeholder uid — empty.
+            object_for_check_raw = ""
+        else:
+            object_for_check_raw = f.object_value
+    completeness = check_completeness(
+        claim=f.claim or "",
+        subject=subject_for_check,
+        predicate=raw_predicate,
+        object_text=object_for_check_raw,
+    )
+    if not completeness["complete"]:
+        d["needs_review"] = True
+        logger.info(
+            "completeness check fail: claim=%r missing=%s coverage=%.2f",
+            (f.claim or "")[:80],
+            list(completeness["missing"])[:5],
+            float(completeness["coverage"]),
+        )
+    d["completeness"] = {
+        "complete": bool(completeness["complete"]),
+        "missing": list(completeness["missing"])[:10],
+        "coverage": round(float(completeness["coverage"]), 2),
+    }
     # tags carries the LLM's tags_suggested when present (we don't
     # synthesize tags in this PR; real tagging is a later ticket).
     d.setdefault("tags", list(d.get("tags_suggested") or []))
