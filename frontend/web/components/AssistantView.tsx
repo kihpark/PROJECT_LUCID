@@ -67,15 +67,31 @@ function InferenceCard({ inference }: { inference: string }) {
   return (
     <div
       data-testid="inference-card"
+      data-variant="primary"
       style={{
         border: `1px solid ${GRAY_BORDER}`,
         background: '#0a1115',
-        borderRadius: 10,
-        padding: '14px 16px',
-        marginTop: 12,
+        borderRadius: 12,
+        padding: '20px 22px',
+        marginBottom: 20,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span
+          data-testid="inference-answer-chip"
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: TEXT_PRIMARY,
+            background: '#1b242a',
+            border: `1px solid ${GRAY_BORDER}`,
+            borderRadius: 4,
+            padding: '2px 7px',
+            letterSpacing: '0.04em',
+          }}
+        >
+          AI 답변
+        </span>
         <span
           data-testid="inference-label"
           style={{
@@ -91,7 +107,10 @@ function InferenceCard({ inference }: { inference: string }) {
           AI 추론 · 미보증
         </span>
       </div>
-      <div style={{ fontSize: 14, color: TEXT_SECONDARY, lineHeight: 1.6 }}>
+      <div
+        data-testid="inference-body"
+        style={{ fontSize: 17, color: TEXT_PRIMARY, lineHeight: 1.65, fontWeight: 500 }}
+      >
         {inference}
       </div>
     </div>
@@ -199,19 +218,29 @@ export function AssistantView({ spaceId }: Props) {
             </div>
           )}
 
+          {result.inference && (
+            <InferenceCard inference={result.inference} />
+          )}
+
           {result.grounded && result.verified.length > 0 && (
             <div data-testid="verified-section" style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 10, fontWeight: 600 }}>
-                검증된 사실 ({result.verified.length}건)
+              <div
+                data-testid="verified-section-header"
+                style={{
+                  fontSize: 11,
+                  color: TEXT_DIM,
+                  marginBottom: 10,
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                근거 사실 {result.verified.length}건
               </div>
               {result.verified.map((entry) => (
                 <VerifiedCard key={entry.fact_uid} entry={entry} />
               ))}
             </div>
-          )}
-
-          {result.inference && (
-            <InferenceCard inference={result.inference} />
           )}
         </div>
       )}
