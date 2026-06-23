@@ -55,6 +55,7 @@ vi.mock('@/lib/useAuthMe', () => ({
 }));
 
 import { HomePage, greetingFor, selectViewState } from '@/components/HomePage';
+import { LUCID_VERSION } from '@/lib/version';
 
 const POPULATED: HomeBrief = {
   totals: {
@@ -400,6 +401,52 @@ describe('selectViewState', () => {
 
   it('returns "populated" when brief has facts', () => {
     expect(selectViewState(POPULATED)).toBe('populated');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// feat/changelog-and-version-display (2026-06-23):
+//
+// PO established versioning discipline (v0.1.0 anchor before data-model
+// overhaul). The home page should surface the current version in a small,
+// subtle footer so the PO can confirm at-a-glance which dogfood round
+// they are looking at. The constant lives in `lib/version.ts` and is
+// the SINGLE SOURCE OF TRUTH — never read from package.json at runtime.
+// ---------------------------------------------------------------------------
+
+describe('LUCID_VERSION constant', () => {
+  it('matches the semver-ish pre-alpha format 0.MINOR.PATCH', () => {
+    // Pre-alpha 0.y.z — 0.MINOR = dogfood round unit, tag = PO graduation.
+    expect(LUCID_VERSION).toMatch(/^0\.\d+\.\d+$/);
+  });
+
+  it('is currently pinned at 0.1.0 (the anchor before data-model overhaul)', () => {
+    expect(LUCID_VERSION).toBe('0.1.0');
+  });
+});
+
+describe('HomePage version footer', () => {
+  beforeEach(() => {
+    useHomeBriefMock.mockReturnValue({ brief: EMPTY, pendingCount: 0 });
+  });
+
+  it('renders the version footer on the cold-start (empty) arm', () => {
+    render(<HomePage userName="박기흥" />);
+
+    const footer = screen.getByTestId('home-version-footer');
+    expect(footer).toBeInTheDocument();
+    expect(footer).toHaveTextContent(`Lucid v${LUCID_VERSION}`);
+    expect(footer).toHaveTextContent('Lucid v0.1.0');
+  });
+
+  it('renders the version footer on the populated arm', () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+
+    render(<HomePage userName="박기흥" />);
+
+    const footer = screen.getByTestId('home-version-footer');
+    expect(footer).toBeInTheDocument();
+    expect(footer).toHaveTextContent('Lucid v0.1.0');
   });
 });
 

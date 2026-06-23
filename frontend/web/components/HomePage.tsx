@@ -33,6 +33,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 import { useAuthMe } from '@/lib/useAuthMe';
+import { LUCID_VERSION } from '@/lib/version';
 import type { HomeBrief } from '@/lib/types';
 import type { MeResponse } from '@/lib/api';
 
@@ -1071,6 +1072,18 @@ function HomeShellCommon({
         <StatusLabel>{statusLabel}</StatusLabel>
         <GreetingH1 name={userName} />
         {children}
+        <footer
+          data-testid="home-version-footer"
+          style={{
+            marginTop: 48,
+            fontSize: 11,
+            color: TEXT_DIMMEST,
+            textAlign: 'center',
+            letterSpacing: '0.04em',
+          }}
+        >
+          Lucid v{LUCID_VERSION}
+        </footer>
       </div>
     </main>
   );
