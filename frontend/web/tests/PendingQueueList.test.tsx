@@ -49,12 +49,43 @@ describe('PendingQueueList', () => {
     expect(screen.getByTestId('pending-card-job-2')).toBeInTheDocument();
   });
 
-  it('shows negation + disambig indicators only when set', () => {
+  it('shows disambig indicator only when set (negation badge removed per feat/negation-policy-consistency)', () => {
     render(<PendingQueueList page={page} onPage={() => {}} />);
-    const negationIndicators = screen.getAllByTitle('negation_flag');
+    // feat/negation-policy-consistency: the ⚠ negation chip used to
+    // render whenever job.has_negation was true. PO's policy (already
+    // enforced on Decide via feat/decide-ux-v3) is that the warning
+    // should only fire on an ACTUAL contradiction relation, not on
+    // every sentence containing 안 / 없 / 못. Until fact_relations is
+    // wired (schema-only today) the chip is fully removed in the queue.
+    // job-2 has has_negation=true in the test fixture but no badge
+    // should render — that is exactly the consistency check the PO asked for.
+    expect(screen.queryByTitle('negation_flag')).toBeNull();
+    expect(screen.queryByText(/negation/i)).toBeNull();
     const disambigIndicators = screen.getAllByTitle('disambiguation_pending');
-    expect(negationIndicators).toHaveLength(1);
     expect(disambigIndicators).toHaveLength(1);
+  });
+
+  it('does NOT render the negation badge even when has_negation=true on every job', () => {
+    // feat/negation-policy-consistency regression guard: build a page where
+    // EVERY job carries has_negation=true and assert zero badges render.
+    // If a future change re-introduces the badge keyed on has_negation,
+    // this test will fail noisily.
+    const allNegated: PendingPage = {
+      ...page,
+      items: page.items.map((j) => ({ ...j, has_negation: true })),
+    };
+    render(<PendingQueueList page={allNegated} onPage={() => {}} />);
+    expect(screen.queryAllByTitle('negation_flag')).toHaveLength(0);
+    expect(screen.queryByText(/negation/i)).toBeNull();
+  });
+
+  it('renders no negation badge when has_negation=false either (sanity)', () => {
+    const noneNegated: PendingPage = {
+      ...page,
+      items: page.items.map((j) => ({ ...j, has_negation: false })),
+    };
+    render(<PendingQueueList page={noneNegated} onPage={() => {}} />);
+    expect(screen.queryByTitle('negation_flag')).toBeNull();
   });
 
   it('Next button calls onPage with offset+limit', () => {
