@@ -30,7 +30,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 import { useAuthMe } from '@/lib/useAuthMe';
 import type { HomeBrief } from '@/lib/types';
@@ -179,10 +179,33 @@ function StatusLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Component 4 — greeting H1. Shared by both states. */
+/** Component 4 — greeting H1. Shared by both states.
+ *
+ * Hydration contract: the time-of-day branch (아침/오후/저녁) MUST be
+ * decided on the client, not during SSR. Otherwise the server renders
+ * with the server-process TZ (UTC on Vercel/Render) and the client
+ * re-renders with the user's local TZ, producing a React hydration
+ * mismatch warning (`HomePage.tsx:187 GreetingH1` — server "아침" vs
+ * client "오후").
+ *
+ * Fix: first paint (SSR + first client paint before effects run) uses
+ * a neutral, TZ-independent greeting "안녕하세요". After mount, the
+ * effect computes the local-time greeting and we re-render. The
+ * data-testid + name interpolation stay identical so the existing
+ * test contract ("home-greeting" contains the userName) holds in both
+ * paints.
+ */
 function GreetingH1({ name }: { name: string }) {
-  const hour = new Date().getHours();
-  const greeting = greetingFor(hour);
+  const [greeting, setGreeting] = useState<string | null>(null);
+
+  useEffect(() => {
+    setGreeting(greetingFor(new Date().getHours()));
+  }, []);
+
+  // First paint (SSR + pre-effect client) — neutral fallback that is
+  // identical on both sides of the hydration boundary.
+  const text = greeting ?? '안녕하세요';
+
   return (
     <h1
       data-testid="home-greeting"
@@ -196,7 +219,7 @@ function GreetingH1({ name }: { name: string }) {
         textAlign: 'center',
       }}
     >
-      {greeting}, {name}님.
+      {text}, {name}님.
     </h1>
   );
 }
