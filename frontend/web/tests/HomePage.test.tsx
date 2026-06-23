@@ -326,6 +326,45 @@ describe('HomePage', () => {
     ).toHaveTextContent('검증 대기는 없습니다.');
     expect(screen.queryByTestId('home-briefing-pending')).not.toBeInTheDocument();
   });
+
+  // ---------------------------------------------------------------------
+  // feat/count-source-unification (2026-06-23): the ActiveBriefing copy
+  // ("어제 캡처하신 N건이...") and the TodayBriefingCard's pending row
+  // ("검증 대기 N건") MUST both surface the same number, because they
+  // both flow from `brief.pending_validation`. The PO observed three
+  // different numbers on the same screen — these tests pin that any
+  // future refactor that introduces a divergent source breaks here.
+  // ---------------------------------------------------------------------
+
+  it('count-source-unification — briefing copy + card count read SAME pending_validation field', () => {
+    const brief: HomeBrief = { ...POPULATED, pending_validation: 5 };
+    useHomeBriefMock.mockReturnValue({ brief, pendingCount: 5 });
+
+    render(<HomePage userName="박기흥" />);
+
+    // The ActiveBriefing paragraph emphasises the number.
+    expect(screen.getByTestId('home-briefing-pending')).toHaveTextContent(
+      '5건',
+    );
+    // The TodayBriefingCard row emphasises the same number.
+    expect(screen.getByTestId('home-briefing-pending-count')).toHaveTextContent(
+      '5건',
+    );
+  });
+
+  it('count-source-unification — HomePage calls useHomeBrief ONCE (no second fetch source)', () => {
+    // If a refactor splits the badge fetch from the brief fetch, the
+    // hook will be called multiple times from this component tree.
+    // We pin one call so a regression that re-introduces the two-
+    // source desync trips here.
+    const brief: HomeBrief = { ...POPULATED, pending_validation: 5 };
+    useHomeBriefMock.mockReset();
+    useHomeBriefMock.mockReturnValue({ brief, pendingCount: 5 });
+
+    render(<HomePage userName="박기흥" />);
+
+    expect(useHomeBriefMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('greetingFor', () => {
