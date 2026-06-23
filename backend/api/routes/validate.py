@@ -55,6 +55,7 @@ from api.models.validate import (
     PendingJobSummary,
     PendingPage,
 )
+from api.routes.home import _decide_ready_jobs
 from api.security import get_current_user
 from api.storage.postgres.orm import GraphNote, KnowledgeSpace, SourceJobORM, User
 from api.storage.postgres.session import make_sessionmaker
@@ -160,25 +161,31 @@ def list_pending(
     limit: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
 ) -> PendingPage:
-    """Return the caller's structured-but-not-yet-validated SourceJobs."""
+    """Return the caller's structured-but-not-yet-validated SourceJobs.
+
+    feat/count-source-unification (2026-06-23): the prefilter
+    now flows through `_decide_ready_jobs` from home.py — the
+    ONE TRUE FILTER shared with the home brief's
+    `pending_validation` field and the AppShell "검증(N)" badge.
+    Previously this route filtered `status='structured'` only,
+    while the home brief had no fact_count filter and the
+    /pending list had its own _job_summary>0 drop — three numbers,
+    no agreement.
+    """
     session = _new_session()
     try:
         ks = _resolve_space(session, space_id, user)
-        stmt = (
-            select(SourceJobORM)
-            .where(SourceJobORM.knowledge_space_id == ks.id)
-            .where(SourceJobORM.status == "structured")
-        )
+        query = _decide_ready_jobs(session, user.id, ks.id)
         if source_url:
-            stmt = stmt.where(SourceJobORM.source_url == source_url)
+            query = query.filter(SourceJobORM.source_url == source_url)
         if source_type:
-            stmt = stmt.where(SourceJobORM.source_type == source_type)
+            query = query.filter(SourceJobORM.source_type == source_type)
         if captured_after is not None:
-            stmt = stmt.where(SourceJobORM.captured_at >= captured_after)
+            query = query.filter(SourceJobORM.captured_at >= captured_after)
         if captured_before is not None:
-            stmt = stmt.where(SourceJobORM.captured_at < captured_before)
+            query = query.filter(SourceJobORM.captured_at < captured_before)
 
-        rows = list(session.scalars(stmt).all())
+        rows = list(query.all())
 
         # The has_negation / has_disambiguation filters require a peek
         # at extracted_metadata which is per-row JSONB — apply after fetch.

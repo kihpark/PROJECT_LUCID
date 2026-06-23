@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import Integer, cast
 
 from api.models.recall import (
     HomeBrief,
@@ -59,6 +60,11 @@ router = APIRouter(prefix="/api/home", tags=["home"])
 # would have to retry capture, not validate. Future work can add
 # more statuses to this set without touching the response shape.
 PENDING_VALIDATION_STATUSES: frozenset[str] = frozenset({"structured"})
+
+# Alias retained for callers that read the new vocabulary. Both names
+# point at the same frozenset so any later widening (e.g. adding
+# `restructured`) happens in one place.
+DECIDE_READY_STATUSES: frozenset[str] = PENDING_VALIDATION_STATUSES
 
 # 7-day window for "this week validated" + top cluster. UTC-anchored
 # so the answer is deterministic across the user's local timezone
@@ -155,23 +161,73 @@ def _this_week_count(ks_id: str, now: datetime) -> int:
     return _safe_count(LUCID_FACTS, filters)
 
 
+def _decide_ready_jobs(
+    session: Any, user_id: uuid.UUID, ks_id: uuid.UUID,
+):
+    """Return a SQLAlchemy query of SourceJobORM rows that are READY
+    FOR THE USER TO DECIDE — feat/count-source-unification (2026-06-23).
+
+    Criteria:
+      - status='structured' (LLM extraction succeeded)
+      - extracted_metadata.structure.fact_count > 0 (something to
+        decide on; legacy LLM parse failures with fact_count=0 are
+        excluded so they don't inflate the validate badge)
+      - knowledge_space_id matches the active KS
+      - user_id matches the caller
+
+    This is the ONE TRUE FILTER used by:
+      - HomePage AppShell "검증(N)" tab badge
+      - HomePage TodayBriefingCard "검증 대기 N건" copy
+      - /api/spaces/{ks}/pending list endpoint
+
+    They MUST agree. If you're tempted to add another filter
+    elsewhere, add it here instead.
+
+    Note: the /pending list applies one further per-row drop
+    (jobs whose every fact is already decided collapse to 0
+    pending) which can make the rendered list count one or two
+    lower than this query's `.count()`. That's by design — the
+    drop happens after fetch because it needs JSONB introspection
+    PO did not want to push into SQL. Surface-level agreement
+    between the BADGE and the LIST.total is the contract.
+
+    NOTE TO FUTURE WORK: fact_count=0 jobs (legacy LLM parse
+    failures) are filtered OUT here but remain in DB. A follow-up
+    can surface them as a separate "처리 실패 N건" strip; see
+    COUNT_SOURCE_DISCOVERY.md for context.
+    """
+    return (
+        session.query(SourceJobORM)
+        .filter(
+            SourceJobORM.user_id == user_id,
+            SourceJobORM.knowledge_space_id == ks_id,
+            SourceJobORM.status.in_(DECIDE_READY_STATUSES),
+            cast(
+                SourceJobORM.extracted_metadata["structure"]["fact_count"],
+                Integer,
+            )
+            > 0,
+        )
+        .order_by(SourceJobORM.created_at.desc())
+    )
+
+
 def _pending_validation_count(
     session: Any, user_id: uuid.UUID, ks_id: uuid.UUID,
 ) -> int:
-    """SourceJobORM rows for this user + KS whose status sits in the
-    decide-ready set. Returns 0 on any DB error so a Postgres
+    """SourceJobORM rows for this user + KS that the user can
+    actually decide on. Returns 0 on any DB error so a Postgres
     hiccup can't 500 the home shell.
+
+    feat/count-source-unification (2026-06-23): now backed by
+    `_decide_ready_jobs` so the home brief's `pending_validation`
+    field, the AppShell badge, and the /pending list page agree.
+    Previously this counted all `status='structured'` jobs,
+    including jobs with `fact_count=0` (legacy LLM parse fails),
+    which inflated the badge above the rendered /pending list.
     """
     try:
-        return int(
-            session.query(SourceJobORM)
-            .filter(
-                SourceJobORM.user_id == user_id,
-                SourceJobORM.knowledge_space_id == ks_id,
-                SourceJobORM.status.in_(PENDING_VALIDATION_STATUSES),
-            )
-            .count()
-        )
+        return int(_decide_ready_jobs(session, user_id, ks_id).count())
     except Exception as exc:  # noqa: BLE001
         logger.warning("home: pending_validation count failed: %s", exc)
         return 0
