@@ -16,6 +16,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 
 import type { HomeBrief } from '@/lib/types';
 
@@ -399,5 +400,85 @@ describe('selectViewState', () => {
 
   it('returns "populated" when brief has facts', () => {
     expect(selectViewState(POPULATED)).toBe('populated');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// feat/home-greeting-hydration (2026-06-23):
+//
+// The time-of-day greeting branch (아침/오후/저녁) depends on the local TZ.
+// When the Next.js server (UTC by default on hosted environments) renders
+// SSR HTML, and the user's browser hydrates with a non-UTC clock, the two
+// branches disagree → React emits a recoverable hydration mismatch warning
+// targeting `GreetingH1` at HomePage.tsx:187.
+//
+// Contract: the FIRST paint (both server SSR and the pre-effect client
+// render) MUST show a neutral, TZ-independent greeting. After mount, the
+// useEffect computes the local-time greeting and the component re-renders.
+// ---------------------------------------------------------------------------
+
+describe('GreetingH1 hydration', () => {
+  beforeEach(() => {
+    useHomeBriefMock.mockReturnValue({ brief: EMPTY, pendingCount: 0 });
+  });
+
+  it('SSR (renderToString — no effects) renders neutral greeting "안녕하세요", not a TZ-dependent branch', () => {
+    // renderToString never runs useEffect, so the output mirrors what
+    // the Next.js server emits into the HTML the browser receives.
+    const html = renderToString(<HomePage userName="박기흥" />);
+    expect(html).toContain('안녕하세요');
+    expect(html).toContain('박기흥');
+    // None of the three time-branch literals leak into SSR markup.
+    expect(html).not.toContain('좋은 아침입니다');
+    expect(html).not.toContain('좋은 오후입니다');
+    expect(html).not.toContain('좋은 저녁입니다');
+  });
+
+  it('first client paint shows neutral fallback, then re-renders with local-time greeting after mount', () => {
+    // Pin the wall-clock to 15:00 local → "좋은 오후입니다".
+    const fixed = new Date();
+    fixed.setHours(15, 0, 0, 0);
+    vi.useFakeTimers();
+    vi.setSystemTime(fixed);
+
+    try {
+      // act() flushes the initial render AND post-render effects, so
+      // by the time render() returns we already see the "after mount"
+      // state. That's the same lifecycle the browser observes — by the
+      // time the user looks at pixels, the effect has run and the
+      // greeting matches local time.
+      render(<HomePage userName="박기흥" />);
+
+      const greeting = screen.getByTestId('home-greeting');
+      expect(greeting).toHaveTextContent('좋은 오후입니다');
+      expect(greeting).toHaveTextContent('박기흥');
+      // Neutral fallback no longer present after the effect runs.
+      expect(greeting.textContent).not.toContain('안녕하세요');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('local-time greeting branches correctly at morning / afternoon / evening boundaries', () => {
+    const cases: Array<[number, string]> = [
+      [7, '좋은 아침입니다'],
+      [15, '좋은 오후입니다'],
+      [21, '좋은 저녁입니다'],
+    ];
+    for (const [hour, expected] of cases) {
+      const fixed = new Date();
+      fixed.setHours(hour, 0, 0, 0);
+      vi.useFakeTimers();
+      vi.setSystemTime(fixed);
+      try {
+        render(<HomePage userName="박기흥" />);
+        expect(screen.getByTestId('home-greeting')).toHaveTextContent(
+          expected,
+        );
+      } finally {
+        vi.useRealTimers();
+        cleanup();
+      }
+    }
   });
 });
