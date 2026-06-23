@@ -1499,3 +1499,92 @@ describe('FactCard - decide-chip-click-bind: LIVE click path (parent re-renders)
   });
 });
 
+// v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split.
+// The FactCard renders a [CLAIM] badge in the header when
+// fact_type='claim' and a speaker / speech_act / content_claim
+// strip below the claim. Action facts (fact_type='action' or
+// undefined for legacy back-compat) render unchanged.
+describe('FactCard — claim (v0.2.0 step 1)', () => {
+  const claimFact: FactSummary = {
+    ...baseFact,
+    fact_uid: 'fn-claim-1',
+    fact_type: 'claim',
+    speaker_uid: 'obj-1',
+    speaker_label: '안도걸 의원',
+    speech_act: '밝혔다',
+    content_claim: '디지털자산기본법 제정에 속도를 낼 것',
+    stance: 'neutral',
+  };
+
+  it('renders [CLAIM] badge when fact_type=claim', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={claimFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    expect(
+      screen.getByTestId('fact-claim-badge-fn-claim-1'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders speaker_label + speech_act + content_claim strip', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={claimFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    const strip = screen.getByTestId('fact-claim-strip-fn-claim-1');
+    expect(strip).toHaveTextContent('안도걸 의원');
+    expect(strip).toHaveTextContent('밝혔다');
+    expect(strip).toHaveTextContent('디지털자산기본법 제정에 속도를 낼 것');
+  });
+
+  it('does NOT render [CLAIM] badge when fact_type=action', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{ ...baseFact, fact_type: 'action' }}
+        action="accept"
+        lang="kr"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.queryByTestId('fact-claim-badge-fn-1')).toBeNull();
+  });
+
+  it('does NOT render [CLAIM] badge when fact_type is undefined (legacy)', () => {
+    // Back-compat: legacy facts pre-fact-claim-layer-v1 have no
+    // fact_type field. They MUST render exactly like action facts —
+    // no badge, no claim strip, no UI regression for the dominant
+    // case.
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={baseFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    expect(screen.queryByTestId('fact-claim-badge-fn-1')).toBeNull();
+    expect(screen.queryByTestId('fact-claim-strip-fn-1')).toBeNull();
+  });
+
+  it('does NOT render claim strip when fact_type=claim but speaker fields empty', () => {
+    // Defensive: if the LLM tags fact_type='claim' but somehow
+    // omits the speaker / speech_act / content_claim (out-of-band
+    // ingestion path), the strip stays hidden — the badge alone
+    // is the type signal, the strip is the optional detail.
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{
+          ...baseFact,
+          fact_uid: 'fn-claim-empty',
+          fact_type: 'claim',
+        }}
+        action="accept"
+        lang="kr"
+        onChange={onChange}
+      />,
+    );
+    expect(
+      screen.getByTestId('fact-claim-badge-fn-claim-empty'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('fact-claim-strip-fn-claim-empty')).toBeNull();
+  });
+});
+

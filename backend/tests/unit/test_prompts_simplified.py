@@ -77,18 +77,22 @@ def test_faithful_decomp_rule_clause_present() -> None:
 
 
 def test_few_shot_examples_count_unchanged() -> None:
-    """We did NOT touch the few-shot block. Trimming happened in
-    SYSTEM_PROMPT body only. PR-3-2's count test (6) must still pass.
-    """
-    assert len(FEW_SHOT_EXAMPLES) == 6
+    """v0.2.0 step 1 (fact-claim-layer-v1) appends 3 KO claim few-shots
+    on top of the PR-3-2 baseline (6) → 9 total. The new shots teach
+    the LLM the Action vs Claim classification and the speaker /
+    speech_act / content_claim / stance fields."""
+    assert len(FEW_SHOT_EXAMPLES) == 9
 
 
 def test_prompt_is_meaningfully_shorter() -> None:
-    """The simplified prompt should be at least 15% shorter than the
+    """The simplified prompt should be meaningfully shorter than the
     6th-round version. Hard count: pre-simplification SYSTEM_PROMPT
-    was ~14,500 chars; after cuts we want under ~12,500.
+    was ~14,500 chars. v0.2.0 step 1 (fact-claim-layer-v1) added
+    the Step 2c Action vs Claim rule + schema annotation; that
+    raises the floor a touch (the rule is ~25 lines / ~1.1KB) but
+    the simplification savings still hold. Target: under ~13_000.
     """
-    assert len(SYSTEM_PROMPT) < 12_500, (
-        f"SYSTEM_PROMPT is {len(SYSTEM_PROMPT)} chars; expected <12500 "
-        f"after removing the v3 verbatim block."
+    assert len(SYSTEM_PROMPT) < 13_000, (
+        f"SYSTEM_PROMPT is {len(SYSTEM_PROMPT)} chars; expected <13000 "
+        f"after the simplification + the v0.2.0 Action/Claim rule."
     )
