@@ -80,6 +80,22 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             # B-62 structure-resolve - HITL surface flag. True when
             # the predicate degraded to RELATED_TO.
             "needs_review": {"type": "boolean"},
+            # B-62 spo-decide-payload-wire / mappings-sync-permanent
+            # (2026-06-23) - Decide-UI display labels resolved at fact-
+            # serialize time. The Decide UI reads these directly when
+            # present (else falls back to `subject_uid` / `object_value`).
+            # Keyword because the writer emits a normalized surface
+            # string, not free-text — exact-match recall + facet display
+            # only.
+            "subject_label": {"type": "keyword"},
+            "object_label": {"type": "keyword"},
+            # B-62 spo-decide-payload-wire / mappings-sync-permanent
+            # (2026-06-23) - True when `detect_predicate_violation` fires
+            # at fact-serialize time (subject/object class violates the
+            # predicate's OPL constraint). The Decide UI shows a warning
+            # chip; recall does not filter on it. Independent of
+            # `needs_review` (which fires on RELATED_TO degrade).
+            "predicate_violation": {"type": "boolean"},
             "tags": {"type": "keyword"},
             "aliases": {"type": "text", "analyzer": "korean_analyzer"},
             "override_warning": {"type": "boolean"},

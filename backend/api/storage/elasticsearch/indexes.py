@@ -136,6 +136,93 @@ def reindex_all() -> dict[str, str]:
     return create_indexes()
 
 
+def ensure_mappings(client=None, *, mappings_module=None) -> dict[str, list[str]]:
+    """Non-destructive mapping sync for facts/objects/sources.
+
+    feat/mappings-sync-permanent (2026-06-23): codifies the runtime
+    `put_mapping` reconciliation we ran against PO's dev ES when the
+    `lucid_objects` / `lucid_facts` indexes drifted behind the writer
+    code (entity-resolver added `primary_label` / `primary_lang`;
+    spo-decide-payload-wire added `subject_label` / `object_label` /
+    `predicate_violation`). Without this hook, the next mapping
+    drift between a live cluster and the declared file would crash
+    every `bulk_create_facts` call with `strict_dynamic_mapping_exception`.
+
+    For each declared index mapping (facts / objects / sources) we
+    fetch the LIVE properties and PUT any properties that are
+    declared in code but missing on the cluster. Existing data is
+    preserved — ES `put_mapping` is additive at the leaf-field level.
+
+    Intentionally does NOT extend the destructive
+    `_applications_mapping_needs_recreate` detector to facts /
+    objects — those indexes hold real PO data and must never be
+    silently dropped.
+
+    The lucid_applications index is excluded because its strict-shape
+    legacy handling is already covered by the destructive detector
+    above; mixing the two would mask legacy-key drift.
+
+    Returns dict { index_name: [field, ...] } listing fields newly
+    added per index. An empty list means the live mapping already
+    matches the declared one. Missing indexes are absent from the
+    return dict entirely (caller can join against `create_indexes()`
+    output to distinguish missing-index from already-synced).
+    """
+    if client is None:
+        client = get_client()
+    if mappings_module is None:
+        from api.storage.elasticsearch import mappings as mappings_module
+
+    declared: dict[str, dict] = {
+        LUCID_FACTS: mappings_module.LUCID_FACTS_MAPPING,
+        LUCID_OBJECTS: mappings_module.LUCID_OBJECTS_MAPPING,
+        LUCID_SOURCES: mappings_module.LUCID_SOURCES_MAPPING,
+    }
+
+    added: dict[str, list[str]] = {}
+    for index_name, declared_mapping in declared.items():
+        if not client.indices.exists(index=index_name):
+            continue
+        try:
+            live = client.indices.get_mapping(index=index_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ensure_mappings: get_mapping failed for %s: %s — skipping",
+                index_name, exc,
+            )
+            added[index_name] = []
+            continue
+        live_props = (
+            live.get(index_name, {})
+            .get("mappings", {})
+            .get("properties", {})
+        )
+        declared_props = (
+            declared_mapping.get("mappings", {}).get("properties", {})
+        )
+        to_add = {
+            k: v for k, v in declared_props.items() if k not in live_props
+        }
+        if not to_add:
+            added[index_name] = []
+            continue
+        try:
+            client.indices.put_mapping(index=index_name, properties=to_add)
+            added[index_name] = list(to_add.keys())
+            logger.info(
+                "ensure_mappings: added %d field(s) to %s: %s",
+                len(to_add), index_name, list(to_add.keys()),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ensure_mappings: put_mapping failed for %s "
+                "(fields=%s): %s",
+                index_name, list(to_add.keys()), exc,
+            )
+            added[index_name] = []
+    return added
+
+
 def ensure_negation_fields() -> dict[str, str]:
     """Idempotent: add negation_flag + negation_scope to lucid_facts.
 

@@ -66,10 +66,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         # ensure_negation_fields handles the lucid_facts case
         # specifically; create_indexes covers all three.
         creation = indexes.create_indexes()
+        # feat/mappings-sync-permanent (2026-06-23): non-destructive
+        # field-level reconcile across facts/objects/sources. Catches
+        # the drift case where the writer code added a new field but
+        # the live cluster's mapping pre-dates the change — without
+        # this hook, the next bulk_create_facts call would raise
+        # strict_dynamic_mapping_exception. Existing data is preserved
+        # (put_mapping is additive at the leaf-field level).
+        sync_added = indexes.ensure_mappings()
         logger.info(
-            "B-39 startup: ES indexes %s (negation tip-up: %s)",
+            "B-39 startup: ES indexes %s (negation tip-up: %s, "
+            "mapping sync: %s)",
             creation,
             result,
+            sync_added,
         )
     except Exception as exc:  # noqa: BLE001 - boot must never crash here
         logger.warning(
