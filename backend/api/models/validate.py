@@ -33,7 +33,18 @@ class PendingFilters(LucidBaseModel):
 
 
 class PendingJobSummary(LucidBaseModel):
-    """One row in the GET /pending list response."""
+    """One row in the GET /pending list response.
+
+    pending-card-title-date: `title` and `hostname` were added so the
+    Pending Queue card can render the article's actual headline
+    (e.g. "중국 정부, 미국 기업 10곳에 수출통제") as the primary text,
+    with the source domain as a smaller sub-label. The PO had been
+    seeing only "n.news.naver.com" as the card title since the card
+    was using `source_url`'s host as a stand-in headline. `title`
+    falls back through extracted_metadata.title → metadata.structure
+    .title → og_title → first chars of body → hostname → "(제목 없음)"
+    so the field is always a non-empty human-readable string.
+    """
 
     job_id: str
     source_url: str
@@ -44,6 +55,8 @@ class PendingJobSummary(LucidBaseModel):
     object_count: int
     has_negation: bool
     has_disambiguation: bool
+    title: str
+    hostname: str
 
 
 class PendingJobDetail(LucidBaseModel):

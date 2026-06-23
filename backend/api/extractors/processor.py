@@ -157,10 +157,28 @@ def process_source_job(job_id: uuid.UUID | str) -> None:
 def _record_success(
     session: Any, job: SourceJobORM, result: ExtractResult
 ) -> None:
-    """Persist the successful ExtractResult onto the SourceJob row."""
+    """Persist the successful ExtractResult onto the SourceJob row.
+
+    pending-card-title-date: ExtractResult.title used to be dropped on
+    the floor here — only result.extracted_metadata (a side-channel
+    dict the extractor builds for strategy stats) was persisted, while
+    the canonical title field disappeared between extract and the
+    Pending Queue's /pending list response. We now fold title /
+    author / publish_date into extracted_metadata so the validate
+    route's `_resolve_title` can read them back without a separate
+    column or a JOIN.
+    """
     job.status = SourceStatus.EXTRACTED.value
     job.extracted_text = result.merged_text
-    job.extracted_metadata = result.extracted_metadata or {}
+    metadata = dict(result.extracted_metadata or {})
+    if result.title and "title" not in metadata:
+        metadata["title"] = result.title
+    if result.author and "author" not in metadata:
+        metadata["author"] = result.author
+    if result.publish_date and "publish_date" not in metadata:
+        # ISO string — JSONB rejects datetime objects in some drivers.
+        metadata["publish_date"] = result.publish_date.isoformat()
+    job.extracted_metadata = metadata
     job.extraction_warnings = list(result.extraction_warnings or [])
     job.extracted_at = _utc_now()
     job.updated_at = _utc_now()

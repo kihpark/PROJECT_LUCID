@@ -156,6 +156,12 @@ async function buildPagePayload(
     };
   }
 
+  // pending-card-title-date: pass tab.title so the backend extractor's
+  // `metadata.page_title` priming kicks in. Web-article extraction
+  // also recovers a title from <title>/og:title independently — this
+  // is a defense-in-depth signal for paywalls or JS-rendered pages
+  // where readability/trafilatura might miss the headline.
+  const pageTitle = (tab?.title ?? '').trim();
   return {
     ok: true,
     payload: {
@@ -163,6 +169,7 @@ async function buildPagePayload(
       source_type: 'web_article',
       captured_from: 'chrome_ext',
       raw_payload_b64: utf8ToBase64(html),
+      ...(pageTitle ? { client_metadata: { page_title: pageTitle } } : {}),
     },
   };
 }
@@ -175,6 +182,12 @@ function buildSyncPayload(
     const url = info.pageUrl ?? tab?.url ?? '';
     const selected = info.selectionText?.trim();
     if (!selected) return null;
+    // pending-card-title-date: forward the page title so the Pending
+    // Queue card can show the article headline instead of the URL
+    // hostname. `tab.title` is the browser-resolved <title>; absence
+    // is rare (chrome://urls, transient sad-tab) and falls through
+    // cleanly because we omit the key when empty.
+    const pageTitle = (tab?.title ?? '').trim();
     return {
       source_url: url,
       source_type: 'highlighted_text',
@@ -183,6 +196,7 @@ function buildSyncPayload(
       client_metadata: {
         selection_range_start: '0',
         selection_range_end: String(selected.length),
+        ...(pageTitle ? { page_title: pageTitle } : {}),
       },
     };
   }
@@ -296,6 +310,8 @@ export async function buildImagePayload(
     };
   }
 
+  // pending-card-title-date: same rationale as the selection branch.
+  const pageTitle = (tab?.title ?? '').trim();
   return {
     ok: true,
     payload: {
@@ -310,6 +326,7 @@ export async function buildImagePayload(
         source_page_url: info.pageUrl ?? tab?.url ?? '',
         image_src_url: srcUrl,
         image_byte_count: String(bytes.byteLength),
+        ...(pageTitle ? { page_title: pageTitle } : {}),
       },
     },
   };
@@ -396,6 +413,8 @@ export async function buildScreenshotPayload(
     };
   }
 
+  // pending-card-title-date: screenshots inherit the page title too.
+  const pageTitle = (tab?.title ?? '').trim();
   return {
     ok: true,
     payload: {
@@ -407,6 +426,7 @@ export async function buildScreenshotPayload(
         source_page_url: pageUrl,
         capture_kind: 'screenshot',
         image_byte_count: String(approxBytes),
+        ...(pageTitle ? { page_title: pageTitle } : {}),
       },
     },
   };

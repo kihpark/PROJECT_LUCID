@@ -1,6 +1,10 @@
 ﻿import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { PendingQueueList } from '@/components/PendingQueueList';
+import {
+  PendingQueueList,
+  formatRelativeKo,
+  formatAbsoluteKo,
+} from '@/components/PendingQueueList';
 import type { PendingPage } from '@/lib/types';
 
 const page: PendingPage = {
@@ -15,6 +19,8 @@ const page: PendingPage = {
       object_count: 2,
       has_negation: false,
       has_disambiguation: true,
+      title: '중국 정부, 미국 기업 10곳에 수출통제',
+      hostname: 'example.com',
     },
     {
       job_id: 'job-2',
@@ -26,6 +32,8 @@ const page: PendingPage = {
       object_count: 1,
       has_negation: true,
       has_disambiguation: false,
+      title: '(제목 없음)',
+      hostname: 'example.com',
     },
   ],
   total: 25,
@@ -112,6 +120,101 @@ describe('PendingQueueList — per-row discard (spo-pending-ux)', () => {
     expect(screen.getByTestId('pending-card-job-1')).toBeInTheDocument();
   });
 });
+describe('PendingQueueList — pending-card-title-date', () => {
+  it('renders the article title as the card heading (not the hostname)', () => {
+    render(<PendingQueueList page={page} onPage={() => {}} />);
+    const title = screen.getByTestId('pending-card-title-job-1');
+    expect(title).toBeInTheDocument();
+    expect(title.tagName.toLowerCase()).toBe('h3');
+    expect(title).toHaveTextContent('중국 정부, 미국 기업 10곳에 수출통제');
+    // The bug we are fixing: hostname must NOT be inside the <h3>.
+    expect(title.textContent).not.toMatch(/example\.com/);
+  });
+
+  it('renders the hostname as a secondary sub-label, not as title', () => {
+    render(<PendingQueueList page={page} onPage={() => {}} />);
+    const host = screen.getByTestId('pending-card-hostname-job-1');
+    expect(host).toBeInTheDocument();
+    expect(host).toHaveTextContent('example.com');
+    // Verify the hostname element is NOT the <h3> title.
+    expect(host.tagName.toLowerCase()).not.toBe('h3');
+  });
+
+  it('renders a relative captured-at label with absolute time in tooltip', () => {
+    render(<PendingQueueList page={page} onPage={() => {}} />);
+    const captured = screen.getByTestId('pending-card-captured-job-1');
+    expect(captured).toBeInTheDocument();
+    // Relative formatter should produce a non-empty, non-ISO string.
+    expect(captured.textContent ?? '').not.toMatch(/T\d{2}:\d{2}/);
+    expect((captured.textContent ?? '').trim()).not.toBe('');
+    // Tooltip carries the absolute / locale form for hover confirmation.
+    expect(captured.getAttribute('title')).toBeTruthy();
+  });
+
+  it('uses the title field even when it is the fallback "(제목 없음)"', () => {
+    render(<PendingQueueList page={page} onPage={() => {}} />);
+    expect(
+      screen.getByTestId('pending-card-title-job-2'),
+    ).toHaveTextContent('(제목 없음)');
+  });
+});
+
+describe('formatRelativeKo', () => {
+  const now = new Date('2026-06-23T12:00:00Z');
+
+  it('returns "방금 전" within the first minute', () => {
+    const iso = new Date(now.getTime() - 5_000).toISOString();
+    expect(formatRelativeKo(iso, now)).toBe('방금 전');
+  });
+
+  it('returns "N분 전" within the hour', () => {
+    const iso = new Date(now.getTime() - 5 * 60_000).toISOString();
+    expect(formatRelativeKo(iso, now)).toBe('5분 전');
+  });
+
+  it('returns "N시간 전" within the day', () => {
+    const iso = new Date(now.getTime() - 3 * 3_600_000).toISOString();
+    expect(formatRelativeKo(iso, now)).toBe('3시간 전');
+  });
+
+  it('returns "N일 전" within the week', () => {
+    const iso = new Date(now.getTime() - 2 * 86_400_000).toISOString();
+    expect(formatRelativeKo(iso, now)).toBe('2일 전');
+  });
+
+  it('returns a locale date for timestamps older than a week', () => {
+    const iso = new Date(now.getTime() - 30 * 86_400_000).toISOString();
+    const out = formatRelativeKo(iso, now);
+    // Beyond a week we fall through to a locale date, which still must
+    // not be the ISO string (PO complaint was unreadable ISO output).
+    expect(out).not.toMatch(/T\d{2}:\d{2}/);
+    expect(out).not.toBe('');
+  });
+
+  it('returns the absolute string for future timestamps (defensive)', () => {
+    const iso = new Date(now.getTime() + 60_000).toISOString();
+    const out = formatRelativeKo(iso, now);
+    expect(out).not.toBe('방금 전');
+    expect(out).not.toBe('');
+  });
+
+  it('returns "" for an unparseable ISO string', () => {
+    expect(formatRelativeKo('not-a-date', now)).toBe('');
+  });
+});
+
+describe('formatAbsoluteKo', () => {
+  it('returns a locale string for a valid ISO timestamp', () => {
+    const out = formatAbsoluteKo(new Date('2026-06-01T10:00:00Z').toISOString());
+    expect(out).not.toBe('');
+    expect(out).not.toMatch(/^2026-06-01T/);
+  });
+
+  it('echoes the input when given garbage so the UI never crashes', () => {
+    expect(formatAbsoluteKo('not-a-date')).toBe('not-a-date');
+  });
+});
+
 describe('PendingQueueList — decide-ux-fix #1: badge / discard button no overlap', () => {
   it('renders source_type badge and discard button as distinct elements', () => {
     const onDiscard = vi.fn(async () => {});
