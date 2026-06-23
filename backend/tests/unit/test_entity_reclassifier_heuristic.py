@@ -11,7 +11,6 @@ import pytest
 
 from api.structure.entity_reclassifier import classify_by_heuristic
 
-
 # ---------------------------------------------------------------------------
 # Persons — 2-4 Hangul syllables, no whitespace, no org/loc suffix
 # ---------------------------------------------------------------------------
