@@ -311,6 +311,17 @@ export interface FactMutationResponse {
   auto_retracted: boolean;
 }
 
+// feat/fact-detail-modify — PATCH body for the Recall detail modal's
+// inline edit affordance. Only surface fields are accepted; identity
+// (subject_uid / predicate_code / validation_method) is immutable here
+// — structural changes go through retract + re-validate.
+export interface ModifyFactRequest {
+  claim?: string;
+  predicate_label?: string;
+  object_value?: string;
+  tags?: string[];
+}
+
 // ---------------------------------------------------------------------------
 // B-55 / B-57 — Home brief response shape (mirrors backend; the runtime fetch
 // is fail-soft so this type lands even before B-55 is merged).

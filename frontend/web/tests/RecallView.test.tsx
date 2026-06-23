@@ -10,6 +10,8 @@ vi.mock('@/lib/api', () => ({
   retractFact: vi.fn(),
   restoreFact: vi.fn(),
   detachSource: vi.fn(),
+  // feat/fact-detail-modify — surface-field PATCH
+  modifyFact: vi.fn(),
   ApiError: class extends Error {
     status = 0;
     detail: string | undefined;
@@ -1386,3 +1388,216 @@ describe('RecallView — B-60 simple/power mode toggle', () => {
     expect(await screen.findByTestId('fact-detail-modal')).toBeInTheDocument();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// feat/fact-detail-modify — PO directive 2026-06-22.
+// The Recall Fact-detail modal must let the user correct surface-level
+// errors in place (typo in claim, off gloss for predicate). Identity
+// fields (subject_uid / predicate_code / validation_method) stay
+// immutable here — structural changes require a retract + re-validate
+// path which lives in Decide.
+// ---------------------------------------------------------------------------
+
+describe('RecallView — fact detail MODIFY (feat/fact-detail-modify)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const RECALL_HIT_FOR_MODIFY: RecallResponse = {
+    signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
+    total: 1,
+    facts: [
+      {
+        fact_uid: 'fn-edit-1',
+        claim: 'SpaceX는 7,500만 달러를 조달했다.',
+        claim_en: null,
+        subject_uid: 'uid-spacex',
+        subject_label: 'SpaceX',
+        predicate: 'raised',
+        object_value: '75M USD',
+        object_label: null,
+        source_uids: [],
+        validated_at: '2026-06-15T10:00:00Z',
+        validator_id: 'u-1',
+        validation_method: 'manual',
+        knowledge_space_id: 'ks-1',
+        negation_flag: false,
+        negation_scope: null,
+        score: 0.91,
+      },
+    ],
+  };
+
+  const detailToEdit = {
+    fact: {
+      fact_uid: 'fn-edit-1',
+      claim: 'SpaceX는 7,500만 달러를 조달했다.',
+      claim_en: null,
+      subject_uid: 'uid-spacex',
+      subject_label: 'SpaceX',
+      predicate: 'raised',
+      object_value: '75M USD',
+      object_label: null,
+      validated_at: '2026-06-15T10:00:00Z',
+      retracted_at: null,
+      retracted_by: null,
+      edit_history: [],
+    },
+    entities: [
+      { uid: 'uid-spacex', name: 'SpaceX', class: 'organization',
+        role: 'subject' as const, aliases: [] },
+    ],
+    sources: [],
+  };
+
+  async function openDetail() {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT_FOR_MODIFY);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailToEdit);
+    fireEvent.click(
+      await screen.findByTestId('recall-fact-fn-edit-1-open-detail'),
+    );
+    await screen.findByTestId('fact-detail-modal');
+  }
+
+  it('★ 수정 버튼이 상세 모달에 노출된다 (read mode)', async () => {
+    await openDetail();
+    expect(screen.getByTestId('fact-detail-edit')).toBeInTheDocument();
+    // Read-mode chrome present.
+    expect(screen.getByTestId('fact-detail-subject')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-detail-object')).toBeInTheDocument();
+    // Edit form NOT rendered until 수정 click.
+    expect(screen.queryByTestId('fact-detail-edit-form')).toBeNull();
+  });
+
+  it('★ 수정 클릭 → 편집 모드 진입 (form 렌더, S/P/O chip 사라짐)', async () => {
+    await openDetail();
+    fireEvent.click(screen.getByTestId('fact-detail-edit'));
+
+    // Form fields show up.
+    expect(screen.getByTestId('fact-detail-edit-form')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-detail-edit-claim')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-detail-edit-predicate')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-detail-edit-object')).toBeInTheDocument();
+
+    // Subject (identity) is NOT editable — the chip is replaced by
+    // the form so the read-mode subject testid is gone.
+    expect(screen.queryByTestId('fact-detail-subject')).toBeNull();
+
+    // 수정 button itself disappears while editing.
+    expect(screen.queryByTestId('fact-detail-edit')).toBeNull();
+  });
+
+  it('★ 저장 클릭 → modifyFact API call 발생, 모달은 갱신된 detail 로 swap', async () => {
+    await openDetail();
+    fireEvent.click(screen.getByTestId('fact-detail-edit'));
+
+    // Edit the claim.
+    const claimInput = screen.getByTestId('fact-detail-edit-claim');
+    fireEvent.change(claimInput, {
+      target: { value: 'SpaceX는 8,500만 달러를 조달했다.' },
+    });
+
+    const refreshedDetail = {
+      ...detailToEdit,
+      fact: {
+        ...detailToEdit.fact,
+        claim: 'SpaceX는 8,500만 달러를 조달했다.',
+      },
+    };
+    (api.modifyFact as ReturnType<typeof vi.fn>).mockResolvedValueOnce(refreshedDetail);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT_FOR_MODIFY);
+
+    fireEvent.click(screen.getByTestId('fact-detail-edit-save'));
+
+    await waitFor(() =>
+      expect(api.modifyFact).toHaveBeenCalledWith(
+        'ks-1', 'fn-edit-1',
+        expect.objectContaining({ claim: 'SpaceX는 8,500만 달러를 조달했다.' }),
+      ),
+    );
+    // Modal swaps to refreshed detail; the edit form disappears.
+    await waitFor(() =>
+      expect(screen.queryByTestId('fact-detail-edit-form')).toBeNull(),
+    );
+    expect(screen.getByTestId('fact-detail-claim')).toHaveTextContent(
+      '8,500만 달러',
+    );
+  });
+
+  it('★ 취소 클릭 → API 호출 없이 read mode 로 복귀', async () => {
+    await openDetail();
+    fireEvent.click(screen.getByTestId('fact-detail-edit'));
+
+    fireEvent.change(screen.getByTestId('fact-detail-edit-claim'), {
+      target: { value: '다른 텍스트로 변경' },
+    });
+
+    fireEvent.click(screen.getByTestId('fact-detail-edit-cancel'));
+
+    // Edit form gone, read-mode chrome back.
+    expect(screen.queryByTestId('fact-detail-edit-form')).toBeNull();
+    expect(screen.getByTestId('fact-detail-subject')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-detail-edit')).toBeInTheDocument();
+    // No PATCH was made.
+    expect(api.modifyFact).not.toHaveBeenCalled();
+  });
+
+  it('편집 모드에서 사실 철회 버튼은 비활성화 — 두 액션이 동시에 일어나지 않음', async () => {
+    await openDetail();
+    fireEvent.click(screen.getByTestId('fact-detail-edit'));
+    const retractBtn = screen.getByTestId('fact-detail-retract') as HTMLButtonElement;
+    expect(retractBtn.disabled).toBe(true);
+  });
+
+  it('철회된 사실에서는 수정 버튼이 노출되지 않는다', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(RECALL_HIT_FOR_MODIFY);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'SpaceX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
+
+    const retracted = {
+      ...detailToEdit,
+      fact: {
+        ...detailToEdit.fact,
+        retracted_at: '2026-06-20T05:00:00Z',
+        retracted_by: 'u-1',
+      },
+    };
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(retracted);
+    fireEvent.click(
+      await screen.findByTestId('recall-fact-fn-edit-1-open-detail'),
+    );
+    await screen.findByTestId('fact-detail-modal');
+
+    // Retracted banner present, 수정 button absent — must restore first.
+    expect(screen.getByTestId('fact-detail-retracted-banner')).toBeInTheDocument();
+    expect(screen.queryByTestId('fact-detail-edit')).toBeNull();
+    expect(screen.getByTestId('fact-detail-restore')).toBeInTheDocument();
+  });
+
+  it('수정하지 않고 저장 클릭 시 PATCH 호출 없이 read mode 로 복귀 (no-op)', async () => {
+    await openDetail();
+    fireEvent.click(screen.getByTestId('fact-detail-edit'));
+    // No field change — submit immediately.
+    fireEvent.click(screen.getByTestId('fact-detail-edit-save'));
+
+    // Should NOT have called modifyFact.
+    expect(api.modifyFact).not.toHaveBeenCalled();
+    // Returns to read mode.
+    await waitFor(() =>
+      expect(screen.queryByTestId('fact-detail-edit-form')).toBeNull(),
+    );
+    expect(screen.getByTestId('fact-detail-edit')).toBeInTheDocument();
+  });
+});
+

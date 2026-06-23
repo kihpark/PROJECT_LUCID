@@ -219,6 +219,37 @@ class DetachSourceRequest(LucidBaseModel):
     source_uid: str
 
 
+class ModifyFactRequest(LucidBaseModel):
+    """PATCH /api/spaces/{ks}/facts/{fact_uid} body.
+
+    feat/fact-detail-modify (PO directive 2026-06-22): the Recall Fact
+    detail modal needs an inline edit affordance — same shape as Decide
+    UI's "edit" action, but limited to SURFACE fields. Identity fields
+    (subject_uid, predicate_code, validation_method, validator_id) stay
+    immutable: structural changes require a retract + re-validate flow
+    (out of scope here).
+
+    Every field is optional — only the keys present in the request body
+    get touched. Empty body → 400 (no-op patch is a client bug, not an
+    accepted state).
+
+    Behaviour:
+      - `claim`: if non-empty and different from current, append the old
+        claim to aliases + edit_history (existing `update_fact` helper).
+        Embedding is re-computed for the new claim text.
+      - `predicate_label`: natural-English gloss; updated in place.
+      - `object_value`: surface object text; updated in place. Caller
+        cannot change this from a literal to an entity uid (that would
+        require Decide's entity-resolver path).
+      - `tags`: list replaces (not merges) — matches Decide semantics.
+    """
+
+    claim: str | None = None
+    predicate_label: str | None = None
+    object_value: str | None = None
+    tags: list[str] | None = None
+
+
 class FactMutationResponse(LucidBaseModel):
     """Response shared by retract / restore / detach-source — the
     client uses the returned fact_uid to redraw / close the panel
