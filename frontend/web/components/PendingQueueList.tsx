@@ -145,14 +145,31 @@ function PendingCard({ job, onDiscardRow }: PendingCardProps) {
             <dt className="text-text-muted">facts</dt>
             <dd className="font-mono" data-testid="pending-card-facts">{job.fact_count}</dd>
           </div>
-          {job.has_negation && (
-            <span
-              className="text-accent-error text-xxs font-mono self-end"
-              title="negation_flag"
-            >
-              ⚠ negation
-            </span>
-          )}
+          {/*
+           * feat/negation-policy-consistency: the "⚠ negation" chip
+           * used to render whenever any pending fact carried
+           * `negation_flag` (i.e. the structurer saw 안 / 없 / 못 in
+           * the sentence). PO's policy — already enforced on the
+           * Decide UI via feat/decide-ux-v3 — is that the warning
+           * should ONLY fire on an ACTUAL contradiction relation in
+           * the KS, not on every negated sentence ("X 안 했다" is
+           * informative, not a problem). The Pending queue was the
+           * only remaining surface still firing on negation_flag
+           * alone, which is why the queue and Decide gave the user
+           * inconsistent signals.
+           *
+           * No replacement chip in this PR: `fact_relations` is
+           * schema-only (see backend/api/storage/postgres/orm.py
+           * line 643 — "Schema-only in this PR; no call-site
+           * populates the table yet"). The badge can be
+           * re-introduced — keyed on a real contradiction_count
+           * derived from fact_relations — once that table is
+           * actually populated (a future PR after B-54 wires up
+           * the writer). The `has_negation` field is kept on the
+           * API response so the PendingFilters "Has negation"
+           * debug toggle still works (analytics only — not a
+           * user-facing warning). See NEGATION_POLICY_DISCOVERY.md.
+           */}
           {job.has_disambiguation && (
             <span
               className="text-accent-warm text-xxs font-mono self-end"
