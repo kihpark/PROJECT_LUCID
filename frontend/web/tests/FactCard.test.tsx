@@ -1,4 +1,5 @@
 ﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FactCard } from '@/components/FactCard';
 import type { FactSummary, ObjectSummary } from '@/lib/types';
@@ -1194,6 +1195,307 @@ describe('FactCard - decide-frontend-prefer-name: prefer backend-corrected name'
     );
     expect(screen.getByTestId('fact-subject')).toHaveTextContent('obj-77');
     expect(screen.getByTestId('fact-subject')).toHaveTextContent('(unresolved)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// decide-chip-click-bind — LIVE click path (parent-controlled re-render)
+// ---------------------------------------------------------------------------
+// PO's live repro: type "중국 상무" → chips appear → click "중국 상무부" chip
+// → input REVERTS to the typed query and editedSubjectUid is NOT applied.
+//
+// The previous `decide-ux-v3` test (`clicking a subject chip binds
+// editedSubjectUid and fills the input`, line ~901) passed because it
+// rendered FactCard standalone with NO controlled parent — the chip
+// handler's local setSubjectQuery(chip.label) succeeded and there was
+// no re-render with the new editedSubjectUid that would trigger the
+// parent-sync useEffect's clobber.
+//
+// In production, DecideOverlay holds editedSubjectUid in factDecisions and
+// passes it back as a prop. On chip click, the chain is:
+//   1. onSubjectChipClick fires → setSubjectQuery(chip.label) locally
+//   2. emitEdit({subject: chip.entity_id}) → parent onChange
+//   3. Parent setFactDecisions → re-renders FactCard with new editedSubjectUid
+//   4. currentSubject (= editedSubjectUid) becomes chip.entity_id
+//   5. The sync useEffect compares currentSubject !== prevSubjectRef.current
+//      → fires resolveEntity(chip.entity_id, labelMap, lang)
+//   6. Since chip.entity_id is NOT in the Decision objects (it came from
+//      the autocomplete API, not the LLM extraction), resolveEntity returns
+//      either the raw uid or the "(unresolved)" marker
+//   7. setSubjectQuery(resolved) CLOBBERS the chip's primary_label
+//
+// Fix: in onSubjectChipClick, pre-arm prevSubjectRef.current to the new
+// entity_id BEFORE setting state, so the sync useEffect's strict-inequality
+// check is false and skips the resolveEntity overwrite.
+// ---------------------------------------------------------------------------
+describe('FactCard - decide-chip-click-bind: LIVE click path (parent re-renders)', () => {
+  // Helper: render a FactCard wrapped in a parent that actually persists
+  // editedSubjectUid / editedObjectValue across re-renders, mimicking
+  // DecideOverlay's factDecisions[uid] flow.
+  function ControlledFactCard(props: {
+    fact: FactSummary;
+    objects?: ObjectSummary[];
+    initialSubjectUid?: string;
+    initialPredicate?: string;
+    initialObjectValue?: string;
+    spaceId?: string;
+    onChangeSpy?: ReturnType<typeof vi.fn>;
+  }) {
+    const [decision, setDecision] = useState<{
+      action: 'accept' | 'edit' | 'discard';
+      editedClaim?: string;
+      editedSubjectUid?: string;
+      editedPredicate?: string;
+      editedObjectValue?: string;
+    }>({
+      action: 'edit',
+      editedSubjectUid: props.initialSubjectUid,
+      editedPredicate: props.initialPredicate,
+      editedObjectValue: props.initialObjectValue,
+    });
+    return (
+      <div>
+        <FactCard
+          fact={props.fact}
+          objects={props.objects}
+          action={decision.action}
+          editedClaim={decision.editedClaim}
+          editedSubjectUid={decision.editedSubjectUid}
+          editedPredicate={decision.editedPredicate}
+          editedObjectValue={decision.editedObjectValue}
+          lang="en"
+          spaceId={props.spaceId}
+          onChange={(next) => {
+            props.onChangeSpy?.(next);
+            setDecision({
+              action: next.action,
+              editedClaim: next.editedClaim,
+              editedSubjectUid: next.editedSubjectUid,
+              editedPredicate: next.editedPredicate,
+              editedObjectValue: next.editedObjectValue,
+            });
+          }}
+        />
+        {/* Reflect parent-held uid for assertions */}
+        <div data-testid="parent-subject-uid">
+          {decision.editedSubjectUid ?? ''}
+        </div>
+        <div data-testid="parent-object-uid">
+          {decision.editedObjectValue ?? ''}
+        </div>
+      </div>
+    );
+  }
+
+  it('LIVE subject chip click: input value stays at chip primary_label after parent re-render', async () => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        entity_id: 'uuid-mocchina',
+        primary_label: '중국 상무부',
+        primary_lang: 'ko',
+        score: 1.0,
+      },
+    ]);
+
+    render(
+      <ControlledFactCard
+        fact={baseFact}
+        objects={baseObjects}
+        initialSubjectUid="obj-1"
+        initialPredicate="will_replace"
+        initialObjectValue="jobs"
+        spaceId="ks-1"
+      />,
+    );
+
+    // 1. User types "중국 상무"
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: '중국 상무' },
+    });
+
+    // 2. Chip appears
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-mocchina')).toBeInTheDocument();
+    });
+
+    // 3. User clicks chip
+    fireEvent.click(screen.getByTestId('subject-chip-uuid-mocchina'));
+
+    // 4. After the parent re-renders with the new editedSubjectUid, the
+    //    input MUST still show the chip's primary_label, NOT the raw uid
+    //    and NOT the typed query. This is the production failure.
+    await waitFor(() => {
+      const input = screen.getByTestId('fact-edit-subject-fn-1') as HTMLInputElement;
+      expect(input.value).toBe('중국 상무부');
+    });
+    const input = screen.getByTestId('fact-edit-subject-fn-1') as HTMLInputElement;
+    expect(input.value).not.toBe('중국 상무');
+    expect(input.value).not.toContain('uuid-mocchina');
+    expect(input.value).not.toMatch(/unresolved|미해석/);
+  });
+
+  it('LIVE subject chip click: parent-held editedSubjectUid is set to the chip entity_id', async () => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        entity_id: 'uuid-mocchina',
+        primary_label: '중국 상무부',
+        primary_lang: 'ko',
+        score: 1.0,
+      },
+    ]);
+
+    render(
+      <ControlledFactCard
+        fact={baseFact}
+        objects={baseObjects}
+        initialSubjectUid="obj-1"
+        initialPredicate="will_replace"
+        initialObjectValue="jobs"
+        spaceId="ks-1"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: '중국' },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-mocchina')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('subject-chip-uuid-mocchina'));
+
+    // The parent's editedSubjectUid landed and persisted.
+    await waitFor(() => {
+      expect(screen.getByTestId('parent-subject-uid')).toHaveTextContent(
+        'uuid-mocchina',
+      );
+    });
+  });
+
+  it('LIVE subject chip click: save payload (via onChange) includes the chip entity_id', async () => {
+    const onChangeSpy = vi.fn();
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        entity_id: 'uuid-mocchina',
+        primary_label: '중국 상무부',
+        primary_lang: 'ko',
+        score: 1.0,
+      },
+    ]);
+
+    render(
+      <ControlledFactCard
+        fact={baseFact}
+        objects={baseObjects}
+        initialSubjectUid="obj-1"
+        initialPredicate="will_replace"
+        initialObjectValue="jobs"
+        spaceId="ks-1"
+        onChangeSpy={onChangeSpy}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: '중국' },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-mocchina')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('subject-chip-uuid-mocchina'));
+
+    // The LAST onChange call (after chip-click batched updates settle) MUST
+    // carry the chip's entity_id. PO's bug: it carried the typed query
+    // ("중국") instead.
+    const lastCall = onChangeSpy.mock.calls[onChangeSpy.mock.calls.length - 1]![0];
+    expect(lastCall).toMatchObject({
+      action: 'edit',
+      editedSubjectUid: 'uuid-mocchina',
+    });
+
+    // Now click 저장 to lock it in — the parent's state still holds the uid.
+    fireEvent.click(screen.getByTestId('fact-save-fn-1'));
+    expect(screen.getByTestId('parent-subject-uid')).toHaveTextContent(
+      'uuid-mocchina',
+    );
+  });
+
+  it('LIVE object chip click: same fix on object side — input + uid preserved', async () => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        entity_id: 'uuid-gallium',
+        primary_label: '갈륨',
+        primary_lang: 'ko',
+        score: 1.0,
+      },
+    ]);
+
+    render(
+      <ControlledFactCard
+        fact={baseFact}
+        objects={baseObjects}
+        initialSubjectUid="obj-1"
+        initialPredicate="restricted_export_of"
+        initialObjectValue="jobs"
+        spaceId="ks-1"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('fact-edit-object-fn-1'), {
+      target: { value: '갈' },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('object-chip-uuid-gallium')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('object-chip-uuid-gallium'));
+
+    await waitFor(() => {
+      const input = screen.getByTestId('fact-edit-object-fn-1') as HTMLInputElement;
+      expect(input.value).toBe('갈륨');
+    });
+    expect(screen.getByTestId('parent-object-uid')).toHaveTextContent(
+      'uuid-gallium',
+    );
+  });
+
+  it('LIVE subject chip click: no additional searchEntitySuggestions fires after chip click (gating still works)', async () => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        entity_id: 'uuid-mocchina',
+        primary_label: '중국 상무부',
+        primary_lang: 'ko',
+        score: 1.0,
+      },
+    ]);
+
+    render(
+      <ControlledFactCard
+        fact={baseFact}
+        objects={baseObjects}
+        initialSubjectUid="obj-1"
+        initialPredicate="will_replace"
+        initialObjectValue="jobs"
+        spaceId="ks-1"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('fact-edit-subject-fn-1'), {
+      target: { value: '중국' },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('subject-chip-uuid-mocchina')).toBeInTheDocument();
+    });
+    const callsBefore = (
+      api.searchEntitySuggestions as ReturnType<typeof vi.fn>
+    ).mock.calls.length;
+    fireEvent.click(screen.getByTestId('subject-chip-uuid-mocchina'));
+
+    // Wait past the debounce window: no new fetch should fire just because
+    // the input's value changed to the chip's primary_label (the gating
+    // mechanism from decide-ux-v3 must still hold).
+    await new Promise((r) => setTimeout(r, 250));
+    const callsAfter = (
+      api.searchEntitySuggestions as ReturnType<typeof vi.fn>
+    ).mock.calls.length;
+    expect(callsAfter).toBe(callsBefore);
   });
 });
 

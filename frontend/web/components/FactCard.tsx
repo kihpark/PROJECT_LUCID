@@ -334,20 +334,89 @@ export function FactCard({
     // Keep action='edit' so the parent retains editedSubjectUid /
     // editedPredicate / editedObjectValue for the batch submit.
     // Just close the local form.
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('[FactCard chip-click] 4. save payload', {
+        subjectQuery,
+        editedSubjectUid,
+        currentSubject,
+        editedPredicate,
+        editedObjectValue,
+      });
+    }
     setEditFormOpen(false);
   };
 
+  // decide-chip-click-bind: step 3 — post-state render. Logs the values that
+  // actually landed in the DOM after the chip click batched-render. If step 2
+  // fired but step 3 shows the old query, the bug is in the parent-sync
+  // useEffect (line ~199 above).
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('[FactCard chip-click] 3. post-state render', {
+        subjectQuery,
+        objectQuery,
+        editedSubjectUid,
+        editedObjectValue,
+        currentSubject,
+      });
+    }
+  }, [subjectQuery, objectQuery, editedSubjectUid, editedObjectValue, currentSubject]);
+
+  // decide-chip-click-bind: LIVE click-path instrumentation. The 5-point
+  // trace lets PO open DevTools verbose console and see the entire chain
+  // each time a chip is clicked. Step 1 = click received here; step 2 =
+  // state setters called; step 3 = post-state render (via useEffect below);
+  // step 4 = save (in onSaveEdit); step 5 = submit (in DecideOverlay).
   const onSubjectChipClick = (suggestion: EntitySuggestion) => {
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('[FactCard chip-click] 1. subject click received', {
+        chip: suggestion,
+      });
+    }
+    // Pre-arm prevSubjectRef so the parent-sync useEffect below does NOT
+    // overwrite subjectQuery when editedSubjectUid lands. Without this,
+    // the sync effect compares the new uid against the old subjectQuery
+    // value and calls resolveEntity(uid) — which, for a fresh entity not
+    // in the Decision objects labelMap, returns the raw uid (or the
+    // "(unresolved)" marker), clobbering the chip's primary_label that
+    // we just placed in the input. PO's "input reverts" repro.
+    prevSubjectRef.current = suggestion.entity_id;
     setSubjectQuery(suggestion.primary_label);
     setSubjectSuggestions([]);
     setSubjectUserTyped(false); // chip-click selects an entity; suppress refetch
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('[FactCard chip-click] 2. subject state setters called', {
+        newSubjectQuery: suggestion.primary_label,
+        newSubjectUid: suggestion.entity_id,
+      });
+    }
     emitEdit({ subject: suggestion.entity_id });
   };
 
   const onObjectChipClick = (suggestion: EntitySuggestion) => {
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('[FactCard chip-click] 1. object click received', {
+        chip: suggestion,
+      });
+    }
+    // Same pre-arm pattern as subject — keep the input value the chip
+    // label, not the unresolved uid.
+    prevObjectRef.current = suggestion.entity_id;
     setObjectQuery(suggestion.primary_label);
     setObjectSuggestions([]);
     setObjectUserTyped(false);
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.debug('[FactCard chip-click] 2. object state setters called', {
+        newObjectQuery: suggestion.primary_label,
+        newObjectUid: suggestion.entity_id,
+      });
+    }
     emitEdit({ object: suggestion.entity_id });
   };
 

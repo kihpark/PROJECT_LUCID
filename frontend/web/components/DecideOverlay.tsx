@@ -194,6 +194,14 @@ export function DecideOverlay({
           }),
         ),
       };
+      // decide-chip-click-bind: step 5 — submit payload trace. Open DevTools
+      // verbose console to confirm the chip-selected entity_uid actually
+      // hits the API (and isn't a stale "중국" the user typed before
+      // clicking the chip).
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.debug('[DecideOverlay chip-click] 5. submit payload', payload);
+      }
       const r = await submitDecisions(spaceId, jobId, payload);
       setResult(r);
     } catch (e) {
