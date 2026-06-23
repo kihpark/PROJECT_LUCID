@@ -51,6 +51,16 @@ _KO_COUNTRY_WHITELIST: frozenset[str] = frozenset({
     "프랑스", "러시아", "북한", "대만", "호주", "캐나다",
 })
 
+# Well-known organization shorthands that pattern-match as 2-4 Hangul
+# without a clear org-suffix tail. Conservative; only the cases the
+# PO's KS demonstrably contains. Anything ambiguous still defers to
+# the LLM.
+_KO_ORG_WHITELIST: frozenset[str] = frozenset({
+    "청와대",   # presidential office
+    "국회",     # national assembly
+    "법원",     # courts (already matches via 원 but harmless)
+})
+
 # Korean organization suffixes — substring at END of name.
 # Order matters for multi-char suffixes: list longest first so the
 # matcher catches them before shorter prefixes of the same string.
@@ -124,18 +134,24 @@ def classify_by_heuristic(
         if cand in _KO_COUNTRY_WHITELIST:
             return "place"
 
-        # 2. Organization suffix (must come BEFORE person check — 정부서울청사
+        # 2. Famous organization shorthands (must come BEFORE person —
+        #    청와대 is 3 Hangul ending in 대 which is NOT in our suffix
+        #    list (too noisy), so the whitelist heads off the misclass).
+        if cand in _KO_ORG_WHITELIST:
+            return "organization"
+
+        # 3. Organization suffix (must come BEFORE person check — 정부서울청사
         #    ends in 사 which is an org suffix even though length<=4).
         org_suf = _ends_with_any(cand, _KO_ORG_SUFFIXES)
         if org_suf:
             return "organization"
 
-        # 3. Location suffix.
+        # 4. Location suffix.
         loc_suf = _ends_with_any(cand, _KO_LOC_SUFFIXES)
         if loc_suf:
             return "place"
 
-        # 4. Person heuristic: 2-4 Hangul, no whitespace, no org suffix.
+        # 5. Person heuristic: 2-4 Hangul, no whitespace, no org suffix.
         #    (We already returned for the suffix cases above.)
         if _looks_like_korean_name(cand):
             return "person"
