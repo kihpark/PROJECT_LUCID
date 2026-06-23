@@ -171,6 +171,31 @@ Run these IN ORDER on the input text:
               NOT   "predicate":"raised_funding"           # English on Korean
               NOT   "object_value":"75 billion USD"        # translation
 
+  Step 2c. RULE — fact 유형 분류 (Action vs Claim — v0.2.0 step 1):
+
+          각 fact 가 다음 둘 중 어디에 속하는지 분류하세요. fact_type 필드.
+
+            - action: 사건/행위 — "X가 Y를 했다"
+            - claim:  발화/주장/관측 — "X가 ~라고 말했다",
+                                       "X가 ~할 것이라 전망했다"
+
+              'claim' 의 본질 = "누가 무엇을 말했나" (one-hop provenance).
+              Lucid 는 화자의 말 자체를 fact 로 인정하되, 그 내용 진실은
+              보증하지 않음.
+
+              fact_type='claim' 이면 추가 필드:
+                - speaker:       발화 주체 (한국어 surface)
+                - speech_act:    발화 행위 (원문 동사 그대로 — 강제 enum 없음)
+                - content_claim: 발화 내용 (한국어 문장)
+                - stance:        supportive | critical | neutral | mixed | unknown
+
+          분류 가이드:
+            - 동사 '발표했다', '추가했다', '올렸다', '발사했다' = action
+            - 동사 '밝혔다', '주장했다', '말했다', '전망했다',
+                  '예측했다', '논평했다' = claim
+            - "X가 [Y는 ...]고 말했다" = claim (content 분명)
+            - 한 문장에서 둘 다 나오면 별도 fact 두 개
+
   Step 3. Decompose every assertion into one or more AtomicFact
           candidates (proposition or procedure). Each fact must be a
           SINGLE falsifiable statement.
@@ -275,9 +300,19 @@ it in markdown fences. Do NOT include any prose outside the JSON.
       "object_value": "Prospect Theory",
       "negation_flag": false,
       "negation_scope": null,
-      "tags_suggested": ["behavioral_economics", "1979"]
+      "tags_suggested": ["behavioral_economics", "1979"],
+      "fact_type": "action"
     }
   ],
+  // v0.2.0 step 1 — when fact_type == "claim", emit these extra fields
+  // on the fact object (omitted entirely for action facts):
+  //   "fact_type": "claim",
+  //   "speaker_uid": "obj-1",
+  //   "speaker_label": "안도걸 의원",
+  //   "speech_act": "밝혔다",
+  //   "content_claim": "디지털자산기본법 제정에 속도를 낼 것",
+  //   "stance": "neutral"   // supportive | critical | neutral | mixed | unknown
+  // speech_act is open natural-language — DO NOT force into an enum.
   "fact_object_links": [
     {
       "fact_uid": "fn-1",
@@ -391,6 +426,89 @@ FEW_SHOT_EXAMPLES = [
     {'input': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '한국은행', 'name_en': 'Bank of Korea', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '기준금리', 'name_en': 'base interest rate', 'properties': {'value': 3.0, 'unit': 'percent', 'as_of': '2024-12'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'subject_uid': 'obj-1', 'predicate': '기준금리였다', 'object_value': '3.0%', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2024-12']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
     {'input': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다. 반도체 부문이 흑자로 전환했고, 디스플레이는 흑자가 축소되었다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성전자', 'name_en': 'Samsung Electronics', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '영업이익', 'name_en': 'operating profit', 'properties': {'value': 23, 'unit': '조원', 'period': '2023Q4'}}, {'uid': 'obj-3', 'class': 'knowledge', 'name': '반도체 부문', 'name_en': 'semiconductor segment', 'properties': {}}, {'uid': 'obj-4', 'class': 'knowledge', 'name': '디스플레이 부문', 'name_en': 'display segment', 'properties': {}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다.', 'subject_uid': 'obj-1', 'predicate': '기록했다', 'object_value': '23조원', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2023Q4']}, {'uid': 'fn-2', 'type': 'proposition', 'claim': '반도체 부문이 흑자로 전환했다.', 'subject_uid': 'obj-3', 'predicate': '전환했다', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}, {'uid': 'fn-3', 'type': 'proposition', 'claim': '디스플레이는 흑자가 축소되었다.', 'subject_uid': 'obj-4', 'predicate': '축소되었다', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}, {'fact_uid': 'fn-2', 'object_uid': 'obj-3', 'link_type': 'describes_state', 'properties': {}}, {'fact_uid': 'fn-3', 'object_uid': 'obj-4', 'link_type': 'describes_state', 'properties': {}}], 'fact_fact_links': [{'from_uid': 'fn-2', 'to_uid': 'fn-1', 'link_type': 'supports'}, {'from_uid': 'fn-3', 'to_uid': 'fn-1', 'link_type': 'supports'}], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
     {'input': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성', 'name_en': 'Samsung', 'properties': {'founded_year': 1938, 'country': 'Korea', 'type': 'conglomerate'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'subject_uid': 'obj-1', 'predicate': '설립되었다', 'object_value': '1938년', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '1938', 'conglomerate']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [{'fact_uid': 'fn-1', 'mention_text': '삼성', 'candidate_object_uids': [], 'scores': []}], 'extraction_status': 'success', 'failure_reason': None}},
+    # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim few-shots.
+    # The classifier should learn (a) action default; (b) claim
+    # with speaker_label + speech_act + content_claim + stance; (c)
+    # critical stance from "부인했다" semantics. speech_act is open
+    # natural-language — DO NOT force an enum.
+    {
+        'input': '중국 상무부가 미국 기업 10곳을 수출통제 대상에 올렸다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'organization', 'name': '중국 상무부', 'name_en': 'Ministry of Commerce of China', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'organization', 'name': '미국 기업 10곳', 'name_en': '10 US companies', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '중국 상무부가 미국 기업 10곳을 수출통제 대상에 올렸다.',
+                 'subject_uid': 'obj-1', 'predicate': '수출통제 대상에 올렸다',
+                 'object_value': 'obj-2', 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR'], 'fact_type': 'action'},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'addresses', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    {
+        'input': '안도걸 의원은 디지털자산기본법 제정에 속도를 낼 것이라고 밝혔다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'person', 'name': '안도걸 의원', 'name_en': 'Rep. Ahn Do-geol', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'knowledge', 'name': '디지털자산기본법', 'name_en': 'Digital Asset Framework Act', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '안도걸 의원은 디지털자산기본법 제정에 속도를 낼 것이라고 밝혔다.',
+                 'subject_uid': 'obj-1', 'predicate': '밝혔다',
+                 'object_value': '디지털자산기본법 제정에 속도를 낼 것',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR'],
+                 'fact_type': 'claim',
+                 'speaker_uid': 'obj-1', 'speaker_label': '안도걸 의원',
+                 'speech_act': '밝혔다',
+                 'content_claim': '디지털자산기본법 제정에 속도를 낼 것',
+                 'stance': 'neutral'},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'addresses', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    {
+        'input': '트럼프 대통령은 관세 인하 가능성을 부인했다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'person', 'name': '트럼프 대통령', 'name_en': 'President Trump', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'knowledge', 'name': '관세 인하 가능성', 'name_en': 'tariff reduction possibility', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '트럼프 대통령은 관세 인하 가능성을 부인했다.',
+                 'subject_uid': 'obj-1', 'predicate': '부인했다',
+                 'object_value': '관세 인하 가능성',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR'],
+                 'fact_type': 'claim',
+                 'speaker_uid': 'obj-1', 'speaker_label': '트럼프 대통령',
+                 'speech_act': '부인했다',
+                 'content_claim': '관세 인하 가능성',
+                 'stance': 'critical'},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'addresses', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
 ]
 
 

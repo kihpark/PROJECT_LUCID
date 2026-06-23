@@ -4,9 +4,12 @@ from __future__ import annotations
 from api.structure.prompts import FEW_SHOT_EXAMPLES, SYSTEM_PROMPT
 
 
-def test_six_few_shot_examples_total():
-    """PR-3-1 shipped 3, PR-3-2 appends 3 → 6 total."""
-    assert len(FEW_SHOT_EXAMPLES) == 6
+def test_nine_few_shot_examples_total():
+    """PR-3-1 shipped 3, PR-3-2 appended 3 → 6.
+    v0.2.0 step 1 (fact-claim-layer-v1) appends 3 more for the
+    Action vs Claim split (action / claim-neutral / claim-critical)
+    → 9 total."""
+    assert len(FEW_SHOT_EXAMPLES) == 9
 
 
 def test_ko_statistic_example_present():

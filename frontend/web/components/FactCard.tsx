@@ -453,6 +453,20 @@ export function FactCard({
                 폐기 예정
               </span>
             )}
+            {/* v0.2.0 step 1 (fact-claim-layer-v1) — CLAIM badge. The
+                fact is a one-hop provenance utterance, NOT a current-
+                event action. Lucid records "X said Y" but does not
+                verify Y's truth. Action facts (fact_type='action' or
+                undefined for legacy back-compat) render unchanged. */}
+            {fact.fact_type === 'claim' && (
+              <span
+                data-testid={`fact-claim-badge-${factUid}`}
+                className="inline-flex items-center text-xxs font-mono text-accent-cool bg-accent-cool/10 border border-accent-cool/30 rounded px-1.5 py-0.5"
+                title="화자 인용 (one-hop provenance — 내용 진실은 보증되지 않음)"
+              >
+                CLAIM
+              </span>
+            )}
             {/* decide-ux-v3: negation badge UI removed per PO ("필요 없다"). */}
             {/* The underlying fact.negation_flag + negation_scope data is */}
             {/* preserved on the FactNode in storage — kept as substrate for */}
@@ -477,6 +491,30 @@ export function FactCard({
           {/* replace with the S|P|O pipe-joined reconstruction. The */}
           {/* edited triple surfaces in the S/P/O dl below. */}
           {displayClaim(fact, lang)}
+        </p>
+      )}
+
+      {/* v0.2.0 step 1 (fact-claim-layer-v1) — speaker / speech_act
+          / content_claim strip. Only renders for claim facts; action
+          cards are visually unchanged. Italic styling reflects the
+          one-hop provenance nature ("X said Y", not "Y is true"). */}
+      {!isEditing && fact.fact_type === 'claim'
+        && (fact.speaker_label || fact.speech_act || fact.content_claim)
+        && (
+        <p
+          data-testid={`fact-claim-strip-${factUid}`}
+          className="text-sm text-text-secondary mb-3 pl-7 italic"
+          lang={lang === 'kr' ? 'ko' : 'en'}
+        >
+          {fact.speaker_label && (
+            <span className="font-medium not-italic">[{fact.speaker_label}]</span>
+          )}
+          {fact.speech_act && (
+            <span className="ml-1 not-italic">&ldquo;{fact.speech_act}&rdquo;:</span>
+          )}
+          {fact.content_claim && (
+            <span className="ml-1">{fact.content_claim}</span>
+          )}
         </p>
       )}
 

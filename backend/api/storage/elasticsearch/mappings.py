@@ -101,6 +101,18 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             "override_warning": {"type": "boolean"},
             "negation_flag": {"type": "boolean"},
             "negation_scope": {"type": "keyword"},
+            # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split.
+            # `fact_type` keyword (action | claim) drives the recall facet
+            # bucket. The 5 claim-only fields are populated by the LLM
+            # only when fact_type=='claim'; legacy / action docs leave
+            # them null. `speech_act` is open natural-language — keyword
+            # for exact-match facet/aggregation, NOT a controlled enum.
+            "fact_type": {"type": "keyword"},
+            "speaker_uid": {"type": "keyword"},
+            "speaker_label": {"type": "keyword"},
+            "speech_act": {"type": "keyword"},
+            "content_claim": {"type": "text", "analyzer": "korean_analyzer"},
+            "stance": {"type": "keyword"},
             "edit_history": {
                 "type": "nested",
                 "properties": {

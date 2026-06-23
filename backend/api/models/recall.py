@@ -52,6 +52,16 @@ class RecallFact(LucidBaseModel):
     # layer landed; the frontend falls back to the canonical predicate
     # surface in that case.
     predicate_label: str | None = None
+    # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split.
+    # Null on legacy facts captured before the split landed (the
+    # recall route defaults the bucket to 'action' when filtering).
+    # The FactCard branches on fact_type=='claim' to show the
+    # speaker/speech_act strip; otherwise it renders as an action.
+    fact_type: Literal["action", "claim"] | None = None
+    speaker_label: str | None = None
+    speech_act: str | None = None
+    content_claim: str | None = None
+    stance: str | None = None
 
 
 class RecallResponse(LucidBaseModel):
@@ -146,6 +156,20 @@ class PredicateFacetItem(LucidBaseModel):
     count: int
 
 
+class FactTypeFacets(LucidBaseModel):
+    """v0.2.0 step 1 — Action vs Claim split counts.
+
+    Aggregated from the `fact_type` keyword field on lucid_facts.
+    Recomputed on every recall call alongside entity / predicate
+    facets. Legacy / null fact_type docs do NOT bucket here (the
+    terms agg skips missing values); the FE treats them as 'action'
+    via the FactCard fallback.
+    """
+
+    action: int = 0
+    claim: int = 0
+
+
 class RecallFacets(LucidBaseModel):
     """Aggregations over the CURRENT filtered result set.
 
@@ -156,6 +180,9 @@ class RecallFacets(LucidBaseModel):
 
     entities: EntityFacets = Field(default_factory=lambda: EntityFacets())
     predicates: list[PredicateFacetItem] = Field(default_factory=list)
+    # v0.2.0 step 1 — Action vs Claim split counts (additive; the
+    # frontend right-rail picks this up to drive the "화자 인용" chip).
+    fact_types: FactTypeFacets = Field(default_factory=lambda: FactTypeFacets())
 
 
 # ---------------------------------------------------------------------------
