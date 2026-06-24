@@ -46,6 +46,8 @@ from api.models.recall import (
     FactMutationResponse,
     FactsList,
     FactTypeFacets,
+    LedgerItem,
+    LedgerResponse,
     ModifyFactRequest,
     PredicateFacetItem,
     RecallFacets,
@@ -1707,4 +1709,163 @@ def list_space_facts(
         facts=facts,
         total=len(facts),
         truncated=total_int > len(facts),
+    )
+
+
+# ---------------------------------------------------------------------------
+# feat/ledger-view — LEDGER (제3의 뷰).
+#
+# Chronological list of recently validated facts in one KS, sorted by
+# validated_at desc with _id as secondary tie-break. Paged with
+# limit (default 20, max 100) + offset. Optional fact_type chip
+# filter narrows to action / claim / measurement. The destination for
+# HEARTH "기록 보기" and the weekly briefing's "이번주 검증" link.
+#
+# Intent-separated from RECALL (no embedding, no kNN, no score floor)
+# and from FACTS (which is unpaginated; capped at 500). LEDGER is
+# explicit pagination so the chrome stays responsive on a big KS.
+# ---------------------------------------------------------------------------
+
+LEDGER_DEFAULT_LIMIT = 20
+LEDGER_MAX_LIMIT = 100
+
+
+def _project_to_ledger_item(fact: RecallFact) -> LedgerItem:
+    """Project a label-enriched RecallFact to the LEDGER surface.
+
+    Drops score / match_kind / contradiction_count / validator_id /
+    validation_method / negation_* / stance — the ledger surface
+    doesn't need them. Keeps the type-layer fields the shared
+    FactTypeBadge / FactTypeStrip consume so the [CLAIM] /
+    [MEASUREMENT] visual parity with RECALL is preserved.
+    """
+    return LedgerItem(
+        fact_uid=fact.fact_uid,
+        claim=fact.claim,
+        claim_en=fact.claim_en,
+        subject_uid=fact.subject_uid,
+        subject_label=fact.subject_label,
+        predicate=fact.predicate,
+        predicate_label=fact.predicate_label,
+        object_value=fact.object_value,
+        object_label=fact.object_label,
+        source_uids=list(fact.source_uids),
+        validated_at=fact.validated_at,
+        knowledge_space_id=fact.knowledge_space_id,
+        fact_type=fact.fact_type,
+        speaker_label=fact.speaker_label,
+        speech_act=fact.speech_act,
+        content_claim=fact.content_claim,
+        metric=fact.metric,
+        measurement_value=fact.measurement_value,
+        measurement_unit=fact.measurement_unit,
+        as_of=fact.as_of,
+    )
+
+
+@router.get("/ledger", response_model=LedgerResponse)
+def list_ledger(
+    space_id: uuid.UUID,
+    limit: int = Query(
+        default=LEDGER_DEFAULT_LIMIT,
+        ge=1,
+        le=LEDGER_MAX_LIMIT,
+        description="Page size for the ledger list (1-100, default 20).",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Offset into the time-desc result set for pagination.",
+    ),
+    fact_type: str | None = Query(
+        default=None,
+        description="Optional fact_type chip filter (action / claim / measurement).",
+    ),
+    user: User = Depends(get_current_user),
+) -> LedgerResponse:
+    """Paged, time-desc list of validated facts in one KS.
+
+    Filters:
+      - knowledge_space_id == :space_id  (hard pin)
+      - validation_method == 'manual'    (hard pin; auto rows never surface)
+      - retracted_at NOT exists          (soft-deleted facts are hidden)
+      - fact_type == :fact_type          (when the query param is set)
+
+    Sort: validated_at desc, _id desc as a stable tie-break.
+
+    Pagination: ES `from_` + `size`. `limit` clamped to [1, 100] by
+    FastAPI's Query validators; `offset` is non-negative.
+
+    Fail-soft: an ES error returns an empty LedgerResponse rather than
+    a 500 — same contract as the recall + facts endpoints. Auth /
+    space resolution still uses the standard 401/403/404 chain.
+    """
+    session = _new_session()
+    try:
+        _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+    ks_id = str(space_id)
+
+    filters: list[dict[str, Any]] = [
+        {"term": {"knowledge_space_id": ks_id}},
+        {"term": {"validation_method": "manual"}},
+    ]
+    # Optional fact_type chip filter. We accept the param as a free
+    # string and rely on the ES term filter to no-op when the value
+    # doesn't match any docs — defensive, since the FE only sends
+    # one of the three known values.
+    if fact_type:
+        filters.append({"term": {"fact_type": fact_type}})
+
+    body: dict[str, Any] = {
+        "from": offset,
+        "size": limit,
+        # Tie-break on _id so the order is stable when multiple facts
+        # share an exact validated_at (e.g. an accept-all batch).
+        "sort": [
+            {"validated_at": {"order": "desc"}},
+            {"_id": {"order": "desc"}},
+        ],
+        "query": {
+            "bool": {
+                "filter": filters,
+                "must_not": [
+                    {"exists": {"field": "retracted_at"}},
+                ],
+            },
+        },
+    }
+    try:
+        client = get_client()
+        resp = client.search(index=LUCID_FACTS, body=body)
+    except Exception as exc:  # noqa: BLE001 — degrade quietly
+        logger.warning("ledger: ES search failed: %s", exc)
+        return LedgerResponse(facts=[], total=0, limit=limit, offset=offset)
+
+    hits = list(resp.get("hits", {}).get("hits") or [])
+    recall_facts: list[RecallFact] = []
+    for hit in hits:
+        fact = _hit_to_fact(hit)
+        if fact is not None:
+            recall_facts.append(fact)
+
+    # Reuse the same label enrichment chain RECALL / FACTS use so the
+    # ledger card can render subject_label / object_label without a
+    # second round-trip — operates on RecallFact[] before projection.
+    recall_facts = _enrich_with_labels(recall_facts, ks_id)
+
+    items = [_project_to_ledger_item(f) for f in recall_facts]
+
+    total_raw = (resp.get("hits") or {}).get("total")
+    if isinstance(total_raw, dict):
+        total_int = int(total_raw.get("value") or 0)
+    else:
+        total_int = int(total_raw or 0)
+
+    return LedgerResponse(
+        facts=items,
+        total=total_int,
+        limit=limit,
+        offset=offset,
     )

@@ -303,6 +303,44 @@ export interface FactsList {
 }
 
 // ---------------------------------------------------------------------------
+// feat/ledger-view — LEDGER (제3의 뷰).
+// Mirrors backend/api/models/recall.py::LedgerItem / LedgerResponse.
+// Deliberately trims score / match_kind / contradiction_count /
+// validator_id / validation_method / negation_* / stance — the ledger
+// surface doesn't render relevance metadata.
+// ---------------------------------------------------------------------------
+
+export interface LedgerItem {
+  fact_uid: string;
+  claim: string;
+  claim_en: string | null;
+  subject_uid: string;
+  subject_label?: string | null;
+  predicate: string;
+  predicate_label?: string | null;
+  object_value: string;
+  object_label?: string | null;
+  source_uids: string[];
+  validated_at: string;
+  knowledge_space_id: string;
+  fact_type?: 'action' | 'claim' | 'measurement' | null;
+  speaker_label?: string | null;
+  speech_act?: string | null;
+  content_claim?: string | null;
+  metric?: string | null;
+  measurement_value?: number | null;
+  measurement_unit?: string | null;
+  as_of?: string | null;
+}
+
+export interface LedgerResponse {
+  facts: LedgerItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ---------------------------------------------------------------------------
 // B-48b — fact detail panel
 // ---------------------------------------------------------------------------
 

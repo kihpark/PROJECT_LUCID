@@ -356,6 +356,74 @@ class FactsList(LucidBaseModel):
 
 
 # ---------------------------------------------------------------------------
+# feat/ledger-view — LEDGER (제3의 뷰).
+#
+# The third view alongside DECIDE (검증 큐, pre-validation) and RECALL
+# (search): a chronological list of recently validated facts. The
+# destination for HEARTH "기록 보기" and the weekly briefing's "이번주
+# 검증" link.
+#
+# LedgerItem is a deliberate trim of RecallFact: the score / match_kind /
+# contradiction_count / validator_id / validation_method / negation_*  /
+# stance fields are dropped because the ledger surface does not need
+# them (no relevance ranking, no embedding metadata, no decide-side
+# guards). Only the type-layer fields the FactCard renders are kept so
+# the CLAIM / MEASUREMENT badge + strip works identically.
+# ---------------------------------------------------------------------------
+
+class LedgerItem(LucidBaseModel):
+    """One row in the LEDGER view — a validated fact projected to the
+    surface fields the chronological list actually renders.
+
+    Identity + chrome (fact_uid, claim, subject/predicate/object,
+    source_uids, validated_at, knowledge_space_id) + the type-layer
+    fields (fact_type, speaker/speech_act/content_claim,
+    metric/value/unit/as_of) + server-resolved labels. No score,
+    no match_kind, no contradiction count — the ledger is not a
+    relevance surface.
+    """
+
+    fact_uid: str
+    claim: str
+    claim_en: str | None = None
+    subject_uid: str
+    subject_label: str | None = None
+    predicate: str
+    predicate_label: str | None = None
+    object_value: str
+    object_label: str | None = None
+    source_uids: list[str] = Field(default_factory=list)
+    validated_at: datetime
+    knowledge_space_id: str
+    # Type-layer fields — same shape FactCard / FactTypeBadge consume.
+    fact_type: Literal["action", "claim", "measurement"] | None = None
+    speaker_label: str | None = None
+    speech_act: str | None = None
+    content_claim: str | None = None
+    metric: str | None = None
+    measurement_value: float | None = None
+    measurement_unit: str | None = None
+    as_of: str | None = None
+
+
+class LedgerResponse(LucidBaseModel):
+    """GET /api/spaces/{space_id}/ledger envelope.
+
+    `facts` is the time-desc-sorted page (validated_at desc, _id
+    secondary for stability). `total` is the count returned by
+    ES `hits.total.value` — the FULL match count, not the page —
+    so the FE can decide whether to show "더 보기".
+    `limit` / `offset` echo the request so the FE's pagination
+    state stays in sync with the server.
+    """
+
+    facts: list[LedgerItem] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 20
+    offset: int = 0
+
+
+# ---------------------------------------------------------------------------
 # B-55 — Home brief
 # ---------------------------------------------------------------------------
 
