@@ -461,6 +461,23 @@ def insert_or_dedup_fact(
     if extra_es_fields:
         body.update(extra_es_fields)
 
+    # search-embedding-restore (v0.2.0 graduation gate): compute dense
+    # embedding on the canonical insert path so kNN recall can actually
+    # rank these facts. Without this, every fact written through B-62's
+    # insert_or_dedup path lands with no embedding field, kNN matches
+    # nothing, and the recall route silently falls through to wildcard
+    # entity-name lookup — which is the bug PO surfaced (선거관리위원회
+    # → 최저임금위원회). Embedding key absent / network fail → tuple is
+    # None → we omit the field rather than write a zero vector, since
+    # ES dense_vector mapping is strict.
+    try:
+        emb = get_embedding(claim or legacy_object_value)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("insert_or_dedup_fact embed failed for %s: %s", fact_uid, exc)
+        emb = None
+    if emb is not None:
+        body["embedding"] = list(emb)
+
     try:
         client.index(
             index=LUCID_FACTS,

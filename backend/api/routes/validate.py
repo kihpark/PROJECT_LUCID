@@ -675,9 +675,15 @@ def decide(
                 log_count += 1
 
         # Single ES round-trip for all accept + edit nodes.
+        # search-embedding-restore (v0.2.0 graduation gate): bulk insert
+        # WITH embedding so kNN recall can find these facts. The OpenAI
+        # cost at dogfood scale (≤10 facts per submit) is ~$0.0002 per
+        # batch and the LRU cache de-dupes repeated claims. With no
+        # API key the helper returns None per fact and ES skips the
+        # dense_vector field — same fail-soft behaviour as before.
         if bulk_module is not None and pending_nodes:
             try:
-                bulk_module(pending_nodes, with_embedding=False)
+                bulk_module(pending_nodes, with_embedding=True)
             except Exception as exc:  # noqa: BLE001
                 logger.exception(
                     "bulk_create_facts failed (%d nodes): %s",
@@ -918,8 +924,10 @@ def accept_all(
                         existing_uid, exc,
                     )
             else:
+                # search-embedding-restore: accept-all path now writes
+                # embedding too — same rationale as the bulk path above.
                 try:
-                    create_fact(node, with_embedding=False)
+                    create_fact(node, with_embedding=True)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("accept-all create_fact failed for %s: %s", fu, exc)
 
