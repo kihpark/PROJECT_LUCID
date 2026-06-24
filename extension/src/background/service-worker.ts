@@ -22,6 +22,21 @@ import {
   installContextMenus,
   installContextMenuListener,
 } from './context-menu';
+// feat/capture-job-tracker — persistent job list driving the popup
+// tracker pane + numeric badge. The capture handler stamps an
+// initial 'saving' row; fireTerminalNotification flips it to
+// 'completed' / 'failed'. The badge is recomputed at every
+// transition.
+import {
+  addJob,
+  clearCompleted,
+  getJobs,
+  getSettings,
+  setSettings,
+  updateJobStatus,
+  type TrackerSettings,
+} from './job-tracker';
+import { updateBadge } from './badge';
 
 // feat/capture-complete-toast: cache the most-recent terminal
 // notification id per job so the click handler can map the
@@ -86,6 +101,25 @@ async function fireTerminalNotification(args: {
     terminalNotifications.set(id, args.jobId);
   } catch (err) {
     console.info('[lucid] terminal notification failed', err);
+  }
+
+  // feat/capture-job-tracker — same event that fires the OS
+  // notification also flips the tracker row. We do this AFTER the
+  // notification create so a thrown notifications call doesn't
+  // swallow the tracker update.
+  try {
+    if (args.status === 'structured') {
+      await updateJobStatus(args.jobId, 'completed', {
+        fact_count: args.factCount ?? undefined,
+      });
+    } else {
+      await updateJobStatus(args.jobId, 'failed', {
+        error_message: 'extraction failed',
+      });
+    }
+    await updateBadge();
+  } catch (err) {
+    console.info('[lucid] tracker terminal update failed', err);
   }
 }
 
@@ -172,8 +206,31 @@ function isCaptureMessage(m: unknown): m is CaptureMessage {
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[lucid] service worker installed');
   installContextMenus();
+  // feat/capture-job-tracker — recover the badge after a browser
+  // restart / extension reload. The persisted job list survives the
+  // SW teardown but `chrome.action.setBadgeText` does not — without
+  // this call the badge would stay empty until the next state
+  // transition.
+  void updateBadge();
 });
 installContextMenuListener();
+// onStartup fires when the browser launches (not on extension
+// install). Some Chrome builds tear down + relaunch the SW between
+// onInstalled and the user's first interaction; calling updateBadge
+// here covers that gap.
+try {
+  if (
+    typeof chrome !== 'undefined'
+    && (chrome as { runtime?: { onStartup?: { addListener?: unknown } } })
+      .runtime?.onStartup?.addListener
+  ) {
+    chrome.runtime.onStartup.addListener(() => {
+      void updateBadge();
+    });
+  }
+} catch {
+  // ignore — onStartup is best-effort
+}
 
 chrome.runtime.onMessage.addListener(
   (msg: IncomingMessage, _sender, sendResponse) => {
@@ -206,6 +263,19 @@ chrome.runtime.onMessage.addListener(
           const cur = await import('@/lib/storage').then((m) => m.readState());
           const next = [...(cur.capturedJobIds || []), result.job_id].slice(-10);
           await writeState({ capturedJobIds: next });
+          // feat/capture-job-tracker — add to the persistent tracker
+          // and bump the badge. We use the page_title forwarded by
+          // the popup (it queries chrome.tabs.query first) as the
+          // human-readable label; falling back to `undefined` lets
+          // the popup renderer derive a hostname.
+          const trackerTitle = title || undefined;
+          await addJob({
+            job_id: result.job_id,
+            source_url: msg.source_url,
+            title: trackerTitle,
+            source_tab_id: _sender.tab?.id,
+          });
+          await updateBadge();
           sendResponse({ ok: true, job_id: result.job_id });
         } catch (err) {
           sendResponse({ ok: false, error: (err as Error).message });
@@ -285,6 +355,80 @@ chrome.runtime.onMessage.addListener(
         try {
           await openPendingForJob(m.job_id);
           sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false, error: (err as Error).message });
+        }
+      })();
+      return true;
+    }
+
+    // feat/capture-job-tracker — popup pulls the tracker list +
+    // settings on every open and after every mutation. Each handler
+    // mirrors the existing get_job_status shape: { ok, ...payload }
+    // on success, { ok:false, error } on failure.
+    if (
+      typeof msg === 'object'
+      && msg !== null
+      && (msg as { type?: string }).type === 'list_jobs'
+    ) {
+      (async () => {
+        try {
+          const jobs = await getJobs();
+          sendResponse({ ok: true, jobs });
+        } catch (err) {
+          sendResponse({ ok: false, error: (err as Error).message });
+        }
+      })();
+      return true;
+    }
+
+    if (
+      typeof msg === 'object'
+      && msg !== null
+      && (msg as { type?: string }).type === 'clear_completed'
+    ) {
+      (async () => {
+        try {
+          await clearCompleted();
+          await updateBadge();
+          sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false, error: (err as Error).message });
+        }
+      })();
+      return true;
+    }
+
+    if (
+      typeof msg === 'object'
+      && msg !== null
+      && (msg as { type?: string }).type === 'get_settings'
+    ) {
+      (async () => {
+        try {
+          const settings = await getSettings();
+          sendResponse({ ok: true, settings });
+        } catch (err) {
+          sendResponse({ ok: false, error: (err as Error).message });
+        }
+      })();
+      return true;
+    }
+
+    if (
+      typeof msg === 'object'
+      && msg !== null
+      && (msg as { type?: string }).type === 'set_settings'
+    ) {
+      const m = msg as { type: 'set_settings'; patch: Partial<TrackerSettings> };
+      (async () => {
+        try {
+          const settings = await setSettings(m.patch ?? {});
+          // Setting changes flip the badge — clear when toggled off,
+          // re-render when toggled on. The popup also re-renders
+          // from its own onChanged listener.
+          await updateBadge();
+          sendResponse({ ok: true, settings });
         } catch (err) {
           sendResponse({ ok: false, error: (err as Error).message });
         }

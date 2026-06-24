@@ -25,6 +25,12 @@
  */
 
 import { postCapture, type CaptureRequest } from '@/lib/api';
+// feat/capture-job-tracker — context-menu captures bypass the SW
+// message handler (handleContextMenuClick calls postCapture
+// directly), so we add to the tracker here too. The popup's
+// capture path adds in service-worker.ts.
+import { addJob } from './job-tracker';
+import { updateBadge } from './badge';
 
 export const MENU_IDS = {
   page: 'lucid-save-page',
@@ -710,6 +716,23 @@ export async function handleContextMenuClick(
 
   try {
     const result = await postCapture(payload);
+    // feat/capture-job-tracker — stamp the tracker BEFORE the toast
+    // call. notifyTab can sometimes block on a slow tab; the
+    // tracker write is fast and order-independent for the badge.
+    // We swallow tracker errors so they can't cancel an otherwise
+    // successful capture (the toast still goes out).
+    try {
+      const trackerTitle = (tab?.title ?? '').trim() || undefined;
+      await addJob({
+        job_id: result.job_id,
+        source_url: payload.source_url,
+        title: trackerTitle,
+        source_tab_id: tabId,
+      });
+      await updateBadge();
+    } catch (trackerErr) {
+      console.info('[lucid] tracker addJob failed', trackerErr);
+    }
     await notifyTab(tabId, {
       type: 'show_toast',
       job_id: result.job_id,
