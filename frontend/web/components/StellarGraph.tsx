@@ -615,6 +615,15 @@ export function StellarGraph(props: StellarGraphProps) {
       controls.autoRotateSpeed = 0.25; // ~0.3 deg/s feel
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
+      // stellar-zoom-recover — explicit wheel-zoom enablement.
+      // OrbitControls defaults to enableZoom = true, but the PO repro
+      // ("zoom out 안 됨") leaves enough doubt that we pin it on
+      // explicitly. minDistance / maxDistance are deliberately left
+      // undefined so the wheel can pull the camera fully outside the
+      // 4500-radius starfield sphere — that's what "fully zoom out to
+      // see the universe" demands.
+      controls.enableZoom = true;
+      controls.zoomSpeed = 1.0;
     }
 
     // B-62-demo-clusters-edges + feat/stellar-camera-focus — d3-force tune
@@ -880,8 +889,19 @@ export function StellarGraph(props: StellarGraphProps) {
   // B-62-fix4 — imperative zoom step. Reads the current camera
   // direction from the live ref so it composes correctly with autoRotate
   // and user orbit; only the distance along the eye→origin axis changes.
+  //
+  // stellar-zoom-recover — range widened from [0.25, 4] to [0.1, 10].
+  // The old 0.25 floor capped camera distance at initialDist × 4. For
+  // a small real graph (initialDist ≈ 130) that ceiling is only
+  // 520 scene-units — well inside the 4500-radius starfield sphere —
+  // so the `−` button visibly stopped doing anything after a few
+  // clicks. The 0.1 floor lets the camera pull all the way out past
+  // the starfield ("see the universe"); the 10 ceiling gives small
+  // graphs real room to zoom in (initialDist=130 → 13 scene-units at
+  // max). This matches the amplify-attempt's range WITHOUT re-introducing
+  // the reverted centroid lookAt — eye distance only, no target swap.
   const applyZoom = useCallback((nextZoom: number) => {
-    const clamped = Math.max(0.25, Math.min(4, nextZoom));
+    const clamped = Math.max(0.1, Math.min(10, nextZoom));
     setZoom(clamped);
     const handle = fgRef.current;
     const camera = handle?.camera?.();
@@ -1181,18 +1201,18 @@ export function StellarGraph(props: StellarGraphProps) {
           type="button"
           data-testid="stellar-zoom-in"
           aria-label="zoom in"
-          disabled={zoom >= 4}
+          disabled={zoom >= 10}
           onClick={() => applyZoom(zoom * 1.25)}
           style={{
             width: 36,
             height: 28,
             borderRadius: 7,
-            background: zoom >= 4 ? '#0d1417' : '#102023',
+            background: zoom >= 10 ? '#0d1417' : '#102023',
             border: '1px solid #1d2b2f',
             color: '#3fe0c6',
             fontWeight: 600,
-            cursor: zoom >= 4 ? 'not-allowed' : 'pointer',
-            opacity: zoom >= 4 ? 0.4 : 1,
+            cursor: zoom >= 10 ? 'not-allowed' : 'pointer',
+            opacity: zoom >= 10 ? 0.4 : 1,
           }}
         >
           +
@@ -1212,18 +1232,18 @@ export function StellarGraph(props: StellarGraphProps) {
           type="button"
           data-testid="stellar-zoom-out"
           aria-label="zoom out"
-          disabled={zoom <= 0.25}
+          disabled={zoom <= 0.1}
           onClick={() => applyZoom(zoom * 0.8)}
           style={{
             width: 36,
             height: 28,
             borderRadius: 7,
-            background: zoom <= 0.25 ? '#0d1417' : '#102023',
+            background: zoom <= 0.1 ? '#0d1417' : '#102023',
             border: '1px solid #1d2b2f',
             color: '#3fe0c6',
             fontWeight: 600,
-            cursor: zoom <= 0.25 ? 'not-allowed' : 'pointer',
-            opacity: zoom <= 0.25 ? 0.4 : 1,
+            cursor: zoom <= 0.1 ? 'not-allowed' : 'pointer',
+            opacity: zoom <= 0.1 ? 0.4 : 1,
           }}
         >
           −

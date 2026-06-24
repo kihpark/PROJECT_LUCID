@@ -129,53 +129,16 @@ function SourceToggle({ source, onChange }: ToggleProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Hover tooltip (positioned near the cursor).
+// stellar-zoom-recover — the floating hover tooltip used to live here.
+// It duplicated the side panel (FocusPanel) once a node was focused, and
+// the PO repro flagged the simultaneous render as "2중 표시" noise. The
+// side panel is the only surface that carries relations chain-navigation
+// (펼치기 / 중심으로 / back) — that's the v1 spec's load-bearing UX — so
+// we keep it and drop the bubble. The renderer's `onNodeHover` prop is
+// left in the type signature as a harmless no-op (subagent-isolated change:
+// we don't refactor the renderer surface).
 // ---------------------------------------------------------------------------
 
-interface HoverState {
-  node: StellarNode;
-  x: number;
-  y: number;
-}
-
-function HoverTooltip({ state }: { state: HoverState | null }) {
-  if (!state) return null;
-  const { node, x, y } = state;
-  return (
-    <div
-      data-testid="stellar-hover-tooltip"
-      style={{
-        position: 'fixed',
-        top: y + 14,
-        left: x + 14,
-        zIndex: 30,
-        maxWidth: 320,
-        padding: '10px 12px',
-        background: PANEL_BG,
-        border: `1px solid ${PANEL_BORDER}`,
-        borderRadius: 10,
-        color: TEXT_PRIMARY,
-        pointerEvents: 'none',
-        fontSize: 12,
-        lineHeight: 1.45,
-        boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
-      }}
-    >
-      <div style={{ color: ACCENT, fontWeight: 600 }}>{node.subject}</div>
-      <div style={{ color: TEXT_DIM, fontSize: 11, marginTop: 2 }}>
-        {predicateLabel(node.predicate)}
-      </div>
-      <div style={{ color: TEXT_BODY, marginTop: 4 }}>
-        {truncate(node.object, 90)}
-      </div>
-    </div>
-  );
-}
-
-function truncate(s: string, max: number): string {
-  if (!s) return '';
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
-}
 
 // B-62-v1 — the old FactDrawer (click-to-open detail) has been replaced
 // by FocusPanel (click → focus + 1-hop + relation list + chain-navigate).
@@ -808,7 +771,10 @@ export interface StellarViewProps {
 
 export function StellarView(props: StellarViewProps = {}) {
   const [source, setSource] = useState<StellarSource>('synthetic');
-  const [hovered, setHovered] = useState<HoverState | null>(null);
+  // stellar-zoom-recover — hover state removed; the floating tooltip
+  // that duplicated the side panel is gone. The renderer's onNodeHover
+  // is wired to a no-op below for backward compatibility with the type
+  // surface.
   // B-62-v1 — focus replaces the old "selected" idea. Focusing a node:
   //   1. dims everything except the node and its 1-hop neighbours,
   //   2. opens the side panel with fact detail + a list of related facts
@@ -841,15 +807,9 @@ export function StellarView(props: StellarViewProps = {}) {
     setSource(persisted);
   }, []);
 
-  // Cursor position for tooltip placement.
-  const cursorRef = useRef({ x: 0, y: 0 });
-  useEffect(() => {
-    function onMove(e: MouseEvent) {
-      cursorRef.current = { x: e.clientX, y: e.clientY };
-    }
-    window.addEventListener('mousemove', onMove);
-    return () => window.removeEventListener('mousemove', onMove);
-  }, []);
+  // stellar-zoom-recover — cursor tracking removed; only HoverTooltip
+  // consumed it, and that tooltip is now gone (the side panel covers
+  // the same surface area without the 2중 표시 problem).
 
   // Synthetic data — memoized, built once per mount. We capture the builder
   // override (test seam) in a ref so the useMemo runs exactly once without
@@ -880,7 +840,6 @@ export function StellarView(props: StellarViewProps = {}) {
   const handleToggle = useCallback((next: StellarSource) => {
     setSource(next);
     persistSource(next);
-    setHovered(null);
     setFocused(null);
     setFocusHistory([]);
     setSelected(null);
@@ -890,12 +849,11 @@ export function StellarView(props: StellarViewProps = {}) {
     setViewResetTick((t) => t + 1);
   }, []);
 
-  const handleHover = useCallback((node: StellarNode | null) => {
-    if (!node) {
-      setHovered(null);
-      return;
-    }
-    setHovered({ node, x: cursorRef.current.x, y: cursorRef.current.y });
+  // stellar-zoom-recover — hover is now an explicit no-op. We keep the
+  // prop to preserve the renderer type surface (StellarGraph.tsx still
+  // exposes onNodeHover; calling it must not throw).
+  const handleHover = useCallback((_node: StellarNode | null) => {
+    // intentionally empty — floating tooltip removed.
   }, []);
 
   // B-62-v1 — click is now FOCUS. The handler pushes the previous focus
@@ -1106,7 +1064,6 @@ export function StellarView(props: StellarViewProps = {}) {
         focused={focused}
       />
 
-      <HoverTooltip state={hovered} />
       <FocusPanel
         focused={focused}
         relations={focusRelations}
