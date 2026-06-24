@@ -1537,6 +1537,35 @@ describe('FactCard — claim (v0.2.0 step 1)', () => {
     expect(strip).toHaveTextContent('디지털자산기본법 제정에 속도를 낼 것');
   });
 
+  // fact-display-unification — PO claim-display-format spec (recovery
+  // spec PR B). Visual contract:
+  //   **국가데이터처**[발표했다]: "4월 기준 증가율은…"
+  // — bold speaker WITHOUT brackets, brackets AROUND speech_act
+  //   (with trailing colon), quotes AROUND content_claim.
+  it('renders the PO claim-display-format spec: bold speaker, [speech_act]:, "content_claim"', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={claimFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    const strip = screen.getByTestId('fact-claim-strip-fn-claim-1');
+    // Speaker wrapped in <strong> with font-bold class (not just font-medium).
+    const speaker = strip.querySelector('strong');
+    expect(speaker).not.toBeNull();
+    expect(speaker!.textContent).toBe('안도걸 의원');
+    expect(speaker!.className).toMatch(/font-bold/);
+    // The speaker text itself should NOT carry the bracket wrap that
+    // the old format used — the old "[안도걸 의원]" rendering is what
+    // PO explicitly rejected.
+    expect(strip.textContent).not.toContain('[안도걸 의원]');
+    // Speech act bracketed with trailing colon — the new spec.
+    expect(strip.textContent).toContain('[밝혔다]:');
+    // The previous quoted "speech_act": rendering must be gone.
+    expect(strip.textContent).not.toContain('"밝혔다":');
+    // Content claim wrapped in curly quotes (the strip itself owns the
+    // quote marks; the old version rendered content_claim plain).
+    expect(strip.textContent).toContain('“디지털자산기본법 제정에 속도를 낼 것”');
+  });
+
   it('does NOT render [CLAIM] badge when fact_type=action', () => {
     const onChange = vi.fn();
     render(

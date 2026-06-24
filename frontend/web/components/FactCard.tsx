@@ -7,6 +7,146 @@ import { searchEntitySuggestions, listPredicates } from '@/lib/api';
 import type { FactAction, FactSummary, ObjectSummary, EntitySuggestion, PredicateEntry } from '@/lib/types';
 import type { Lang } from './LangToggle';
 
+// ---------------------------------------------------------------------------
+// fact-display-unification — shared fact_type-aware sub-components.
+//
+// PO escalation (2026-06-24): Decide and Recall used to render fact cards
+// via TWO completely separate components — Decide's FactCard branched on
+// fact_type to show CLAIM/MEASUREMENT badges + strips, while Recall's
+// RecallFactCard had ZERO branching, so the SAME fact looked totally
+// different across the two surfaces. This pair of presentational
+// sub-components is the single source of truth for the fact_type display
+// surface: badge + strip, no other coupling. Both FactCard (Decide) and
+// RecallFactCard (Recall) consume them so the visual is identical.
+//
+// Contract: each component early-returns null when fact_type is not
+// 'claim' or 'measurement' (matching the existing legacy-safe guards).
+// Props are structurally typed so any consumer with the matching field
+// names (FactSummary, RecallFact, FactDetailHeader) wires for free.
+// ---------------------------------------------------------------------------
+
+export interface FactTypeFields {
+  fact_type?: 'action' | 'claim' | 'measurement' | null;
+  speaker_label?: string | null;
+  speech_act?: string | null;
+  content_claim?: string | null;
+  metric?: string | null;
+  measurement_value?: number | null;
+  measurement_unit?: string | null;
+  as_of?: string | null;
+}
+
+export function FactTypeBadge({
+  factType, factUid,
+}: { factType: FactTypeFields['fact_type']; factUid: string }) {
+  if (factType === 'claim') {
+    return (
+      <span
+        data-testid={`fact-claim-badge-${factUid}`}
+        className="inline-flex items-center text-xxs font-mono text-accent-cool bg-accent-cool/10 border border-accent-cool/30 rounded px-1.5 py-0.5"
+        title="화자 인용 (one-hop provenance — 내용 진실은 보증되지 않음)"
+      >
+        CLAIM
+      </span>
+    );
+  }
+  if (factType === 'measurement') {
+    return (
+      <span
+        data-testid={`fact-measurement-badge-${factUid}`}
+        className="inline-flex items-center text-xxs font-mono text-accent-warm bg-accent-warm/10 border border-accent-warm/30 rounded px-1.5 py-0.5"
+        title="수치 측정 (numeric data pinned to a timepoint — 시계열의 한 점)"
+      >
+        MEASUREMENT
+      </span>
+    );
+  }
+  return null;
+}
+
+export function FactTypeStrip({
+  fact, factUid, lang,
+}: { fact: FactTypeFields; factUid: string; lang: Lang }) {
+  // PO claim-display-format (recovery spec PR B): bold speaker WITHOUT
+  // brackets, brackets around speech_act, quotes around content_claim.
+  // Visual: **국가데이터처**[발표했다]: "4월 기준 증가율은…"
+  if (fact.fact_type === 'claim') {
+    if (!fact.speaker_label && !fact.speech_act && !fact.content_claim) {
+      return null;
+    }
+    return (
+      <p
+        data-testid={`fact-claim-strip-${factUid}`}
+        className="text-sm text-text-secondary mb-3 pl-7 italic"
+        lang={lang === 'kr' ? 'ko' : 'en'}
+      >
+        {fact.speaker_label && (
+          <strong className="font-bold not-italic">{fact.speaker_label}</strong>
+        )}
+        {fact.speech_act && (
+          <span className="ml-1 not-italic">[{fact.speech_act}]:</span>
+        )}
+        {fact.content_claim && (
+          <span className="ml-1">&ldquo;{fact.content_claim}&rdquo;</span>
+        )}
+      </p>
+    );
+  }
+  if (fact.fact_type === 'measurement') {
+    const hasValue = fact.measurement_value !== null && fact.measurement_value !== undefined;
+    if (!fact.metric && !hasValue && !fact.measurement_unit && !fact.as_of) {
+      return null;
+    }
+    return (
+      <p
+        data-testid={`fact-measurement-strip-${factUid}`}
+        className="text-sm text-text-secondary mb-3 pl-7 font-mono"
+        lang={lang === 'kr' ? 'ko' : 'en'}
+      >
+        <span
+          data-testid={`fact-measurement-prefix-${factUid}`}
+          className="mr-2 opacity-60"
+        >
+          [MEASUREMENT]
+        </span>
+        {fact.metric && (
+          <span
+            data-testid={`fact-measurement-metric-${factUid}`}
+            className="font-medium text-accent-warm"
+          >
+            {fact.metric}
+          </span>
+        )}
+        {hasValue && (
+          <>
+            {fact.metric && <span className="mx-1 opacity-60">=</span>}
+            <span data-testid={`fact-measurement-value-${factUid}`}>
+              {Number(fact.measurement_value).toLocaleString()}
+            </span>
+          </>
+        )}
+        {fact.measurement_unit && (
+          <span
+            data-testid={`fact-measurement-unit-${factUid}`}
+            className="ml-1"
+          >
+            {fact.measurement_unit}
+          </span>
+        )}
+        {fact.as_of && (
+          <span
+            data-testid={`fact-measurement-asof-${factUid}`}
+            className="ml-2 opacity-70"
+          >
+            ({fact.as_of})
+          </span>
+        )}
+      </p>
+    );
+  }
+  return null;
+}
+
 interface EditPayload {
   action: FactAction;
   editedClaim?: string;
@@ -453,35 +593,13 @@ export function FactCard({
                 폐기 예정
               </span>
             )}
-            {/* v0.2.0 step 1 (fact-claim-layer-v1) — CLAIM badge. The
-                fact is a one-hop provenance utterance, NOT a current-
-                event action. Lucid records "X said Y" but does not
-                verify Y's truth. Action facts (fact_type='action' or
-                undefined for legacy back-compat) render unchanged. */}
-            {fact.fact_type === 'claim' && (
-              <span
-                data-testid={`fact-claim-badge-${factUid}`}
-                className="inline-flex items-center text-xxs font-mono text-accent-cool bg-accent-cool/10 border border-accent-cool/30 rounded px-1.5 py-0.5"
-                title="화자 인용 (one-hop provenance — 내용 진실은 보증되지 않음)"
-              >
-                CLAIM
-              </span>
-            )}
-            {/* v0.2.0 step 2 (fact-measurement-layer-v1) — MEASUREMENT
-                badge. The fact is a numeric value pinned to a timepoint
-                (as_of). Same metric across multiple as_of → a verified
-                time series — Lucid's structural moat over note-apps /
-                LLM completion. Color is warm (vs cool CLAIM) so the
-                two badges differentiate at a glance. */}
-            {fact.fact_type === 'measurement' && (
-              <span
-                data-testid={`fact-measurement-badge-${factUid}`}
-                className="inline-flex items-center text-xxs font-mono text-accent-warm bg-accent-warm/10 border border-accent-warm/30 rounded px-1.5 py-0.5"
-                title="수치 측정 (numeric data pinned to a timepoint — 시계열의 한 점)"
-              >
-                MEASUREMENT
-              </span>
-            )}
+            {/* fact-display-unification: badge rendering is delegated to
+                the shared FactTypeBadge sub-component (declared at the
+                top of this module) so Decide and Recall render the
+                fact_type signal identically. The component itself
+                early-returns null for action / legacy / undefined
+                fact_type — matches the previous Decide guard verbatim. */}
+            <FactTypeBadge factType={fact.fact_type} factUid={factUid} />
             {/* decide-ux-v3: negation badge UI removed per PO ("필요 없다"). */}
             {/* The underlying fact.negation_flag + negation_scope data is */}
             {/* preserved on the FactNode in storage — kept as substrate for */}
@@ -509,97 +627,23 @@ export function FactCard({
         </p>
       )}
 
-      {/* v0.2.0 step 1 (fact-claim-layer-v1) — speaker / speech_act
-          / content_claim strip. Only renders for claim facts; action
-          cards are visually unchanged. Italic styling reflects the
-          one-hop provenance nature ("X said Y", not "Y is true"). */}
-      {!isEditing && fact.fact_type === 'claim'
-        && (fact.speaker_label || fact.speech_act || fact.content_claim)
-        && (
-        <p
-          data-testid={`fact-claim-strip-${factUid}`}
-          className="text-sm text-text-secondary mb-3 pl-7 italic"
-          lang={lang === 'kr' ? 'ko' : 'en'}
-        >
-          {fact.speaker_label && (
-            <span className="font-medium not-italic">[{fact.speaker_label}]</span>
-          )}
-          {fact.speech_act && (
-            <span className="ml-1 not-italic">&ldquo;{fact.speech_act}&rdquo;:</span>
-          )}
-          {fact.content_claim && (
-            <span className="ml-1">{fact.content_claim}</span>
-          )}
-        </p>
-      )}
+      {/* fact-display-unification: both the claim strip
+          (speaker / speech_act / content_claim) and the measurement
+          strip (metric / value / unit / as_of) are now delegated to the
+          shared FactTypeStrip sub-component at the top of this module.
+          The component itself owns the legacy-safe early returns:
+          - fact_type !== 'claim'/'measurement' → null
+          - empty fields → null
+          So Decide's behaviour is identical to before, and Recall picks
+          up the same renderer to fix the (a)/(c)/(d) divergence the PO
+          escalated.
 
-      {/* v0.2.0 step 2 (fact-measurement-layer-v1) — metric / value /
-          unit / as_of strip. Only renders for measurement facts.
-          Format example: "[MEASUREMENT] MAU = 800,000,000 명 (2026-03)".
-          Locale formatting (`toLocaleString`) puts thousands separators
-          on the value so 8e8 reads as "800,000,000" not "800000000".
-          Strict mono-font keeps the value-unit-timepoint alignment
-          stable regardless of UI lang.
-
-          v0.2.0 step 2.5 (feat/measurement-completeness, PO 2026-06-24):
-          the explicit "[MEASUREMENT]" prefix establishes the strip as a
-          derived chip-style summary, not a replacement for the original
-          claim sentence rendered above (line 499). PO directive:
-          surface = faithful, structure = metadata on top. The claim
-          MUST coexist with the strip; the prefix makes the visual
-          relationship unambiguous. */}
-      {!isEditing && fact.fact_type === 'measurement'
-        && (
-          fact.metric
-          || fact.measurement_value !== null && fact.measurement_value !== undefined
-          || fact.measurement_unit
-          || fact.as_of
-        )
-        && (
-        <p
-          data-testid={`fact-measurement-strip-${factUid}`}
-          className="text-sm text-text-secondary mb-3 pl-7 font-mono"
-          lang={lang === 'kr' ? 'ko' : 'en'}
-        >
-          <span
-            data-testid={`fact-measurement-prefix-${factUid}`}
-            className="mr-2 opacity-60"
-          >
-            [MEASUREMENT]
-          </span>
-          {fact.metric && (
-            <span
-              data-testid={`fact-measurement-metric-${factUid}`}
-              className="font-medium text-accent-warm"
-            >
-              {fact.metric}
-            </span>
-          )}
-          {(fact.measurement_value !== null && fact.measurement_value !== undefined) && (
-            <>
-              {fact.metric && <span className="mx-1 opacity-60">=</span>}
-              <span data-testid={`fact-measurement-value-${factUid}`}>
-                {Number(fact.measurement_value).toLocaleString()}
-              </span>
-            </>
-          )}
-          {fact.measurement_unit && (
-            <span
-              data-testid={`fact-measurement-unit-${factUid}`}
-              className="ml-1"
-            >
-              {fact.measurement_unit}
-            </span>
-          )}
-          {fact.as_of && (
-            <span
-              data-testid={`fact-measurement-asof-${factUid}`}
-              className="ml-2 opacity-70"
-            >
-              ({fact.as_of})
-            </span>
-          )}
-        </p>
+          PO claim-display-format spec (recovery spec PR B):
+          **국가데이터처**[발표했다]: "4월 기준 증가율은…" — bold speaker
+          without brackets, brackets around speech_act, quotes around
+          content_claim. The shared component encodes this directly. */}
+      {!isEditing && (
+        <FactTypeStrip fact={fact} factUid={factUid} lang={lang} />
       )}
 
       {!isEditing

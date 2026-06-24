@@ -129,6 +129,122 @@ def test_detail_returns_fact_with_entities_and_sources():
     assert result.sources[0].url == "https://a.com/1"
 
 
+def test_detail_passes_through_fact_type_layer_fields():
+    """fact-display-unification: the detail header must surface the
+    fact_type layer fields (fact_type, speaker_label, speech_act,
+    content_claim, metric, measurement_value, measurement_unit, as_of)
+    so the Recall detail modal can render the same [CLAIM] /
+    [MEASUREMENT] badge + per-type strip the list card already does.
+
+    PO (d): a measurement fact in the modal used to render as a plain
+    SPO row with no badge / no metric strip. After this test passes the
+    wire carries every field the frontend FactTypeBadge / FactTypeStrip
+    consume.
+    """
+    from api.routes.recall import fact_detail
+
+    ks_id = uuid4()
+    user = _make_user()
+    session = _make_session_with_space(ks_id, user.id)
+
+    fact = _fact_doc(
+        ks_id=ks_id,
+        subject_uid="uid-cgpt", object_value="800000000",
+        source_uids=[],
+    )
+    # Layer fields the LLM populates for measurement facts.
+    fact["fact_type"] = "measurement"
+    fact["metric"] = "MAU"
+    fact["measurement_value"] = 800000000
+    fact["measurement_unit"] = "명"
+    fact["as_of"] = "2026-03"
+
+    subject_obj = {
+        "object_uid": "uid-cgpt", "name": "ChatGPT",
+        "class": "product",
+        "knowledge_space_id": str(ks_id),
+    }
+    fake_client = MagicMock()
+    fake_client.exists.return_value = True
+
+    def _get(*, index, id):
+        if id == "uid-cgpt":
+            return {"_source": subject_obj}
+        raise KeyError(id)
+
+    fake_client.get.side_effect = _get
+
+    with patch(
+        "api.routes.recall._new_session", return_value=session,
+    ), patch(
+        "api.routes.recall.get_fact_by_uid", return_value=fact,
+    ), patch(
+        "api.routes.recall.get_client", return_value=fake_client,
+    ):
+        result = fact_detail(space_id=ks_id, fact_uid="fact-1", user=user)
+
+    # The new wire fields are populated.
+    assert result.fact.fact_type == "measurement"
+    assert result.fact.metric == "MAU"
+    assert result.fact.measurement_value == 800000000
+    assert result.fact.measurement_unit == "명"
+    assert result.fact.as_of == "2026-03"
+    # Claim-side fields stay None because this is a measurement fact.
+    assert result.fact.speaker_label is None
+    assert result.fact.speech_act is None
+    assert result.fact.content_claim is None
+
+
+def test_detail_legacy_fact_omits_layer_fields_safely():
+    """Back-compat: a legacy fact doc that pre-dates the fact_type
+    columns must still produce a valid FactDetailHeader — every layer
+    field defaults to None and the frontend FactTypeBadge / FactTypeStrip
+    early-return null, so the modal renders exactly as before.
+    """
+    from api.routes.recall import fact_detail
+
+    ks_id = uuid4()
+    user = _make_user()
+    session = _make_session_with_space(ks_id, user.id)
+
+    fact = _fact_doc(
+        ks_id=ks_id,
+        subject_uid="uid-legacy", object_value="legacy-value",
+        source_uids=[],
+    )
+    # NO fact_type / speaker_label / metric — pure legacy.
+
+    subject_obj = {
+        "object_uid": "uid-legacy", "name": "Legacy Entity",
+        "class": "organization",
+        "knowledge_space_id": str(ks_id),
+    }
+    fake_client = MagicMock()
+    fake_client.exists.return_value = True
+    fake_client.get.side_effect = lambda *, index, id: (
+        {"_source": subject_obj} if id == "uid-legacy" else None
+    )
+
+    with patch(
+        "api.routes.recall._new_session", return_value=session,
+    ), patch(
+        "api.routes.recall.get_fact_by_uid", return_value=fact,
+    ), patch(
+        "api.routes.recall.get_client", return_value=fake_client,
+    ):
+        result = fact_detail(space_id=ks_id, fact_uid="fact-1", user=user)
+
+    # All layer fields default to None — frontend treats this as legacy.
+    assert result.fact.fact_type is None
+    assert result.fact.speaker_label is None
+    assert result.fact.speech_act is None
+    assert result.fact.content_claim is None
+    assert result.fact.metric is None
+    assert result.fact.measurement_value is None
+    assert result.fact.measurement_unit is None
+    assert result.fact.as_of is None
+
+
 def test_detail_404s_on_unknown_fact():
     from fastapi import HTTPException
 
