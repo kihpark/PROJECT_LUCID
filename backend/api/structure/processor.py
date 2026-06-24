@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
@@ -878,6 +879,20 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             logger.exception("decompose failed for job %s", job_id)
             _record_failure(session, job, f"decompose error: {type(exc).__name__}")
             return
+
+        # feat/prompts-classification-recovery: log fact_type distribution
+        # right after decompose so production drift (e.g. 100% defaulting
+        # to 'action' because the LLM omits the field) is visible in
+        # structure-stage logs without needing to re-index ES.
+        fact_type_dist = Counter(
+            getattr(f, "fact_type", None) or "unknown" for f in decomp.facts
+        )
+        logger.info(
+            "structure: fact_type distribution: %s (total=%d, job=%s)",
+            dict(fact_type_dist),
+            len(decomp.facts),
+            job_id,
+        )
 
         # Match each Object
         match_per_object: dict[str, MatchResult] = {}
