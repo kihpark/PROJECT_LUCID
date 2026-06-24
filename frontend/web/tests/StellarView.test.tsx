@@ -1,4 +1,4 @@
-/**
+﻿/**
  * B-62 — StellarView page-shell tests.
  *
  * jsdom can't render WebGL, so we mock the renderer via a prop override.
@@ -9,6 +9,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
+
+// feat/hearth-oracle-merge — StellarView now reads ?cluster= from
+// next/navigation. We mock useSearchParams so tests can drive the
+// auto-focus behaviour (default: no cluster param, no auto-focus).
+const searchParamsRef = { current: new URLSearchParams() as URLSearchParams };
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => searchParamsRef.current,
+}));
+
 import { StellarView } from '@/components/StellarView';
 import type { StellarGraphData, StellarNode } from '@/lib/syntheticGraph';
 
@@ -84,6 +93,7 @@ function fakeSyntheticBuilder(): StellarGraphData {
 beforeEach(() => {
   window.localStorage.clear();
   lastRendererProps.current = null;
+  searchParamsRef.current = new URLSearchParams();
 });
 
 describe('StellarView', () => {
@@ -525,5 +535,57 @@ describe('StellarView', () => {
       expect(real.getAttribute('aria-pressed')).toBe('true');
     });
     await waitFor(() => expect(realLoader).toHaveBeenCalled());
+  });
+
+  // -------------------------------------------------------------------------
+  // feat/hearth-oracle-merge — /stellar?cluster=<value> auto-focus (H-5)
+  // -------------------------------------------------------------------------
+
+  it('H-5 — ?cluster=most_active auto-focuses the highest-degree cluster node', async () => {
+    searchParamsRef.current = new URLSearchParams('cluster=most_active');
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+      />,
+    );
+    // Auto-focus runs after activeData lands.
+    await waitFor(() => {
+      const focusedId = lastRendererProps.current.focusedId;
+      expect(focusedId).toBeTruthy();
+      // fake builder returns two nodes — one of them must be focused.
+      expect(['fake-1', 'fake-2']).toContain(focusedId);
+    });
+    // FocusPanel mounts when focused is set.
+    await waitFor(() => {
+      expect(screen.getByTestId('stellar-fact-drawer')).toBeInTheDocument();
+    });
+  });
+
+  it('H-5 — ?cluster=<exact-id> auto-focuses that specific node', async () => {
+    searchParamsRef.current = new URLSearchParams('cluster=fake-2');
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+      />,
+    );
+    await waitFor(() => {
+      expect(lastRendererProps.current.focusedId).toBe('fake-2');
+    });
+  });
+
+  it('H-5 — no ?cluster param → no auto-focus (manual exploration default)', async () => {
+    searchParamsRef.current = new URLSearchParams();
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+      />,
+    );
+    // Give effects a tick to settle.
+    await act(async () => { await Promise.resolve(); });
+    expect(lastRendererProps.current.focusedId).toBeFalsy();
+    expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
   });
 });

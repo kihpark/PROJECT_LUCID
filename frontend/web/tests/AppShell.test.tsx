@@ -1,4 +1,4 @@
-/**
+﻿/**
  * B-57 — frontend app shell + 3-verb nav.
  *
  * The shell is rendered around every route. Tests cover:
@@ -124,6 +124,19 @@ describe('AppShell', () => {
     expect(
       screen.getByTestId('app-shell-profile-trigger'),
     ).toBeInTheDocument();
+  });
+
+  it('feat/hearth-oracle-merge — "어시스턴트" nav tab is removed (ORACLE absorbed into HEARTH)', () => {
+    render(
+      <AppShell>
+        <div>child</div>
+      </AppShell>,
+    );
+    // The /assistant route still exists (it redirects to /home), but
+    // it no longer appears in the top nav.
+    expect(screen.queryByTestId('app-shell-nav-assistant')).not.toBeInTheDocument();
+    const nav = screen.getByTestId('app-shell-nav');
+    expect(nav.textContent).not.toContain('어시스턴트');
   });
 
   it('active route highlights the matching nav item', async () => {
