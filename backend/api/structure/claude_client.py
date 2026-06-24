@@ -75,20 +75,104 @@ _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULT
 
 
 def _strip_json_fences(text: str) -> str:
-    """Best-effort: strip ```json ...``` fences if the model added them."""
+    """Best-effort: strip ```json ...``` fences if the model added them.
+
+    Kept for backward-compatibility with callers that imported this
+    helper directly. The main parse path (`_parse_json_safely`) now
+    uses `_extract_outer_json` instead — that brace-matching extractor
+    is robust to fences AND leading/trailing prose, which the regex
+    here is not (it misses any closing-fence variant that has prose
+    after it). See feat/llm-parse-resilient (2026-06-24).
+    """
     return _JSON_FENCE_RE.sub("", text).strip()
 
 
-def _parse_json_safely(text: str) -> dict[str, Any] | None:
-    """Parse a JSON string into a dict. Returns None on any failure."""
+def _extract_outer_json(text: str) -> str | None:
+    """Find the outermost balanced JSON object or array in text.
+
+    Robust to:
+      - Leading/trailing markdown fences (```json, ```)
+      - Trailing prose ("Note: ...", "This output ...", "Hope this helps!")
+      - Leading prose ("Here's the JSON:")
+      - Mixed line endings
+
+    The scanner walks forward from the first '{' or '[' tracking depth
+    while respecting JSON strings + their backslash escapes. Returns
+    the JSON substring (fences and prose stripped), or None if no
+    balanced structure is found (e.g. truncated output).
+
+    If multiple top-level JSON blocks appear, only the FIRST balanced
+    one is returned. (Claude doesn't realistically emit multiple, but
+    this keeps behavior deterministic.)
+    """
     if not text:
         return None
-    body = _strip_json_fences(text)
+
+    # Find first '{' or '['
+    start = -1
+    open_char = ""
+    for i, c in enumerate(text):
+        if c == "{" or c == "[":
+            start = i
+            open_char = c
+            break
+    if start == -1:
+        return None
+
+    close_char = "}" if open_char == "{" else "]"
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i in range(start, len(text)):
+        c = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if in_string:
+            if c == "\\":
+                escape_next = True
+                continue
+            if c == '"':
+                in_string = False
+            continue
+        # not in string
+        if c == '"':
+            in_string = True
+            continue
+        if c == open_char:
+            depth += 1
+        elif c == close_char:
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+
+    # Unbalanced (likely truncated)
+    return None
+
+
+def _parse_json_safely(text: str) -> dict[str, Any] | None:
+    """Parse a JSON string into a dict. Returns None on any failure.
+
+    Strategy (feat/llm-parse-resilient):
+      1. Extract the outermost balanced JSON via `_extract_outer_json`
+         (handles fences, leading prose, trailing prose).
+      2. Try `json.loads` on the extracted substring.
+      3. On failure, scrub trailing commas (legacy LLM quirk) and retry.
+      4. Reject any parsed value that isn't a dict (top-level arrays
+         and primitives are not valid Structure-stage envelopes).
+    """
+    if not text:
+        return None
+
+    extracted = _extract_outer_json(text)
+    candidate = extracted if extracted is not None else text
+
     try:
-        parsed = json.loads(body)
+        parsed = json.loads(candidate)
     except json.JSONDecodeError:
         # Common LLM quirk: trailing commas. Try one targeted scrub.
-        scrubbed = re.sub(r",(\s*[}\]])", r"\1", body)
+        scrubbed = re.sub(r",(\s*[}\]])", r"\1", candidate)
         try:
             parsed = json.loads(scrubbed)
         except json.JSONDecodeError:
@@ -188,7 +272,21 @@ def decompose_via_claude(
 
     parsed = _parse_json_safely(raw_output)
     if parsed is None:
-        logger.warning("Claude returned non-JSON output (first 200 chars): %s", raw_output[:200])
+        # Hardened logging (feat/llm-parse-resilient): the previous
+        # "first 200 chars" view truncated mid-fence so we couldn't
+        # tell whether the LLM had wrapped the JSON, added trailing
+        # prose, or run out of tokens. We now log length, brace
+        # balance, and BOTH ends of the output so the failure mode
+        # is identifiable from logs alone.
+        open_count = raw_output.count("{")
+        close_count = raw_output.count("}")
+        tail = raw_output[-300:] if len(raw_output) > 600 else ""
+        logger.warning(
+            "Claude returned non-JSON output (len=%d, braces=%d/%d). "
+            "First 300: %r ... Last 300: %r",
+            len(raw_output), open_count, close_count,
+            raw_output[:300], tail,
+        )
         return _build_result(
             _empty_failure("malformed_llm_output"),
             merged_text,
