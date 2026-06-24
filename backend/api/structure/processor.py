@@ -50,7 +50,10 @@ from api.storage.elasticsearch.embeddings import get_embedding
 from api.storage.postgres.orm import SourceJobORM
 from api.storage.postgres.session import make_sessionmaker
 from api.structure.brand_resolver import resolve_korean_brand
-from api.structure.completeness_validator import check_completeness
+from api.structure.completeness_validator import (
+    check_completeness,
+    check_measurement_completeness,
+)
 from api.structure.decomposer import decompose
 from api.structure.entity_resolver import _detect_lang
 from api.structure.link_creator import LinkCreationResult, create_links
@@ -648,28 +651,49 @@ def _serialize_struct_fact(
     # available — those are post-recovery / post-brand-canonicalization
     # so the coverage check measures what the user will actually see
     # in the Decide UI, not the LLM's raw output.
+    #
+    # v0.2.0 step 2.5 (feat/measurement-completeness, PO 2026-06-24):
+    # measurement facts use a DIFFERENT validator — the SPO triple is
+    # the wrong surface to check against the claim because a measurement
+    # claim's content is carried in the (entity, metric, value, unit,
+    # as_of) quadruple, not in (subject, predicate, object). PO's 노사
+    # case: the LLM-emitted predicate ("시급 기준 차이이다") and object
+    # ("1680원") together cover most of the claim, so the SPO validator
+    # falsely passes — yet metric="최초 요구안 차이" is missing 주체/기준
+    # qualifiers. The measurement validator catches that.
     subject_for_check = (
         d.get("subject_label") or d.get("subject_surface") or ""
     )
-    object_for_check_raw = d.get("object_label") or d.get("object_surface") or ""
-    # When object_value is a literal (e.g. "750억달러", "흑자"), use it.
-    # When object_value is an obj-N reference, prefer the resolved label.
-    if not object_for_check_raw and isinstance(f.object_value, str):
-        if _OBJ_PLACEHOLDER_RE.match(f.object_value):
-            # No resolved label and it's just a placeholder uid — empty.
-            object_for_check_raw = ""
-        else:
-            object_for_check_raw = f.object_value
-    completeness = check_completeness(
-        claim=f.claim or "",
-        subject=subject_for_check,
-        predicate=raw_predicate,
-        object_text=object_for_check_raw,
-    )
+    if f.fact_type == "measurement":
+        completeness = check_measurement_completeness(
+            claim=f.claim or "",
+            metric=f.metric,
+            measurement_value=f.measurement_value,
+            measurement_unit=f.measurement_unit,
+            as_of=f.as_of,
+            entity_label=subject_for_check,
+        )
+    else:
+        object_for_check_raw = d.get("object_label") or d.get("object_surface") or ""
+        # When object_value is a literal (e.g. "750억달러", "흑자"), use it.
+        # When object_value is an obj-N reference, prefer the resolved label.
+        if not object_for_check_raw and isinstance(f.object_value, str):
+            if _OBJ_PLACEHOLDER_RE.match(f.object_value):
+                # No resolved label and it's just a placeholder uid — empty.
+                object_for_check_raw = ""
+            else:
+                object_for_check_raw = f.object_value
+        completeness = check_completeness(
+            claim=f.claim or "",
+            subject=subject_for_check,
+            predicate=raw_predicate,
+            object_text=object_for_check_raw,
+        )
     if not completeness["complete"]:
         d["needs_review"] = True
         logger.info(
-            "completeness check fail: claim=%r missing=%s coverage=%.2f",
+            "completeness check fail (fact_type=%s): claim=%r missing=%s coverage=%.2f",
+            f.fact_type,
             (f.claim or "")[:80],
             list(completeness["missing"])[:5],
             float(completeness["coverage"]),

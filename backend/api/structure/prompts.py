@@ -221,6 +221,39 @@ Run these IN ORDER on the input text:
               metric / measurement_unit / as_of 는 강제 enum 없음 —
               원문 표기 그대로 자연어 OK.
 
+          RULE — 측정(measurement) 완전성 (v0.2.0 step 2.5):
+
+          metric 은 한정어를 **통째로** 포함하세요. 빈약한 토막 금지.
+
+            좋은 예: metric="노사 양측의 최초 요구안 차이 (시급 기준)"
+                    metric="ChatGPT 의 월간 활성 사용자 (MAU)"
+                    metric="OpenAI 의 분기 매출 (Q1 기준)"
+            나쁜 예: metric="차이" (주체·기준 누락)
+                    metric="MAU" (주체 누락 — 어떤 서비스의?)
+                    metric="매출" (주체·기간 누락)
+
+          주체(누구의) + 대상(무엇의) + 기준(시급/MAU/Q1/WHO 등)을
+          metric 에 포함하세요. predicate/object 가 한정어를
+          떨어뜨리지 않게 — spo-decomp-completeness 와 같은 원칙.
+
+          RULE — as_of 의미 통일 (v0.2.0 step 2.5):
+
+          as_of 는 **"그 값이 측정/유효한 시점"** 입니다.
+          적용 시점, 시행 시점, 발효 시점은 as_of 가 **아닙니다**.
+
+            좋은 예 (측정 시점):
+              "ChatGPT MAU 8억" + "2026년 3월 기준" → as_of="2026-03"
+              "GDP 성장률 3%" + "2025년 4분기" → as_of="2025-Q4"
+              "2026년 6월 미국 실업률 3.4%" → as_of="2026-06"
+            모호 (적용/시행/발효 시점):
+              "2027년 적용 최저임금 시급 1만 320원" → as_of=null
+                (적용 시점이지 측정 시점이 아님)
+              "2026년 7월 발효되는 ..." → as_of=null
+
+          측정 시점이 모호하거나 적용/시행/발효 시점이면 as_of=null
+          로 두고, 원문은 claim 에 그대로 보존하세요. claim 은 항상
+          faithful — 적용 시점 정보가 거기에 남아 있습니다.
+
           분류 가이드:
             - 동사 '발표했다', '추가했다', '올렸다', '발사했다' = action
             - 동사 '밝혔다', '주장했다', '말했다', '전망했다',
@@ -585,6 +618,76 @@ FEW_SHOT_EXAMPLES = [
                  'measurement_value': 800000000,
                  'measurement_unit': '명',
                  'as_of': '2026-03'},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # v0.2.0 step 2.5 (measurement-completeness): rich-metric few-shot.
+    # The "노사 양측의 최초 요구안 차이" case — the LLM tends to compress
+    # metric to "차이" and lose the 주체("노사 양측의") + 기준("시급 기준")
+    # qualifiers. This anchor teaches it to KEEP THEM all in the metric
+    # string. Also: 적용 시점 (시행/발효/적용/예정) MUST NOT populate as_of —
+    # this fact's surface "..." has no measurement timepoint, only an
+    # application timepoint that the prompt explicitly rejects.
+    {
+        'input': '노사 양측의 최초 요구안 차이는 시급 기준 1680원이다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'concept', 'name': '노사 양측', 'name_en': 'labor and management', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'metric', 'name': '노사 양측의 최초 요구안 차이 (시급 기준)', 'name_en': 'initial proposal gap between labor and management (hourly basis)', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '노사 양측의 최초 요구안 차이는 시급 기준 1680원이다.',
+                 'subject_uid': 'obj-1', 'predicate': '시급 기준 차이이다',
+                 'object_value': '1680원',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR', '시급', '최저임금'],
+                 'fact_type': 'measurement',
+                 'metric': '노사 양측의 최초 요구안 차이 (시급 기준)',
+                 'measurement_value': 1680,
+                 'measurement_unit': '원',
+                 'as_of': None},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # v0.2.0 step 2.5 (measurement-completeness): as_of disambiguation
+    # few-shot. The source carries an "적용" (application) timepoint, NOT
+    # a measurement timepoint. The LLM tends to mis-populate as_of with
+    # "2027" here because it sees a year + a number. The rule above
+    # says: 적용/시행/발효 → as_of=null. The application-time information
+    # remains in the claim text (faithful surface) so no information is
+    # lost; only the as_of slot is correctly left empty.
+    {
+        'input': '2027년 적용 최저임금은 시급 기준 1만 320원이다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'concept', 'name': '최저임금', 'name_en': 'minimum wage', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'metric', 'name': '2027년 적용 최저임금 (시급 기준)', 'name_en': '2027 minimum wage (hourly basis)', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '2027년 적용 최저임금은 시급 기준 1만 320원이다.',
+                 'subject_uid': 'obj-1', 'predicate': '시급 기준이다',
+                 'object_value': '1만 320원',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR', '최저임금', '2027'],
+                 'fact_type': 'measurement',
+                 'metric': '2027년 적용 최저임금 (시급 기준)',
+                 'measurement_value': 10320,
+                 'measurement_unit': '원',
+                 'as_of': None},
             ],
             'fact_object_links': [
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},

@@ -82,8 +82,10 @@ def test_few_shot_examples_count_unchanged() -> None:
     (fact-measurement-layer-v1) appends 2 KO measurement few-shots
     (MAU + 실업률) on top of that → 11 total. The new shots teach
     the LLM the 3-way Action / Claim / Measurement classification +
-    the metric / measurement_value / measurement_unit / as_of fields."""
-    assert len(FEW_SHOT_EXAMPLES) == 11
+    the metric / measurement_value / measurement_unit / as_of fields.
+    v0.2.0 step 2.5 (feat/measurement-completeness) appends 2 more for
+    the rich-metric + as_of-disambiguation anchors (노사 + 적용) → 13."""
+    assert len(FEW_SHOT_EXAMPLES) == 13
 
 
 def test_prompt_is_meaningfully_shorter() -> None:
@@ -92,13 +94,15 @@ def test_prompt_is_meaningfully_shorter() -> None:
       - Pre-simplification: ~14,500 chars
       - +v0.2.0 step 1 (Action vs Claim rule): ~+1,100 chars
       - +v0.2.0 step 2 (Measurement rule + schema annotation): ~+1,400 chars
+      - +v0.2.0 step 2.5 (measurement-completeness rule + as_of
+        disambiguation): ~+1,300 chars
     Net the simplification savings are still in play (the body shrunk
-    by ~2.5KB; the new rules add ~2.5KB) so we hold around 15KB.
-    Target: under ~16,000 — a generous ceiling that catches future
-    cumulative-prompt creep without false-firing on the deliberate
-    v0.2.0 additions.
+    by ~2.5KB; the rules cumulatively add ~3.8KB) so we hold around 16-17KB.
+    Target: under ~18,000 — a ceiling that catches future cumulative-
+    prompt creep without false-firing on the deliberate v0.2.0 additions.
     """
-    assert len(SYSTEM_PROMPT) < 16_000, (
-        f"SYSTEM_PROMPT is {len(SYSTEM_PROMPT)} chars; expected <16000 "
-        f"after the simplification + the v0.2.0 Action/Claim/Measurement rules."
+    assert len(SYSTEM_PROMPT) < 18_000, (
+        f"SYSTEM_PROMPT is {len(SYSTEM_PROMPT)} chars; expected <18000 "
+        f"after the simplification + the v0.2.0 Action/Claim/Measurement/"
+        f"completeness rules."
     )
