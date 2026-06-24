@@ -157,3 +157,36 @@ class FactNode(LucidBaseModel):
     # canonical_key (dedup key stays subject_uid / predicate_code /
     # object_canonical). Display layer only.
     predicate_label: str | None = None
+    # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split.
+    # `fact_type` is the NEW 3-way bucket ('action' | 'claim' |
+    # 'measurement') that drives the recall facet and the FactCard
+    # rendering branch. The legacy `type_` enum (`proposition` /
+    # `procedure`) stays untouched — it is a DIFFERENT axis kept for
+    # back-compat with the old structurer payload. The two coexist as
+    # separate ES fields: `type` (legacy enum, FactNode.type_) and
+    # `fact_type` (new string, FactNode.fact_type).
+    #
+    # All five claim-only fields are populated by the LLM at structure
+    # time only when fact_type=='claim'; legacy / action / measurement
+    # docs leave them None and the recall facet bucket / FactCard
+    # branches gate on `fact_type=='claim'` before reading them.
+    # `speech_act` is intentionally open natural-language (no enum) so
+    # the loose ontology survives unknown verbs.
+    fact_type: str | None = None
+    speaker_uid: str | None = None
+    speaker_label: str | None = None
+    speech_act: str | None = None
+    content_claim: str | None = None
+    stance: str | None = None
+    # v0.2.0 step 2 (fact-measurement-layer-v1): measurement layer.
+    # Populated only when fact_type=='measurement'. `metric` is OPEN
+    # Korean / source-language string (no controlled vocabulary at
+    # extraction time). `measurement_value` is a float — the PO use
+    # cases (MAU ~ 1e9, %, 조 원) all fit safely in IEEE-754, and ES
+    # `double` carries it. `as_of` is OPEN string — "2026", "2026-03",
+    # "2026-Q1", "2026-03-23" all valid; the LLM emits whatever
+    # granularity the source supports.
+    metric: str | None = None
+    measurement_value: float | None = None
+    measurement_unit: str | None = None
+    as_of: str | None = None

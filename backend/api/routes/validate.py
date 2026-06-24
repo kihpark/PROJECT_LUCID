@@ -451,6 +451,31 @@ def _coerce_fact_to_factnode(
     ):
         if meta.get(canon_field):
             canonical_kwargs[canon_field] = meta[canon_field]
+    # feat/validate-wire-new-fact-fields (v0.2.0 graduation final gate):
+    # surface the 10 new step1+2+2.5 fact fields from the structure-stage
+    # facts_summary jsonb onto the FactNode so the ES write (via
+    # bulk_create_facts -> _serialize_fact -> FactNode.model_dump) carries
+    # them into the lucid_facts index. Without this loop the LLM-emitted
+    # fact_type / speaker_* / measurement_* fields are silently dropped on
+    # the validate.decide -> ES boundary, leaving every persisted fact
+    # with fact_type=null and the recall facet bucket empty.
+    #
+    # `is not None` (NOT truthy) on purpose: `measurement_value=0` is a
+    # valid value (e.g. unemployment 0%) that would be wrongly skipped by
+    # the falsy guard the canonical loop above uses. For the keyword
+    # fields the distinction is irrelevant (empty string is unlikely from
+    # the LLM and behaves the same either way), but we use the same
+    # `is not None` rule across the block for consistency.
+    for new_field in (
+        # step 1 (Action vs Claim)
+        "fact_type",
+        "speaker_uid", "speaker_label", "speech_act",
+        "content_claim", "stance",
+        # step 2 (Measurement)
+        "metric", "measurement_value", "measurement_unit", "as_of",
+    ):
+        if meta.get(new_field) is not None:
+            canonical_kwargs[new_field] = meta[new_field]
     if meta.get("needs_review"):
         canonical_kwargs["needs_review"] = bool(meta["needs_review"])
     return FactNode(
