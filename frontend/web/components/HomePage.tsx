@@ -1,41 +1,47 @@
-/**
+﻿/**
  * B-59 — Home (/home) two-state surface.
+ *
+ * feat/hearth-oracle-merge (2026-06-24):
+ *   - ORACLE absorbed: the home search bar now drives the M4a Q&A engine
+ *     inline. Verified vs. inference blocks render below the input.
+ *   - HEARTH sphere: static teal orb replaced with a particle-ring
+ *     animation (4 states: idle / listening / thinking / speaking).
+ *   - Headline: "LUCID · 대기 중" → "BE LUCID." brand line above greeting.
+ *     The long "지난 검증 이후 N개의 사실이…" briefing paragraph is removed
+ *     (the same numbers stay in the Quick Stats bar + 오늘의 브리핑 card).
+ *   - "기록 보기" → /ledger. "살펴보기" → /stellar?cluster=<entity_uid>.
  *
  * Implements the "AI 비서 홈" handoff from the design README:
  *
- *   - `populated` (Components 2–9): orb + greeting + 능동 브리핑 + recall
- *     input + 겸손 한 줄 + 오늘의 브리핑 카드 + 빠른 현황 바.
- *   - `empty`     (Components E1–E4): orb + greeting + 빈 상태 한 줄 +
- *     "첫 사실 캡처하기" CTA + disabled recall + '여기서 시작합니다' 3-step.
+ *   - `populated` (Components 2–9): orb + greeting + recall + 오늘의 브리핑.
+ *   - `empty`     (Components E1–E4): orb + greeting + cold-start CTA.
  *   - `unknown`   (reserved): the structure switches on a `HomeViewState`
- *     enum so a follow-up ticket can slot the "不知" state in without
- *     re-architecting the surface. The 'unknown' arm intentionally
- *     renders nothing here — that's B-59's explicit scope boundary.
+ *     enum so a follow-up ticket can slot the "不知" state in.
  *
  * Fail-soft contract: when `useHomeBrief()` cannot load (B-55 not wired,
- * 401, network error), `brief` is `null`. We treat that as `empty` —
- * the cold-start surface is meaningful copy + a CTA, never a crash
- * screen. (DR-089 / B-57 "fail-soft" precedent.)
+ * 401, network error), `brief` is `null`. We treat that as `empty`.
  *
  * The shared shell (header + nav + profile) comes from `app/layout.tsx`
  * (AppShell, B-57). This component is the body only.
- *
- * Visual scope clarification: per the task, animation is a nice-to-have,
- * not a requirement. We ship pure-CSS static visuals — the orb is a
- * radial-gradient circle, not a multi-ring animated assembly. The
- * design tokens (colours, spacing, typography) are taken verbatim from
- * the handoff README "Design Tokens" section.
  */
 'use client';
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 import { useAuthMe } from '@/lib/useAuthMe';
 import { LUCID_VERSION } from '@/lib/version';
 import type { HomeBrief } from '@/lib/types';
 import type { MeResponse } from '@/lib/api';
+import {
+  AssistantQuery,
+  type AssistantQueryHandle,
+} from './AssistantQuery';
+import {
+  SphereAnimation,
+  type SphereState,
+} from './SphereAnimation';
 
 const ACCENT = '#3fe0c6';
 const BG = '#06080b';
@@ -58,7 +64,7 @@ export type HomeViewState = 'populated' | 'empty' | 'unknown';
 // Small pure helpers (greeting + view-state selector)
 // ---------------------------------------------------------------------------
 
-/** Time-of-day greeting fragment, in Korean. Mirrors the handoff:
+/** Time-of-day greeting fragment, in Korean.
  *    05–11 아침 / 12–17 오후 / 18–04 저녁. */
 export function greetingFor(hour: number): string {
   if (hour >= 5 && hour < 12) return '좋은 아침입니다';
@@ -66,136 +72,35 @@ export function greetingFor(hour: number): string {
   return '좋은 저녁입니다';
 }
 
-/** View-state selector — the single source of truth for the enum switch.
- * Exported so the test can pin the exact branching contract. */
+/** View-state selector — the single source of truth for the enum switch. */
 export function selectViewState(brief: HomeBrief | null): HomeViewState {
-  // Fail-soft: a missing brief is treated as cold-start, not as an
-  // error screen. The handoff's "empty" copy is meaningful.
   if (brief == null) return 'empty';
   if (brief.is_empty) return 'empty';
   return 'populated';
+}
+
+/** feat/hearth-oracle-merge — build the stellar cluster-focus href.
+ * When the brief carries an entity_uid we forward it as `?cluster=<uid>`;
+ * otherwise we fall back to the sentinel `most_active` which StellarView
+ * may resolve heuristically (largest cluster by degree). */
+export function clusterFocusHref(
+  cluster: { entity_uid: string | null; linked_count: number } | null,
+): string {
+  if (cluster && cluster.entity_uid && cluster.linked_count > 0) {
+    return `/stellar?cluster=${encodeURIComponent(cluster.entity_uid)}`;
+  }
+  return '/stellar?cluster=most_active';
 }
 
 // ---------------------------------------------------------------------------
 // Visual primitives
 // ---------------------------------------------------------------------------
 
-/** Component 2 — orb. Pure CSS radial gradient + glow. Animation
- * (orbPulse / orbBreath) is a nice-to-have applied via inline keyframes
- * but the orb stays visible if animation never runs. */
-function OrbVisual() {
-  return (
-    <div
-      data-testid="home-orb"
-      style={{
-        position: 'relative',
-        width: 230,
-        height: 230,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 36,
-      }}
-    >
-      {/* Halo */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: -46,
-          borderRadius: '50%',
-          background: `radial-gradient(circle, color-mix(in oklab, ${ACCENT} 24%, transparent), transparent 62%)`,
-          filter: 'blur(10px)',
-          animation: 'orbBreath 5.2s ease-in-out infinite',
-        }}
-      />
-      {/* Outer ring */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          width: 222,
-          height: 222,
-          borderRadius: '50%',
-          border: `1px solid color-mix(in oklab, ${ACCENT} 26%, transparent)`,
-        }}
-      />
-      {/* Inner dashed ring */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          width: 176,
-          height: 176,
-          borderRadius: '50%',
-          border: `1px dashed color-mix(in oklab, ${ACCENT} 22%, transparent)`,
-        }}
-      />
-      {/* Core sphere — the 124px circle the task calls out by name. */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'relative',
-          width: 124,
-          height: 124,
-          borderRadius: '50%',
-          background: `radial-gradient(circle at 38% 30%, color-mix(in oklab, ${ACCENT} 88%, white 12%), color-mix(in oklab, ${ACCENT} 66%, #06201c) 52%, #04130f 100%)`,
-          boxShadow: `0 0 56px color-mix(in oklab, ${ACCENT} 42%, transparent), inset 0 0 32px color-mix(in oklab, ${ACCENT} 28%, transparent)`,
-          animation: 'orbPulse 4.2s ease-in-out infinite',
-        }}
-      />
-      <style>{`
-        @keyframes orbPulse {
-          0%, 100% { transform: scale(1); filter: brightness(1); }
-          50%      { transform: scale(1.045); filter: brightness(1.12); }
-        }
-        @keyframes orbBreath {
-          0%, 100% { opacity: 0.55; transform: scale(0.98); }
-          50%      { opacity: 0.95; transform: scale(1.06); }
-        }
-        @keyframes dotPulse {
-          0%, 100% { opacity: 0.4; transform: translateY(-50%) scale(0.85); }
-          50%      { opacity: 1;   transform: translateY(-50%) scale(1); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/** Mono status label (Component 3 / E상태 라벨 자리). */
-function StatusLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      data-testid="home-status-label"
-      style={{
-        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        fontSize: 12,
-        letterSpacing: '0.14em',
-        color: `color-mix(in oklab, ${ACCENT} 75%, #6b7d82)`,
-        marginBottom: 14,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
 /** Component 4 — greeting H1. Shared by both states.
  *
  * Hydration contract: the time-of-day branch (아침/오후/저녁) MUST be
- * decided on the client, not during SSR. Otherwise the server renders
- * with the server-process TZ (UTC on Vercel/Render) and the client
- * re-renders with the user's local TZ, producing a React hydration
- * mismatch warning (`HomePage.tsx:187 GreetingH1` — server "아침" vs
- * client "오후").
- *
- * Fix: first paint (SSR + first client paint before effects run) uses
- * a neutral, TZ-independent greeting "안녕하세요". After mount, the
- * effect computes the local-time greeting and we re-render. The
- * data-testid + name interpolation stay identical so the existing
- * test contract ("home-greeting" contains the userName) holds in both
- * paints.
- */
+ * decided on the client. SSR + first client paint use the neutral
+ * "안녕하세요"; after mount we recompute against the local clock. */
 function GreetingH1({ name }: { name: string }) {
   const [greeting, setGreeting] = useState<string | null>(null);
 
@@ -203,19 +108,17 @@ function GreetingH1({ name }: { name: string }) {
     setGreeting(greetingFor(new Date().getHours()));
   }, []);
 
-  // First paint (SSR + pre-effect client) — neutral fallback that is
-  // identical on both sides of the hydration boundary.
   const text = greeting ?? '안녕하세요';
 
   return (
     <h1
       data-testid="home-greeting"
       style={{
-        fontSize: 40,
+        fontSize: 44,
         fontWeight: 600,
         letterSpacing: '-0.025em',
         color: TEXT_H1,
-        lineHeight: 1.15,
+        lineHeight: 1.1,
         margin: 0,
         textAlign: 'center',
       }}
@@ -225,68 +128,80 @@ function GreetingH1({ name }: { name: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Populated arm — Components 5–9
-// ---------------------------------------------------------------------------
-
-/** Component 5 — 능동 브리핑 문단. Numbers inline in accent. */
-function ActiveBriefing({
-  facts,
-  pending,
-}: {
-  facts: number;
-  pending: number;
-}) {
+/** feat/hearth-oracle-merge — "BE LUCID." brand line. Lives ABOVE the
+ * greeting; intentionally small so the greeting reads as the visual
+ * subject. Constant — never time-of-day branched. */
+function BrandLine() {
   return (
     <p
-      data-testid="home-briefing-text"
+      data-testid="home-brand-line"
       style={{
-        marginTop: 20,
-        marginBottom: 0,
-        fontSize: 18,
-        lineHeight: 1.75,
-        color: TEXT_SECONDARY,
-        maxWidth: 600,
-        textWrap: 'pretty' as React.CSSProperties['textWrap'],
+        margin: 0,
+        marginBottom: 12,
+        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        fontSize: 12,
+        letterSpacing: '0.18em',
+        color: `color-mix(in oklab, ${ACCENT} 75%, #6b7d82)`,
         textAlign: 'center',
       }}
     >
-      지난 검증 이후{' '}
-      <span
-        data-testid="home-briefing-facts"
-        style={{ color: ACCENT, fontWeight: 600 }}
-      >
-        {facts}개
-      </span>
-      의 사실이 당신의 그래프에 살아 있습니다.{' '}
-      {pending > 0 ? (
-        <>
-          어제 캡처하신{' '}
-          <span
-            data-testid="home-briefing-pending"
-            style={{ color: ACCENT, fontWeight: 600 }}
-          >
-            {pending}건
-          </span>
-          이 검증을 기다리고 있습니다.
-        </>
-      ) : (
-        <span data-testid="home-briefing-no-pending">검증 대기는 없습니다.</span>
-      )}
+      BE LUCID.
     </p>
   );
 }
 
-/** Component 6 — active recall input. Submit navigates to /recall?q=... */
-function ActiveRecallInput() {
-  const router = useRouter();
+// ---------------------------------------------------------------------------
+// Populated arm — Components 5–9
+// ---------------------------------------------------------------------------
+
+/** Component 6 — active recall input.
+ *
+ * feat/hearth-oracle-merge: this is now the HEARTH Q&A entry. On submit
+ * it routes through the inline AssistantQuery (ORACLE engine), not the
+ * /recall route. Sphere state hooks are exposed via callbacks so the
+ * parent can drive the SphereAnimation (focus → listening, submit →
+ * thinking → speaking).
+ */
+function ActiveRecallInput({
+  spaceId,
+  onSphereState,
+  assistantRef,
+}: {
+  spaceId: string;
+  onSphereState: (state: SphereState) => void;
+  assistantRef: React.RefObject<AssistantQueryHandle | null>;
+}) {
   const [value, setValue] = useState('');
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const q = value.trim();
     if (!q) return;
-    router.push(`/recall?q=${encodeURIComponent(q)}`);
+    if (!spaceId) {
+      // No space available — fail-soft: don't crash, just don't submit.
+      return;
+    }
+    // Drive the sphere through "thinking" then the Q&A component will
+    // bump it to "speaking" once the result lands.
+    onSphereState('thinking');
+    void assistantRef.current?.submit(q);
+  }
+
+  function handleFocus() {
+    onSphereState('listening');
+  }
+
+  function handleBlur() {
+    // The Q&A component owns "thinking" / "speaking"; we only drop back
+    // to idle if there's no active query.
+    if (!value.trim()) onSphereState('idle');
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setValue(e.target.value);
+    if (e.target.value.length > 0) {
+      onSphereState('listening');
+    }
   }
 
   return (
@@ -320,7 +235,9 @@ function ActiveRecallInput() {
         data-testid="home-recall-input"
         type="text"
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         placeholder="무엇이든 물어보세요. 검증된 것만 답합니다."
         style={{
           width: '100%',
@@ -339,7 +256,7 @@ function ActiveRecallInput() {
       <button
         data-testid="home-recall-submit"
         type="submit"
-        aria-label="recall 전송"
+        aria-label="질문 전송"
         style={{
           position: 'absolute',
           right: 11,
@@ -358,6 +275,12 @@ function ActiveRecallInput() {
       >
         →
       </button>
+      <style>{`
+        @keyframes dotPulse {
+          0%, 100% { opacity: 0.4; transform: translateY(-50%) scale(0.85); }
+          50%      { opacity: 1;   transform: translateY(-50%) scale(1); }
+        }
+      `}</style>
     </form>
   );
 }
@@ -384,9 +307,7 @@ function HumilityLine({ facts }: { facts: number }) {
 }
 
 /** Component 8 — 오늘의 브리핑 card.
- * 3 rows: 검증 대기 / 주간 증가 / 클러스터. The cluster row hides when
- * `top_cluster.linked_count <= 0` (the backend collapses to an empty
- * cluster object in that case — guarding the UI keeps zeros out). */
+ * 3 rows: 검증 대기 / 주간 증가 / 클러스터. */
 function TodayBriefingCard({ brief }: { brief: HomeBrief }) {
   const pending = brief.pending_validation;
   const thisWeek = brief.totals.this_week_validated;
@@ -480,7 +401,10 @@ function TodayBriefingCard({ brief }: { brief: HomeBrief }) {
         }
       />
 
-      {/* Row 2 — 주간 증가 */}
+      {/* Row 2 — 주간 증가
+       * feat/hearth-oracle-merge — "기록 보기" 의 destination 을
+       * /recall → /ledger 로 정정 (LEDGER 페이지 자체는 ledger-view
+       * 의뢰가 만듦; 이 PR 은 링크만 정정). */}
       <BriefingRow
         testId="home-briefing-row-this-week"
         icon={
@@ -511,7 +435,7 @@ function TodayBriefingCard({ brief }: { brief: HomeBrief }) {
         caption="지난주보다 활발한 한 주였습니다"
         action={
           <Link
-            href="/recall"
+            href="/ledger"
             data-testid="home-briefing-this-week-cta"
             style={{
               color: '#8aa0a5',
@@ -524,7 +448,10 @@ function TodayBriefingCard({ brief }: { brief: HomeBrief }) {
         }
       />
 
-      {/* Row 3 — 클러스터 (hidden when linked_count == 0) */}
+      {/* Row 3 — 클러스터.
+       * feat/hearth-oracle-merge — "살펴보기" 의 destination 을
+       * /recall → /stellar?cluster=<entity_uid> 로 정정. STELLAR 가
+       * 가장 활발한 클러스터에 카메라 focus 한다. */}
       {showCluster ? (
         <BriefingRow
           testId="home-briefing-row-cluster"
@@ -582,7 +509,7 @@ function TodayBriefingCard({ brief }: { brief: HomeBrief }) {
           caption={`최근 7일간 사실 ${cluster!.linked_count}건이 연결됨`}
           action={
             <Link
-              href="/recall"
+              href={clusterFocusHref(cluster)}
               data-testid="home-briefing-cluster-cta"
               style={{
                 color: '#8aa0a5',
@@ -733,7 +660,17 @@ function Sep() {
   return <span style={{ opacity: 0.4 }}>·</span>;
 }
 
-function HomePopulated({ brief }: { brief: HomeBrief }) {
+function HomePopulated({
+  brief,
+  spaceId,
+  onSphereState,
+  assistantRef,
+}: {
+  brief: HomeBrief;
+  spaceId: string;
+  onSphereState: (state: SphereState) => void;
+  assistantRef: React.RefObject<AssistantQueryHandle | null>;
+}) {
   return (
     <div
       data-testid="home-populated"
@@ -744,11 +681,19 @@ function HomePopulated({ brief }: { brief: HomeBrief }) {
         width: '100%',
       }}
     >
-      <ActiveBriefing
-        facts={brief.totals.facts}
-        pending={brief.pending_validation}
+      <ActiveRecallInput
+        spaceId={spaceId}
+        onSphereState={onSphereState}
+        assistantRef={assistantRef}
       />
-      <ActiveRecallInput />
+      {/* feat/hearth-oracle-merge — inline Q&A surface. Renders below the
+       * input only when there's a query / result / error. The sphere
+       * state syncs through the assistantRef + onSphereState plumbing. */}
+      <AssistantQuery
+        ref={assistantRef}
+        spaceId={spaceId}
+        onStateChange={onSphereState}
+      />
       <HumilityLine facts={brief.totals.facts} />
       <TodayBriefingCard brief={brief} />
       <QuickStats brief={brief} />
@@ -966,10 +911,7 @@ function GettingStartedCard() {
  * B-61 — personalised welcome line.
  *
  * Rendered above the cold-start 3-step card when the caller is a
- * newly registered user (`is_new_user=true` from /api/auth/me). When
- * `displayName` is null (e.g. user registered without a name), we
- * fall back to "게스트" so the copy is still warm and the test
- * contract stays deterministic.
+ * newly registered user (`is_new_user=true` from /api/auth/me).
  */
 function WelcomeLine({ displayName }: { displayName: string | null }) {
   const name = displayName?.trim() || '게스트';
@@ -990,10 +932,6 @@ function WelcomeLine({ displayName }: { displayName: string | null }) {
 }
 
 function HomeColdStart({ me }: { me: MeResponse | null }) {
-  // Only show the personalised welcome line for genuinely new users.
-  // Returning users with an empty graph (deleted all their facts, or
-  // never captured anything in 7+ days) get the generic cold-start
-  // copy without the welcome ribbon.
   const showWelcome = me?.is_new_user === true;
   return (
     <div
@@ -1020,15 +958,13 @@ function HomeColdStart({ me }: { me: MeResponse | null }) {
 // Common shell + page entry
 // ---------------------------------------------------------------------------
 
-/** The visual frame both states share: background glow + centred column +
- * orb + greeting + status label slot. The arm-specific content goes
- * inside `children` (below the greeting). */
+/** The visual frame both states share. */
 function HomeShellCommon({
-  statusLabel,
+  sphereState,
   userName,
   children,
 }: {
-  statusLabel: string;
+  sphereState: SphereState;
   userName: string;
   children: React.ReactNode;
 }) {
@@ -1068,8 +1004,8 @@ function HomeShellCommon({
           alignItems: 'center',
         }}
       >
-        <OrbVisual />
-        <StatusLabel>{statusLabel}</StatusLabel>
+        <SphereAnimation state={sphereState} />
+        <BrandLine />
         <GreetingH1 name={userName} />
         {children}
         <footer
@@ -1089,43 +1025,39 @@ function HomeShellCommon({
   );
 }
 
-/** Public entry. Mounted by `app/home/page.tsx`.
- *
- * Tests may pass `userName` to pin the greeting without mocking the
- * default identity. Until login is wired (B-58 follow-up) the default
- * mirrors AppShell's mock identity "박기흥". */
+/** Public entry. Mounted by `app/home/page.tsx`. */
 export function HomePage({ userName = '박기흥' }: { userName?: string }) {
   const { brief } = useHomeBrief();
-  // B-61 — pull identity/cold-start signal so the welcome line can
-  // appear above the 3-step card for genuinely new users.
   const { me } = useAuthMe();
 
-  // The enum + switch is the contract: a follow-up ticket can wire
-  // 'unknown' without re-architecting this component.
+  // feat/hearth-oracle-merge — sphere state lives here so all four
+  // states are reachable: idle (default) / listening (input focus or
+  // typing) / thinking (Q&A in flight) / speaking (answer mounted).
+  const [sphereState, setSphereState] = useState<SphereState>('idle');
+  const assistantRef = useRef<AssistantQueryHandle | null>(null);
+
+  const handleSphereState = useCallback((s: SphereState) => {
+    setSphereState(s);
+  }, []);
+
   const view: HomeViewState = useMemo(() => selectViewState(brief), [brief]);
 
-  const statusLabel =
-    view === 'empty'
-      ? 'LUCID · 첫 사실을 기다리는 중'
-      : view === 'unknown'
-        ? 'LUCID · 경계 밖'
-        : 'LUCID · 대기 중';
-
-  // Prefer the authenticated display name when available — keeps the
-  // greeting in sync with the AppShell. Falls back to the prop (test
-  // pinning) and finally to the design-mock literal.
   const meName = me
     ? (me.display_name?.trim() || me.email.split('@')[0] || me.email)
     : null;
   const greetingName = meName ?? userName;
+  const spaceId = me?.default_space_id ?? '';
 
   return (
-    <HomeShellCommon statusLabel={statusLabel} userName={greetingName}>
-      {renderArm(view, brief, me)}
+    <HomeShellCommon sphereState={sphereState} userName={greetingName}>
+      {renderArm(view, brief, me, spaceId, handleSphereState, assistantRef)}
       {/* Keep TEXT_LABEL referenced so the design-token contract is
-          visible without an unused-var warning. The token is reserved
-          for the future 'unknown' arm's primary button label color. */}
-      <span style={{ display: 'none' }} aria-hidden="true" data-color={TEXT_LABEL} />
+          visible without an unused-var warning. */}
+      <span
+        style={{ display: 'none' }}
+        aria-hidden="true"
+        data-color={TEXT_LABEL}
+      />
     </HomeShellCommon>
   );
 }
@@ -1134,16 +1066,23 @@ function renderArm(
   view: HomeViewState,
   brief: HomeBrief | null,
   me: MeResponse | null,
+  spaceId: string,
+  onSphereState: (s: SphereState) => void,
+  assistantRef: React.RefObject<AssistantQueryHandle | null>,
 ) {
   switch (view) {
     case 'populated':
-      // selectViewState() guarantees brief != null && !is_empty here.
-      return <HomePopulated brief={brief as HomeBrief} />;
+      return (
+        <HomePopulated
+          brief={brief as HomeBrief}
+          spaceId={spaceId}
+          onSphereState={onSphereState}
+          assistantRef={assistantRef}
+        />
+      );
     case 'empty':
       return <HomeColdStart me={me} />;
     case 'unknown':
-      // Reserved for the next ticket — explicit `null` so the switch
-      // exhaustively covers the enum.
       return null;
     default: {
       const _exhaustive: never = view;

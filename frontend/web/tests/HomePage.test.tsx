@@ -1,4 +1,4 @@
-/**
+﻿/**
  * B-59 — /home page test suite.
  *
  * Covers the three contracts the task pinned:
@@ -15,7 +15,7 @@
  * fetch path is already covered by the AppShell suite.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 
 import type { HomeBrief } from '@/lib/types';
@@ -54,6 +54,15 @@ vi.mock('@/lib/useAuthMe', () => ({
   useAuthMe: () => useAuthMeMock(),
 }));
 
+// feat/hearth-oracle-merge — ORACLE engine is now invoked inline from
+// HomePage. We mock postAssistantBrief so submission asserts can pin
+// the call shape without exercising the real fetch path. The
+// AssistantView module-level test pins the engine semantics.
+const postAssistantBriefMock = vi.fn();
+vi.mock('@/lib/api', () => ({
+  postAssistantBrief: (...args: unknown[]) => postAssistantBriefMock(...args),
+}));
+
 import { HomePage, greetingFor, selectViewState } from '@/components/HomePage';
 import { LUCID_VERSION } from '@/lib/version';
 
@@ -87,6 +96,7 @@ beforeEach(() => {
   useHomeBriefMock.mockReset();
   useAuthMeMock.mockReset();
   useAuthMeMock.mockReturnValue({ me: null, loading: false, error: null });
+  postAssistantBriefMock.mockReset();
 });
 
 afterEach(() => {
@@ -103,14 +113,14 @@ describe('HomePage', () => {
     expect(screen.getByTestId('home-populated')).toBeInTheDocument();
     expect(screen.queryByTestId('home-empty')).not.toBeInTheDocument();
 
-    // Status label switches to "대기 중".
-    expect(screen.getByTestId('home-status-label')).toHaveTextContent(
-      'LUCID · 대기 중',
-    );
-
-    // Briefing paragraph emphasises facts + pending counts.
-    expect(screen.getByTestId('home-briefing-facts')).toHaveTextContent('247개');
-    expect(screen.getByTestId('home-briefing-pending')).toHaveTextContent('3건');
+    // feat/hearth-oracle-merge — "LUCID · 대기 중" status label
+    // replaced with the fixed "BE LUCID." brand line.
+    expect(screen.getByTestId('home-brand-line')).toHaveTextContent('BE LUCID.');
+    expect(screen.queryByTestId('home-status-label')).not.toBeInTheDocument();
+    // The long briefing paragraph ("지난 검증 이후 N개의 사실이…") is removed;
+    // the same numbers stay in Quick Stats + 오늘의 브리핑 card.
+    expect(screen.queryByTestId('home-briefing-facts')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('home-briefing-pending')).not.toBeInTheDocument();
 
     // 오늘의 브리핑 card with all three rows visible.
     const card = screen.getByTestId('home-briefing-card');
@@ -146,10 +156,10 @@ describe('HomePage', () => {
     expect(screen.getByTestId('home-empty')).toBeInTheDocument();
     expect(screen.queryByTestId('home-populated')).not.toBeInTheDocument();
 
-    // Status label switches to "첫 사실을 기다리는 중".
-    expect(screen.getByTestId('home-status-label')).toHaveTextContent(
-      'LUCID · 첫 사실을 기다리는 중',
-    );
+    // feat/hearth-oracle-merge — "BE LUCID." brand line appears in
+    // both arms; the time-of-day status label is removed.
+    expect(screen.getByTestId('home-brand-line')).toHaveTextContent('BE LUCID.');
+    expect(screen.queryByTestId('home-status-label')).not.toBeInTheDocument();
 
     // Cold-start CTA.
     const cta = screen.getByTestId('home-empty-cta');
@@ -261,8 +271,32 @@ describe('HomePage', () => {
     expect(screen.getByTestId('home-empty-step-1')).toBeInTheDocument();
   });
 
-  it('recall input on populated submits to /recall?q=<encoded>', () => {
+  it('feat/hearth-oracle-merge — recall input submit drives inline ORACLE Q&A, NOT a /recall navigation', async () => {
     useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    useAuthMeMock.mockReturnValue({
+      me: {
+        user_id: 'u-1',
+        email: 'kihpark85@example.com',
+        display_name: '박기흥',
+        default_space_id: 'ks-1',
+        is_new_user: false,
+      },
+      loading: false,
+      error: null,
+    });
+    postAssistantBriefMock.mockResolvedValue({
+      grounded: true,
+      verified: [
+        {
+          fact_uid: 'fn-1',
+          subject: '한국은행',
+          predicate_label: '기준금리',
+          object: '3.5%',
+          sources: ['src-1'],
+        },
+      ],
+      inference: '한국은행 기준금리는 3.5%입니다.',
+    });
 
     render(<HomePage userName="박기흥" />);
 
@@ -274,13 +308,27 @@ describe('HomePage', () => {
     fireEvent.change(input, { target: { value: '한국은행 기준금리' } });
     fireEvent.submit(form);
 
-    expect(pushMock).toHaveBeenCalledTimes(1);
-    // Encoded Korean: spaces become %20, hangul → %xx triplets.
-    const target = pushMock.mock.calls[0]?.[0] as string;
-    expect(target).toMatch(/^\/recall\?q=/);
-    expect(decodeURIComponent(target.replace('/recall?q=', ''))).toBe(
-      '한국은행 기준금리',
+    // The ORACLE engine is called with the query + active space id.
+    await waitFor(() => {
+      expect(postAssistantBriefMock).toHaveBeenCalledTimes(1);
+      expect(postAssistantBriefMock).toHaveBeenCalledWith(
+        '한국은행 기준금리',
+        'ks-1',
+      );
+    });
+    // Router.push is NOT invoked — Q&A is inline, the user stays on /home.
+    expect(pushMock).not.toHaveBeenCalled();
+
+    // Verified + inference cards render inline, below the input.
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-result-inline')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('inference-card')).toHaveTextContent(
+      '한국은행 기준금리는 3.5%입니다.',
     );
+    expect(screen.getByTestId('verified-fact-card')).toBeInTheDocument();
+    expect(screen.getByTestId('verified-badge')).toHaveTextContent('검증됨');
+    expect(screen.getByTestId('inference-label')).toHaveTextContent('미보증');
   });
 
   it('does not navigate when recall input is empty/whitespace', () => {
@@ -317,16 +365,26 @@ describe('HomePage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('briefing copy collapses pending phrase when pending_validation == 0', () => {
+  it('feat/hearth-oracle-merge — long briefing paragraph removed regardless of pending count', () => {
+    // The old "지난 검증 이후 N개의 사실이…" paragraph was deleted by
+    // H-3. The home-briefing-no-pending / -facts / -pending testids
+    // belonged to that paragraph and must NOT appear in either branch
+    // (pending == 0 or pending > 0). The same numbers stay reachable
+    // via the card row + Quick Stats.
     const zeroPending: HomeBrief = { ...POPULATED, pending_validation: 0 };
     useHomeBriefMock.mockReturnValue({ brief: zeroPending, pendingCount: 0 });
 
     render(<HomePage userName="박기흥" />);
 
     expect(
-      screen.getByTestId('home-briefing-no-pending'),
-    ).toHaveTextContent('검증 대기는 없습니다.');
+      screen.queryByTestId('home-briefing-no-pending'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId('home-briefing-pending')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('home-briefing-facts')).not.toBeInTheDocument();
+    // The card-row count still surfaces the number (0건).
+    expect(screen.getByTestId('home-briefing-pending-count')).toHaveTextContent(
+      '0건',
+    );
   });
 
   // ---------------------------------------------------------------------
@@ -338,20 +396,23 @@ describe('HomePage', () => {
   // future refactor that introduces a divergent source breaks here.
   // ---------------------------------------------------------------------
 
-  it('count-source-unification — briefing copy + card count read SAME pending_validation field', () => {
+  it('count-source-unification — pending count read from single source (brief.pending_validation) after H-3 paragraph removal', () => {
+    // feat/hearth-oracle-merge: the long briefing paragraph (the second
+    // surface that previously read pending_validation) is gone, so the
+    // 검증 대기 number now flows from exactly one place: the card row.
+    // This is even tighter than the original count-source-unification
+    // contract — there is no second surface to drift against.
     const brief: HomeBrief = { ...POPULATED, pending_validation: 5 };
     useHomeBriefMock.mockReturnValue({ brief, pendingCount: 5 });
 
     render(<HomePage userName="박기흥" />);
 
-    // The ActiveBriefing paragraph emphasises the number.
-    expect(screen.getByTestId('home-briefing-pending')).toHaveTextContent(
-      '5건',
-    );
-    // The TodayBriefingCard row emphasises the same number.
+    // The TodayBriefingCard row emphasises the number.
     expect(screen.getByTestId('home-briefing-pending-count')).toHaveTextContent(
       '5건',
     );
+    // The old paragraph surface is gone.
+    expect(screen.queryByTestId('home-briefing-pending')).not.toBeInTheDocument();
   });
 
   it('count-source-unification — HomePage calls useHomeBrief ONCE (no second fetch source)', () => {
@@ -366,6 +427,160 @@ describe('HomePage', () => {
     render(<HomePage userName="박기흥" />);
 
     expect(useHomeBriefMock).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // feat/hearth-oracle-merge — H-1 through H-5
+  // -------------------------------------------------------------------------
+
+  it('H-2 — sphere mounts with idle state by default (Jarvis-style entry hub)', () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    render(<HomePage userName="박기흥" />);
+    const sphere = screen.getByTestId('home-sphere');
+    expect(sphere).toBeInTheDocument();
+    expect(sphere.getAttribute('data-sphere-state')).toBe('idle');
+  });
+
+  it('H-2 — typing in the input flips sphere to listening state', () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    render(<HomePage userName="박기흥" />);
+
+    const input = screen.getByTestId('home-recall-input') as HTMLInputElement;
+    fireEvent.focus(input);
+    expect(screen.getByTestId('home-sphere').getAttribute('data-sphere-state')).toBe('listening');
+
+    fireEvent.change(input, { target: { value: '한국은행' } });
+    expect(screen.getByTestId('home-sphere').getAttribute('data-sphere-state')).toBe('listening');
+  });
+
+  it('H-2 — submitting the query drives sphere through thinking → speaking', async () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    useAuthMeMock.mockReturnValue({
+      me: {
+        user_id: 'u-1',
+        email: 'a@b.c',
+        display_name: '박',
+        default_space_id: 'sp-1',
+        is_new_user: false,
+      },
+      loading: false,
+      error: null,
+    });
+    let resolveBrief!: (v: unknown) => void;
+    postAssistantBriefMock.mockImplementation(
+      () => new Promise((res) => { resolveBrief = res; }),
+    );
+
+    render(<HomePage userName="박기흥" />);
+    const input = screen.getByTestId('home-recall-input') as HTMLInputElement;
+    const form = screen.getByTestId('home-recall-form');
+    fireEvent.change(input, { target: { value: 'Q' } });
+    fireEvent.submit(form);
+
+    // While the promise is in flight → thinking.
+    await waitFor(() => {
+      expect(screen.getByTestId('home-sphere').getAttribute('data-sphere-state')).toBe('thinking');
+    });
+
+    // Resolve the promise → component bumps state to speaking.
+    resolveBrief({ grounded: true, verified: [], inference: 'answer' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('home-sphere').getAttribute('data-sphere-state')).toBe('speaking');
+    });
+  });
+
+  it('H-3 — BE LUCID. brand line is fixed (visible in BOTH populated + empty)', () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    render(<HomePage userName="박기흥" />);
+    expect(screen.getByTestId('home-brand-line')).toHaveTextContent('BE LUCID.');
+    expect(screen.queryByTestId('home-status-label')).not.toBeInTheDocument();
+    cleanup();
+
+    useHomeBriefMock.mockReturnValue({ brief: EMPTY, pendingCount: 0 });
+    render(<HomePage userName="박기흥" />);
+    expect(screen.getByTestId('home-brand-line')).toHaveTextContent('BE LUCID.');
+    expect(screen.queryByTestId('home-status-label')).not.toBeInTheDocument();
+  });
+
+  it('H-3 — greeting reads <인사>, <이름>님. and is sized larger than the brand line', () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    // Pin the clock to evening so the test is deterministic.
+    const fixed = new Date();
+    fixed.setHours(20, 0, 0, 0);
+    vi.useFakeTimers();
+    vi.setSystemTime(fixed);
+    try {
+      render(<HomePage userName="박기흥" />);
+      const greeting = screen.getByTestId('home-greeting');
+      const brand = screen.getByTestId('home-brand-line');
+      expect(greeting).toHaveTextContent('좋은 저녁입니다, 박기흥님.');
+      // Visual hierarchy: greeting > brand line.
+      const greetingPx = parseInt(
+        (greeting as HTMLElement).style.fontSize || '0',
+        10,
+      );
+      const brandPx = parseInt(
+        (brand as HTMLElement).style.fontSize || '0',
+        10,
+      );
+      expect(greetingPx).toBeGreaterThan(brandPx);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('H-4 — 기록 보기 → link points at /ledger (was /recall)', () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    render(<HomePage userName="박기흥" />);
+    const cta = screen.getByTestId('home-briefing-this-week-cta');
+    expect(cta).toHaveAttribute('href', '/ledger');
+  });
+
+  it('H-5 — 살펴보기 → link points at /stellar?cluster=<entity_uid> (focuses cluster)', () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    render(<HomePage userName="박기흥" />);
+    const cta = screen.getByTestId('home-briefing-cluster-cta');
+    const href = cta.getAttribute('href') ?? '';
+    expect(href).toMatch(/^\/stellar\?cluster=/);
+    // POPULATED.top_cluster.entity_uid is 'obj-spacex'.
+    expect(href).toBe('/stellar?cluster=obj-spacex');
+  });
+
+  it('H-5 — 살펴보기 → falls back to ?cluster=most_active when entity_uid is missing', () => {
+    const briefNoUid: HomeBrief = {
+      ...POPULATED,
+      top_cluster: {
+        entity_uid: null,
+        entity_name: 'NoUidCluster',
+        linked_count: 4,
+      },
+    };
+    useHomeBriefMock.mockReturnValue({ brief: briefNoUid, pendingCount: 3 });
+    render(<HomePage userName="박기흥" />);
+    const cta = screen.getByTestId('home-briefing-cluster-cta');
+    expect(cta).toHaveAttribute('href', '/stellar?cluster=most_active');
+  });
+
+  it('H-1 — empty input submit does not fire the ORACLE engine (no spam on Enter with empty box)', () => {
+    useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
+    useAuthMeMock.mockReturnValue({
+      me: {
+        user_id: 'u-1',
+        email: 'a@b.c',
+        display_name: '박',
+        default_space_id: 'sp-1',
+        is_new_user: false,
+      },
+      loading: false,
+      error: null,
+    });
+    render(<HomePage userName="박기흥" />);
+    const form = screen.getByTestId('home-recall-form');
+    fireEvent.submit(form);
+    expect(postAssistantBriefMock).not.toHaveBeenCalled();
+    // No inline result section either.
+    expect(screen.queryByTestId('assistant-result-inline')).not.toBeInTheDocument();
   });
 });
 

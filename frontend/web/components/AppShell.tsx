@@ -373,7 +373,9 @@ export function AppShell({ children, userName, userEmail }: AppShellProps) {
     // are no count semantics on the canvas (recall has search, stellar
     // has the whole graph slice).
     { href: '/stellar', label: 'Stellar' },
-    { href: '/assistant', label: '어시스턴트' },
+    // feat/hearth-oracle-merge — "어시스턴트" tab removed. ORACLE is now
+    // absorbed into HEARTH (the /home sphere). The /assistant route
+    // redirects to /home for backwards compatibility with deep links.
     { href: '/pending', label: '검증', count: pendingCount },
   ];
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * B-62 — StellarView: the page shell for the 3D stellar surface.
  *
  * Responsibilities:
@@ -14,6 +14,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   generateSyntheticGraph,
@@ -66,6 +67,65 @@ function persistSource(source: StellarSource): void {
   } catch {
     /* localStorage may be unavailable in some browser modes — fail-soft. */
   }
+}
+
+// ---------------------------------------------------------------------------
+// feat/hearth-oracle-merge — cluster-focus query param helper.
+//
+// HomePage's "살펴보기 →" link routes to /stellar?cluster=<entity_uid> or
+// /stellar?cluster=most_active. We resolve the param to a focus node:
+//
+//   - If the param matches a node's id / subject / object / label → that node.
+//   - If the param is "most_active" (or no match) → fall back to the cluster
+//     with the highest aggregate degree, returning that cluster's hottest
+//     node (max degree). This gives the user a meaningful 1-hop ring to
+//     explore even when the home brief's entity_uid doesn't line up with
+//     synthetic data ids (which is the common case in dogfood mode).
+// ---------------------------------------------------------------------------
+
+export function pickClusterFocusNode(
+  data: StellarGraphData,
+  clusterParam: string,
+): StellarNode | null {
+  if (data.nodes.length === 0) return null;
+
+  // Exact id match — cheapest path, used when the home brief's entity_uid
+  // actually exists in the graph.
+  if (clusterParam && clusterParam !== 'most_active') {
+    const byId = data.nodes.find((n) => n.id === clusterParam);
+    if (byId) return byId;
+    // Label / subject / object substring match — useful when the param
+    // carries a human-readable entity name.
+    const q = clusterParam.toLowerCase();
+    const byLabel = data.nodes.find((n) =>
+      [n.label, n.subject, n.object].join(" ").toLowerCase().includes(q),
+    );
+    if (byLabel) return byLabel;
+  }
+
+  // Fallback — pick the cluster with the highest summed degree, then the
+  // hottest node inside it. This is the "가장 활발한 클러스터" semantic.
+  const degreeByCluster = new Map<number, number>();
+  for (const node of data.nodes) {
+    const c = node.cluster;
+    degreeByCluster.set(c, (degreeByCluster.get(c) ?? 0) + (node.degree ?? 0));
+  }
+  let bestCluster = data.nodes[0]!.cluster;
+  let bestSum = -1;
+  for (const [c, sum] of degreeByCluster) {
+    if (sum > bestSum) {
+      bestSum = sum;
+      bestCluster = c;
+    }
+  }
+  let bestNode: StellarNode | null = null;
+  for (const n of data.nodes) {
+    if (n.cluster !== bestCluster) continue;
+    if (!bestNode || (n.degree ?? 0) > (bestNode.degree ?? 0)) {
+      bestNode = n;
+    }
+  }
+  return bestNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -1030,6 +1090,27 @@ export function StellarView(props: StellarViewProps = {}) {
     },
     [],
   );
+
+  // feat/hearth-oracle-merge — auto-focus from /stellar?cluster=<value>.
+  // The query param flows from HomePage's "살펴보기 →" link. We resolve
+  // it once, after the active data has loaded, and only if the user is
+  // not already focused on something (so manual exploration wins over
+  // the URL hint).
+  const searchParams = useSearchParams();
+  const clusterParam = searchParams?.get('cluster') ?? null;
+  const clusterAutoFocusedRef = useRef(false);
+  useEffect(() => {
+    if (!clusterParam) return;
+    if (clusterAutoFocusedRef.current) return;
+    if (activeData.nodes.length === 0) return;
+    // For real mode we wait for the lazy load to settle before binding
+    // the focus — otherwise we'd focus on the empty fallback graph.
+    if (source === 'real' && realLoading) return;
+    const node = pickClusterFocusNode(activeData, clusterParam);
+    if (!node) return;
+    clusterAutoFocusedRef.current = true;
+    handleClick(node);
+  }, [clusterParam, activeData, source, realLoading, handleClick]);
 
   // B-62-focus-select-actions — relation-row click: set selected only.
   // The camera eases lookAt in StellarGraph; nothing else moves.

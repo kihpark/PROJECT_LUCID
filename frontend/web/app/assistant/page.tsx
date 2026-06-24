@@ -1,42 +1,14 @@
-﻿'use client';
+﻿/**
+ * feat/hearth-oracle-merge — /assistant is absorbed into HEARTH (the /home
+ * sphere + search bar). This page now redirects to /home so any deep links
+ * (bookmarks, old nav, third-party references) land on the new entry hub.
+ *
+ * The redirect is server-side (Next 15 `redirect()`), which fires before
+ * client hydration. Authenticated check is no longer needed here — the
+ * /home page handles its own auth via AppShell + the home redirect logic.
+ */
+import { redirect } from 'next/navigation';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuthMe } from '@/lib/useAuthMe';
-import { AssistantView } from '@/components/AssistantView';
-
-export default function AssistantPage() {
-  const { me, loading } = useAuthMe();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!loading && !me) {
-      router.push('/login');
-    }
-  }, [me, loading, router]);
-
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '60vh',
-          color: '#9db0b5',
-          fontSize: 14,
-        }}
-      >
-        로딩 중...
-      </div>
-    );
-  }
-
-  if (!me) {
-    return null;
-  }
-
-  const spaceId = me.default_space_id ?? '';
-
-  return <AssistantView spaceId={spaceId} />;
+export default function AssistantPage(): never {
+  redirect('/home');
 }
