@@ -123,6 +123,51 @@ def _is_entity_ref(value: str | None) -> bool:
     return bool(_UUID4_RE.match(value) or _OBJ_PLACEHOLDER_RE.match(value))
 
 
+# search-embedding-restore (v0.2.0 graduation gate) — confidence guards.
+#
+# PO repro: searching "선거관리위원회" returned "최저임금위원회". Root cause:
+# (a) every fact's embedding field was empty (fixed on the write side) so
+# the kNN pass returned zero hits, then (b) the entity-name fallback's
+# tier-3 wildcard `*위원회*` matched ANY entity sharing the substring.
+#
+# These two helpers gate each fallback so a low-confidence match is
+# silenced rather than rendered. PO philosophy: 知之爲知之 — better
+# silence than a wrong fact.
+#
+# `_is_kNN_meaningful` is largely redundant with RECALL_SCORE_FLOOR
+# (already filters kNN hits below 0.72) but stays as a belt-and-braces
+# check on the raw _score before threshold logic — useful when callers
+# override the threshold to 0 for debugging.
+#
+# `_entity_match_is_confident` uses bigram (n=2) Jaccard. For the PO
+# repro: "선거관리위원회"↔"최저임금위원회" share only the "위원회" trigram
+# region — bigrams {위원, 원회} of 6 vs 6 → Jaccard ≈ 2/10 = 0.20. Same
+# query against itself → 1.0. Threshold 0.6 cleanly separates them.
+
+def _is_kNN_meaningful(hits: list[dict], threshold: float = 0.3) -> bool:
+    if not hits:
+        return False
+    top = hits[0].get("_score", 0.0)
+    return top >= threshold
+
+
+def _entity_match_is_confident(
+    query: str, matched_entity_name: str, threshold: float = 0.6,
+) -> bool:
+    def ngrams(text: str, n: int = 2) -> set[str]:
+        text = (text or "").strip()
+        if len(text) >= n:
+            return {text[i : i + n] for i in range(len(text) - n + 1)}
+        return {text} if text else set()
+
+    q_grams = ngrams(query)
+    m_grams = ngrams(matched_entity_name)
+    if not q_grams or not m_grams:
+        return False
+    jaccard = len(q_grams & m_grams) / len(q_grams | m_grams)
+    return jaccard >= threshold
+
+
 def _collect_entity_uids(facts: list[RecallFact]) -> list[str]:
     """Extract the unique set of entity uids referenced by `facts`
     (subject_uid always counts; object_value only when it's shaped
@@ -940,8 +985,40 @@ def recall(
         except Exception as exc:  # noqa: BLE001
             logger.warning("recall: name-lookup fallback failed: %s", exc)
             matched_entities = []
+        # search-embedding-restore (v0.2.0 graduation gate): filter
+        # entity-name candidates by bigram Jaccard against the query so
+        # the wildcard substring fallback can't surface unrelated
+        # entities that merely share a token (PO repro: 선거관리위원회 →
+        # 최저임금위원회 share only the "위원회" tail). Jaccard 0.6 cleanly
+        # separates the repro pair (0.20) from a real self-match (1.0)
+        # and from a real prefix overlap like 선거관리위원장 (~0.71).
+        #
+        # Confidence is the MAX Jaccard across the entity's name fields —
+        # name / name_en / aliases — so a Korean query against an entity
+        # whose canonical name is English (B-52 cross-lingual: "Ministry
+        # of Defense" matched by 국방부 alias) still confidently surfaces.
+        def _doc_is_confident(doc: dict[str, Any]) -> bool:
+            candidates: list[str] = []
+            for k in ("name", "name_en"):
+                v = doc.get(k)
+                if isinstance(v, str) and v.strip():
+                    candidates.append(v)
+            aliases = doc.get("aliases")
+            if isinstance(aliases, list):
+                candidates.extend(a for a in aliases if isinstance(a, str) and a.strip())
+            return any(_entity_match_is_confident(q, name) for name in candidates)
+
+        confident_entities = [
+            doc for doc in matched_entities if _doc_is_confident(doc)
+        ]
+        if matched_entities and not confident_entities:
+            logger.info(
+                "recall: entity-name fallback rejected %d low-confidence "
+                "matches for query %r",
+                len(matched_entities), q,
+            )
         entity_seed_uids = [
-            uid for uid in (doc.get("object_uid") for doc in matched_entities)
+            uid for uid in (doc.get("object_uid") for doc in confident_entities)
             if isinstance(uid, str)
         ]
         if entity_seed_uids:
