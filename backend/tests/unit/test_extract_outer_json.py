@@ -19,7 +19,6 @@ from api.structure.claude_client import (
     _parse_json_safely,
 )
 
-
 # -----------------------------------------------------------------
 # _extract_outer_json — pure extraction (returns substring or None)
 # -----------------------------------------------------------------
