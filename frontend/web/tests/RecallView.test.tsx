@@ -514,7 +514,7 @@ describe('RecallView — entity brief panel (B-41)', () => {
     ],
   };
 
-  it('renders the entity brief panel above the flat fact list', async () => {
+  it('surfaces the resolved entity name + class in the summary header', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
@@ -523,19 +523,25 @@ describe('RecallView — entity brief panel (B-41)', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    const brief = await screen.findByTestId('entity-brief');
-    expect(brief).toHaveTextContent('SpaceX');
-    expect(brief).toHaveTextContent('organization');
-    expect(brief).toHaveTextContent(/3개 검증 사실/);
-    // feat/recall-entity-fact-type-breakdown — the old "생성 0" tagline
-    // and "주어로서" / "목적어로서" role labels are gone. The brief
-    // header no longer mentions them.
-    expect(brief).not.toHaveTextContent(/생성 0/);
-    expect(brief).not.toHaveTextContent(/주어로서/);
-    expect(brief).not.toHaveTextContent(/목적어로서/);
+    // feat/recall-entity-bucket-cleanup — the separate entity-brief
+    // panel is gone; the entity-scoped signal lives on the
+    // RecallFactTypeSummary box itself.
+    const summary = await screen.findByTestId('recall-fact-type-summary');
+    expect(summary).toHaveAttribute('data-entity-scoped', 'true');
+    expect(screen.getByTestId('recall-summary-entity-name'))
+      .toHaveTextContent('SpaceX');
+    expect(screen.getByTestId('recall-summary-entity-class'))
+      .toHaveTextContent('organization');
+    // The deprecated entity-brief panel and its inner role labels are
+    // gone from the DOM entirely.
+    expect(screen.queryByTestId('entity-brief')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('brief-predicate-groups')).not.toBeInTheDocument();
+    expect(summary).not.toHaveTextContent(/주어로서/);
+    expect(summary).not.toHaveTextContent(/목적어로서/);
+    expect(summary).not.toHaveTextContent(/생성 0/);
   });
 
-  it('renders the predicate-grouped fact lists from both role buckets', async () => {
+  it('drops the predicate-grouped brief fact lists from the DOM', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
@@ -544,36 +550,20 @@ describe('RecallView — entity brief panel (B-41)', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    // feat/recall-entity-fact-type-breakdown — the brief-as-subject /
-    // brief-as-object wrappers are gone; the predicate groups
-    // themselves stay so existing per-predicate assertions keep
-    // pinning. They now live under a single brief-predicate-groups
-    // container that doesn't split on role.
-    expect(await screen.findByTestId('brief-predicate-groups')).toBeInTheDocument();
-    expect(screen.queryByTestId('brief-as-subject')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('brief-as-object')).not.toBeInTheDocument();
-    expect(screen.getByTestId('brief-group-subject-total_funds_raised'))
-      .toBeInTheDocument();
-    expect(screen.getByTestId('brief-group-subject-set_ipo_price'))
-      .toBeInTheDocument();
-    expect(screen.getByTestId('brief-group-object-is_underwriter_for'))
-      .toBeInTheDocument();
+    // feat/recall-entity-bucket-cleanup — the predicate-grouped fact
+    // surface is gone. The same facts are already shown by the main
+    // fact list below, ordered by score.
+    await screen.findByTestId('recall-fact-type-summary');
+    expect(screen.queryByTestId('brief-predicate-groups')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('brief-group-subject-total_funds_raised'))
+      .not.toBeInTheDocument();
+    expect(screen.queryByTestId('brief-group-subject-set_ipo_price'))
+      .not.toBeInTheDocument();
+    expect(screen.queryByTestId('brief-group-object-is_underwriter_for'))
+      .not.toBeInTheDocument();
   });
 
-  it('displays the other-entity label when the related side resolved', async () => {
-    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
-    render(<RecallView spaceId="ks-1" />);
-    switchToPowerMode();
-    fireEvent.change(screen.getByLabelText('recall query'), {
-      target: { value: 'SpaceX' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
-    await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    const fact3 = await screen.findByTestId('brief-fact-fn-3');
-    expect(fact3).toHaveTextContent('Goldman Sachs');
-  });
-
-  it('renders the empty entity case with the no-facts notice', async () => {
+  it('paints the summary box accent-cool when the response is entity-scoped, with empty hits', async () => {
     const emptyEntity: RecallResponse = {
       signature: '검증된 사실이 없습니다',
       total: 0,
@@ -595,9 +585,17 @@ describe('RecallView — entity brief panel (B-41)', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    const brief = await screen.findByTestId('entity-brief');
-    expect(brief).toHaveTextContent('Nobody');
-    expect(brief).toHaveTextContent(/검증된 사실이 없습니다/);
+    // feat/recall-entity-bucket-cleanup — the empty-entity message
+    // ("이 엔티티에 대한 검증된 사실이 없습니다.") is gone. We still
+    // surface the resolved entity_name in the summary header so the
+    // user knows what was searched; the per-entity lifetime KS facts
+    // count is no longer authoritative for an entity-keyword recall.
+    const summary = await screen.findByTestId('recall-fact-type-summary');
+    expect(summary).toHaveAttribute('data-entity-scoped', 'true');
+    expect(screen.getByTestId('recall-summary-entity-name'))
+      .toHaveTextContent('Nobody');
+    expect(screen.queryByTestId('entity-brief')).not.toBeInTheDocument();
+    expect(summary).not.toHaveTextContent(/이 엔티티에 대한 검증된 사실이 없습니다/);
   });
 });
 
@@ -728,7 +726,7 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     ],
   };
 
-  it('renders three fact_type chips (행동 / 발언 / 수치) inside the brief panel', async () => {
+  it('renders three fact_type chips (행동 / 발언 / 수치) on the merged summary box', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
@@ -737,19 +735,23 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    const breakdown = await screen.findByTestId('brief-fact-type-breakdown');
-    // All three chips must be present, in canonical order action /
-    // claim / measurement.
-    expect(screen.getByTestId('brief-fact-type-chip-action')).toBeInTheDocument();
-    expect(screen.getByTestId('brief-fact-type-chip-claim')).toBeInTheDocument();
-    expect(screen.getByTestId('brief-fact-type-chip-measurement')).toBeInTheDocument();
-    // Each chip carries its Korean label.
-    expect(breakdown).toHaveTextContent('행동');
-    expect(breakdown).toHaveTextContent('발언');
-    expect(breakdown).toHaveTextContent('수치');
+    // feat/recall-entity-bucket-cleanup — the per-entity chip row
+    // ("brief-fact-type-*") was merged into the page-level summary
+    // ("recall-summary-chip-*"). For the dogfood entity-keyword case
+    // (every hit touches the resolved entity), the two count sources
+    // are equivalent, so no information is lost.
+    const summary = await screen.findByTestId('recall-fact-type-summary');
+    expect(screen.getByTestId('recall-summary-chip-action')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-summary-chip-claim')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-summary-chip-measurement')).toBeInTheDocument();
+    expect(summary).toHaveTextContent('행동');
+    expect(summary).toHaveTextContent('발언');
+    expect(summary).toHaveTextContent('수치');
+    // The deleted per-entity chip-row testids are gone from the DOM.
+    expect(screen.queryByTestId('brief-fact-type-breakdown')).not.toBeInTheDocument();
   });
 
-  it('counts the per-entity fact_type breakdown from result.facts', async () => {
+  it('counts the page-level fact_type breakdown from response facets', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
@@ -758,18 +760,19 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    await screen.findByTestId('brief-fact-type-breakdown');
-    // 1 action, 2 claim, 3 measurement — all of which touch the entity
-    // (either as subject_uid or object_value).
-    expect(screen.getByTestId('brief-fact-type-count-action'))
+    await screen.findByTestId('recall-fact-type-summary');
+    // 1 action, 2 claim, 3 measurement — facets.fact_types from the
+    // response is the count source (equal to the per-entity breakdown
+    // for the dogfood entity-keyword case).
+    expect(screen.getByTestId('recall-summary-count-action'))
       .toHaveTextContent('1');
-    expect(screen.getByTestId('brief-fact-type-count-claim'))
+    expect(screen.getByTestId('recall-summary-count-claim'))
       .toHaveTextContent('2');
-    expect(screen.getByTestId('brief-fact-type-count-measurement'))
+    expect(screen.getByTestId('recall-summary-count-measurement'))
       .toHaveTextContent('3');
   });
 
-  it('clicking a per-entity chip flips the global fact_type filter', async () => {
+  it('clicking a summary chip flips the fact_type filter for an entity-scoped recall', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
@@ -778,26 +781,22 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    const breakdown = await screen.findByTestId('brief-fact-type-breakdown');
-    expect(breakdown).toHaveAttribute('data-active-filter', '');
-    // Click 발언 chip → both the per-entity chip AND the top-level
-    // summary chip should now read as the active filter ('claim').
-    fireEvent.click(screen.getByTestId('brief-fact-type-chip-claim'));
-    expect(screen.getByTestId('brief-fact-type-breakdown'))
-      .toHaveAttribute('data-active-filter', 'claim');
-    expect(screen.getByTestId('brief-fact-type-chip-claim'))
-      .toHaveAttribute('data-active', 'true');
+    const summary = await screen.findByTestId('recall-fact-type-summary');
+    expect(summary).toHaveAttribute('data-active-filter', '');
+    expect(summary).toHaveAttribute('data-entity-scoped', 'true');
+    // Click 발언 chip → summary box flips to active 'claim'.
+    fireEvent.click(screen.getByTestId('recall-summary-chip-claim'));
     expect(screen.getByTestId('recall-fact-type-summary'))
       .toHaveAttribute('data-active-filter', 'claim');
-    // Click again → filter clears, both chip rows go back to neutral.
-    fireEvent.click(screen.getByTestId('brief-fact-type-chip-claim'));
-    expect(screen.getByTestId('brief-fact-type-breakdown'))
-      .toHaveAttribute('data-active-filter', '');
+    expect(screen.getByTestId('recall-summary-chip-claim'))
+      .toHaveAttribute('data-active', 'true');
+    // Click again → filter clears.
+    fireEvent.click(screen.getByTestId('recall-summary-chip-claim'));
     expect(screen.getByTestId('recall-fact-type-summary'))
       .toHaveAttribute('data-active-filter', '');
   });
 
-  it('renders zero-count chips disabled and visually muted', async () => {
+  it('renders zero-count chips disabled and visually muted on the merged summary box', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(LEGACY_ACTION_ONLY);
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
@@ -806,28 +805,28 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    await screen.findByTestId('brief-fact-type-breakdown');
-    // Even with only action facts, all three chips must render — the
-    // visual hierarchy is constant; the empty buckets get the
-    // disabled / muted treatment.
-    expect(screen.getByTestId('brief-fact-type-count-action'))
-      .toHaveTextContent('2');
-    expect(screen.getByTestId('brief-fact-type-count-claim'))
+    await screen.findByTestId('recall-fact-type-summary');
+    // LEGACY_ACTION_ONLY has no facets payload, so all chip counts on
+    // the page-level summary are 0 — matching the codebase convention
+    // that a missing facets bucket means "we don't know" (not "1+").
+    // All three chips render but disabled.
+    expect(screen.getByTestId('recall-summary-count-action'))
       .toHaveTextContent('0');
-    expect(screen.getByTestId('brief-fact-type-count-measurement'))
+    expect(screen.getByTestId('recall-summary-count-claim'))
       .toHaveTextContent('0');
-    const claimChip = screen.getByTestId('brief-fact-type-chip-claim');
-    const measurementChip = screen.getByTestId('brief-fact-type-chip-measurement');
+    expect(screen.getByTestId('recall-summary-count-measurement'))
+      .toHaveTextContent('0');
+    const actionChip = screen.getByTestId('recall-summary-chip-action');
+    const claimChip = screen.getByTestId('recall-summary-chip-claim');
+    const measurementChip = screen.getByTestId('recall-summary-chip-measurement');
+    expect(actionChip).toBeDisabled();
     expect(claimChip).toBeDisabled();
     expect(measurementChip).toBeDisabled();
     expect(claimChip).toHaveAttribute('data-empty', 'true');
     expect(measurementChip).toHaveAttribute('data-empty', 'true');
-    // Action chip is non-empty so it stays enabled even though its
-    // count is the only non-zero one.
-    expect(screen.getByTestId('brief-fact-type-chip-action')).not.toBeDisabled();
   });
 
-  it('no longer shows the "주어로서 / 목적어로서 / 생성 0" role labels', async () => {
+  it('no longer renders the deleted "주어로서 / 목적어로서 / 생성 0" role labels', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
@@ -836,10 +835,11 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    const brief = await screen.findByTestId('entity-brief');
-    expect(brief).not.toHaveTextContent(/주어로서/);
-    expect(brief).not.toHaveTextContent(/목적어로서/);
-    expect(brief).not.toHaveTextContent(/생성 0/);
+    const summary = await screen.findByTestId('recall-fact-type-summary');
+    expect(summary).not.toHaveTextContent(/주어로서/);
+    expect(summary).not.toHaveTextContent(/목적어로서/);
+    expect(summary).not.toHaveTextContent(/생성 0/);
+    expect(screen.queryByTestId('entity-brief')).not.toBeInTheDocument();
   });
 });
 
