@@ -1601,3 +1601,306 @@ describe('RecallView — fact detail MODIFY (feat/fact-detail-modify)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// feat/recall-fact-type-summary — fact_type 별 요약 박스 + chip 필터 +
+// 페이지네이션. PO live evidence (2026-06-24): "'삼성전기' 검색하면
+// 주어로서(action 층위), claim 몇 건, measurement 몇 건 이런게 요약 박스에
+// 나와야 하고 나머지는 페이지네이션 리스트업 하는게 맞다."
+// ---------------------------------------------------------------------------
+
+// Helper: build a RecallFact stub. Defaults to action layer.
+function makeFact(
+  uid: string,
+  factType: 'action' | 'claim' | 'measurement' | null = 'action',
+  score = 0.8,
+): import('@/lib/types').RecallFact {
+  return {
+    fact_uid: uid,
+    claim: `${uid} — 삼성전기 관련 사실 (${factType ?? 'legacy'})`,
+    claim_en: null,
+    subject_uid: 'obj-sem',
+    subject_label: '삼성전기',
+    predicate: 'reported',
+    object_value: '실적',
+    source_uids: [],
+    validated_at: new Date('2026-06-15T10:00:00Z').toISOString(),
+    validator_id: 'user-x',
+    validation_method: 'manual',
+    knowledge_space_id: 'ks-1',
+    negation_flag: false,
+    negation_scope: null,
+    score,
+    fact_type: factType,
+  };
+}
+
+describe('RecallView — fact_type summary box + pagination', () => {
+  function buildResponse(opts: {
+    actions: number;
+    claims: number;
+    measurements: number;
+  }): RecallResponse {
+    const facts: import('@/lib/types').RecallFact[] = [];
+    for (let i = 0; i < opts.actions; i++) {
+      facts.push(makeFact(`a-${i}`, 'action', 0.9 - i * 0.001));
+    }
+    for (let i = 0; i < opts.claims; i++) {
+      facts.push(makeFact(`c-${i}`, 'claim', 0.85 - i * 0.001));
+    }
+    for (let i = 0; i < opts.measurements; i++) {
+      facts.push(makeFact(`m-${i}`, 'measurement', 0.8 - i * 0.001));
+    }
+    const total = opts.actions + opts.claims + opts.measurements;
+    return {
+      signature: `As far as I know — 그래프에 ${total}개 검증 사실이 있습니다`,
+      total,
+      facts,
+      facets: {
+        entities: {
+          organization: [
+            { uid: 'obj-sem', name: '삼성전기', count: total },
+          ],
+          person: [],
+          place: [],
+          other: [],
+        },
+        predicates: [{ name: 'reported', count: total }],
+        fact_types: {
+          action: opts.actions,
+          claim: opts.claims,
+          measurement: opts.measurements,
+        },
+      },
+    };
+  }
+
+  async function search(query = '삼성전기') {
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: query },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await screen.findByTestId('recall-fact-type-summary');
+  }
+
+  it('renders the summary box with action / claim / measurement counts', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      buildResponse({ actions: 8, claims: 3, measurements: 1 }),
+    );
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    const summary = screen.getByTestId('recall-fact-type-summary');
+    // Total chip pseudo-element shows the overall count from the
+    // envelope's `total`, not just the visible page.
+    expect(screen.getByTestId('recall-summary-total').textContent).toMatch(/12/);
+    // Each layer chip shows its Korean label + the count from facets.
+    expect(screen.getByTestId('recall-summary-count-action').textContent).toBe('8');
+    expect(screen.getByTestId('recall-summary-count-claim').textContent).toBe('3');
+    expect(screen.getByTestId('recall-summary-count-measurement').textContent).toBe('1');
+    expect(summary.textContent).toContain('행동');
+    expect(summary.textContent).toContain('발언');
+    expect(summary.textContent).toContain('수치');
+    // The PO's verbatim search term is echoed in the summary header so
+    // the user has a clear "for this query" anchor.
+    expect(summary.textContent).toContain('삼성전기');
+  });
+
+  it('clicking a fact_type chip filters the list to that layer', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      buildResponse({ actions: 2, claims: 2, measurements: 1 }),
+    );
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    // Before filter: all 5 cards are in the DOM (within PAGE_SIZE).
+    expect(screen.getByTestId('recall-fact-a-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-c-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-m-0')).toBeInTheDocument();
+
+    // Click the claim chip.
+    fireEvent.click(screen.getByTestId('recall-summary-chip-claim'));
+
+    // Now only claim cards remain — action and measurement vanish.
+    expect(screen.queryByTestId('recall-fact-a-0')).toBeNull();
+    expect(screen.queryByTestId('recall-fact-m-0')).toBeNull();
+    expect(screen.getByTestId('recall-fact-c-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-c-1')).toBeInTheDocument();
+
+    // The clicked chip is marked active and the summary box exposes
+    // the active filter as a data attribute so styling / tests can
+    // both read it without DOM walking.
+    expect(
+      screen.getByTestId('recall-fact-type-summary').getAttribute('data-active-filter'),
+    ).toBe('claim');
+    expect(
+      screen.getByTestId('recall-summary-chip-claim').getAttribute('data-active'),
+    ).toBe('true');
+
+    // Click the same chip again → filter clears, all cards return.
+    fireEvent.click(screen.getByTestId('recall-summary-chip-claim'));
+    expect(screen.getByTestId('recall-fact-a-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-m-0')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('recall-fact-type-summary').getAttribute('data-active-filter'),
+    ).toBe('');
+  });
+
+  it('renders a "더 보기" pagination control when results exceed the page size', async () => {
+    // 25 action facts → first page is 20, "more" yields 5.
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      buildResponse({ actions: 25, claims: 0, measurements: 0 }),
+    );
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    // First page: cards a-0 .. a-19 visible; a-20 .. a-24 not yet.
+    expect(screen.getByTestId('recall-fact-a-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-a-19')).toBeInTheDocument();
+    expect(screen.queryByTestId('recall-fact-a-20')).toBeNull();
+    // Progress shows 20/25 — the underlying VISIBLE total (post-filter),
+    // not the envelope total.
+    expect(screen.getByTestId('recall-pagination-progress').textContent).toContain('20/25');
+    const more = screen.getByTestId('recall-pagination-more');
+    expect(more).toBeInTheDocument();
+
+    fireEvent.click(more);
+
+    // After "더 보기": a-20 .. a-24 enter the DOM; the more button
+    // disappears because shown === total.
+    expect(screen.getByTestId('recall-fact-a-24')).toBeInTheDocument();
+    expect(screen.queryByTestId('recall-pagination-more')).toBeNull();
+    expect(screen.getByTestId('recall-pagination-progress').textContent).toContain('25/25');
+  });
+
+  it('a new search resets the layer filter and pagination window', async () => {
+    // First query: filter to claim, then run a second query.
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      buildResponse({ actions: 5, claims: 5, measurements: 0 }),
+    );
+    render(<RecallView spaceId="ks-1" />);
+    await search('삼성전기');
+    fireEvent.click(screen.getByTestId('recall-summary-chip-claim'));
+    expect(
+      screen.getByTestId('recall-fact-type-summary').getAttribute('data-active-filter'),
+    ).toBe('claim');
+
+    // Run a second, distinct query — the filter should clear.
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      buildResponse({ actions: 3, claims: 1, measurements: 2 }),
+    );
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'LG에너지솔루션' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('recall-fact-type-summary').getAttribute('data-active-filter'),
+      ).toBe(''),
+    );
+    // Counts reflect the second response (3 actions / 1 claim / 2 measurements).
+    expect(screen.getByTestId('recall-summary-count-action').textContent).toBe('3');
+    expect(screen.getByTestId('recall-summary-count-claim').textContent).toBe('1');
+    expect(screen.getByTestId('recall-summary-count-measurement').textContent).toBe('2');
+    // The summary header echoes the new query.
+    expect(
+      screen.getByTestId('recall-fact-type-summary').textContent,
+    ).toContain('LG에너지솔루션');
+  });
+
+  it('disables a layer chip when its count is 0 (no empty-filter trap)', async () => {
+    // Only action facts: claim + measurement chips should be disabled.
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      buildResponse({ actions: 4, claims: 0, measurements: 0 }),
+    );
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    const claimChip = screen.getByTestId('recall-summary-chip-claim') as HTMLButtonElement;
+    const measChip = screen.getByTestId('recall-summary-chip-measurement') as HTMLButtonElement;
+    const actionChip = screen.getByTestId('recall-summary-chip-action') as HTMLButtonElement;
+    expect(claimChip.disabled).toBe(true);
+    expect(measChip.disabled).toBe(true);
+    expect(actionChip.disabled).toBe(false);
+    expect(claimChip.getAttribute('data-empty')).toBe('true');
+    expect(measChip.getAttribute('data-empty')).toBe('true');
+    expect(actionChip.getAttribute('data-empty')).toBe('false');
+
+    // Clicking the disabled chip is a no-op — the active filter never
+    // flips to 'claim' because the chip won't dispatch onClick.
+    fireEvent.click(claimChip);
+    expect(
+      screen.getByTestId('recall-fact-type-summary').getAttribute('data-active-filter'),
+    ).toBe('');
+  });
+
+  it('hides the pagination footer entirely when there are no results', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      signature: '검증된 사실이 없습니다',
+      facts: [],
+      total: 0,
+      facets: {
+        entities: { organization: [], person: [], place: [], other: [] },
+        predicates: [],
+        fact_types: { action: 0, claim: 0, measurement: 0 },
+      },
+    });
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '결과없는검색어' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await screen.findByTestId('recall-fact-type-summary');
+
+    // The summary box still renders — it announces the all-zero state
+    // so the user understands the query returned nothing in any layer.
+    expect(screen.getByTestId('recall-summary-count-action').textContent).toBe('0');
+    expect(screen.getByTestId('recall-summary-count-claim').textContent).toBe('0');
+    expect(screen.getByTestId('recall-summary-count-measurement').textContent).toBe('0');
+    // All chips are disabled.
+    expect(
+      (screen.getByTestId('recall-summary-chip-action') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    // Pagination footer never mounts because total === 0.
+    expect(screen.queryByTestId('recall-pagination')).toBeNull();
+  });
+
+  it('treats legacy facts (fact_type undefined / null) as action under the filter', async () => {
+    // The backend signals 4 actions, but one of the facts has
+    // fact_type=null (legacy capture before fact-claim-layer-v1).
+    // The action chip filter must still include it.
+    const response: RecallResponse = {
+      signature: 'As far as I know — 그래프에 4개 검증 사실이 있습니다',
+      total: 4,
+      facts: [
+        makeFact('legacy-1', null, 0.9),
+        makeFact('a-modern', 'action', 0.85),
+        makeFact('c-modern', 'claim', 0.8),
+        makeFact('m-modern', 'measurement', 0.75),
+      ],
+      facets: {
+        entities: {
+          organization: [{ uid: 'obj-sem', name: '삼성전기', count: 4 }],
+          person: [],
+          place: [],
+          other: [],
+        },
+        predicates: [{ name: 'reported', count: 4 }],
+        fact_types: { action: 2, claim: 1, measurement: 1 },
+      },
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response);
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    // Filter to action.
+    fireEvent.click(screen.getByTestId('recall-summary-chip-action'));
+    // Both the legacy and the modern action fact survive the filter.
+    expect(screen.getByTestId('recall-fact-legacy-1')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-a-modern')).toBeInTheDocument();
+    // Claim and measurement rows are filtered out.
+    expect(screen.queryByTestId('recall-fact-c-modern')).toBeNull();
+    expect(screen.queryByTestId('recall-fact-m-modern')).toBeNull();
+  });
+});
+

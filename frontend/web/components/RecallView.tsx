@@ -58,6 +58,7 @@ import type {
   EntityBriefGroup,
   EntityFacetItem,
   FactDetailResponse,
+  FactTypeFacets,
   ModifyFactRequest,
   PredicateFacetItem,
   RecallFact,
@@ -1299,22 +1300,225 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
+// feat/recall-fact-type-summary — fact_type 층위 별 요약 박스.
+//
+// PO live evidence (2026-06-24):
+//   "recall 했을 때 claim 층위인지 measure 층위인지 action 층위인지
+//    구분이 하나도 안 된 상태로 검색되어진다. '삼성전기' 검색하면 주어
+//    로서(action 층위), claim 몇 건, measurement 몇 건 이런게 요약 박스에
+//    나와야 하고 나머지는 페이지네이션 리스트업 하는게 맞다."
+//
+// The summary banner lives ABOVE the result list in BOTH simple and
+// power modes. Each chip:
+//   · displays the Korean label + the count from facets.fact_types,
+//   · toggles a fact_type filter on click (visually highlights when
+//     active; click again to clear),
+//   · is disabled when the count is 0 so a zero bucket can't become
+//     an empty filter trap.
+//
+// The total fact count from the recall envelope is rendered as a
+// passive "전체 N건" pseudo-chip on the left so the user sees the
+// overall result size at a glance.
+//
+// Backwards compat: the existing claimOnly / measurementOnly checkbox
+// chips in the power rail keep working — toggling either reads the
+// same `factTypeFilter` state, so the new summary box is the single
+// source of truth. The checkboxes act as a redundant power-user knob.
+// ---------------------------------------------------------------------------
+
+type FactTypeKey = 'action' | 'claim' | 'measurement';
+
+const FACT_TYPE_LABELS: Record<FactTypeKey, string> = {
+  action: '행동',
+  claim: '발언',
+  measurement: '수치',
+};
+
+const FACT_TYPE_GLOSS: Record<FactTypeKey, string> = {
+  action: 'Action',
+  claim: 'Claim',
+  measurement: 'Measurement',
+};
+
+const FACT_TYPE_ORDER: FactTypeKey[] = ['action', 'claim', 'measurement'];
+
+interface RecallFactTypeSummaryProps {
+  total: number;
+  factTypes: FactTypeFacets | undefined;
+  activeFilter: FactTypeKey | null;
+  onToggle: (kind: FactTypeKey) => void;
+  query: string | null;
+}
+
+function RecallFactTypeSummary({
+  total, factTypes, activeFilter, onToggle, query,
+}: RecallFactTypeSummaryProps) {
+  // Build the chip rows. Counts default to 0 when the backend omitted
+  // the bucket (legacy responses) or when facets is missing entirely.
+  const counts: Record<FactTypeKey, number> = {
+    action: factTypes?.action ?? 0,
+    claim: factTypes?.claim ?? 0,
+    measurement: factTypes?.measurement ?? 0,
+  };
+  return (
+    <section
+      aria-label="recall fact type summary"
+      data-testid="recall-fact-type-summary"
+      data-active-filter={activeFilter ?? ''}
+      className="rounded-lg border border-border-subtle bg-bg-card/60 px-4 py-3 mb-4"
+    >
+      <header className="flex items-baseline justify-between flex-wrap gap-2 mb-2">
+        <h2 className="text-xs font-medium text-text-secondary">
+          검색 결과 요약{query ? ` · ${query}` : ''}
+        </h2>
+        <span
+          data-testid="recall-summary-total"
+          className="text-xxs font-mono text-text-muted"
+        >
+          전체 {total}건
+        </span>
+      </header>
+      <div
+        role="group"
+        aria-label="fact type filter"
+        className="flex flex-wrap items-center gap-2"
+      >
+        {FACT_TYPE_ORDER.map((kind) => {
+          const count = counts[kind];
+          const active = activeFilter === kind;
+          const empty = count === 0;
+          return (
+            <button
+              key={kind}
+              type="button"
+              data-testid={`recall-summary-chip-${kind}`}
+              data-active={active ? 'true' : 'false'}
+              data-empty={empty ? 'true' : 'false'}
+              aria-pressed={active}
+              disabled={empty}
+              onClick={() => onToggle(kind)}
+              title={
+                empty
+                  ? `${FACT_TYPE_LABELS[kind]} 층위의 결과 없음`
+                  : active
+                  ? `${FACT_TYPE_LABELS[kind]} 필터 해제`
+                  : `${FACT_TYPE_LABELS[kind]} 층위만 보기`
+              }
+              className={[
+                'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                empty
+                  ? 'border-border-subtle bg-bg-card/40 text-text-muted cursor-not-allowed opacity-60'
+                  : active
+                  ? 'border-accent-cool/70 bg-accent-cool/15 text-accent-cool'
+                  : 'border-border-subtle bg-bg-card text-text-secondary hover:bg-bg-elevated/60 cursor-pointer',
+              ].join(' ')}
+            >
+              <span>{FACT_TYPE_LABELS[kind]}</span>
+              <span
+                className="font-mono text-xxs opacity-80"
+                data-testid={`recall-summary-count-${kind}`}
+              >
+                {count}
+              </span>
+              <span className="font-mono text-xxs opacity-50">
+                {FACT_TYPE_GLOSS[kind]}
+              </span>
+            </button>
+          );
+        })}
+        {activeFilter && (
+          <button
+            type="button"
+            data-testid="recall-summary-clear"
+            onClick={() => onToggle(activeFilter)}
+            className="ml-1 text-xxs font-mono text-text-muted hover:text-text-primary underline"
+            title="층위 필터 해제"
+          >
+            층위 해제
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// feat/recall-fact-type-summary — pagination footer.
+//
+// PO's "나머지는 페이지네이션 리스트업". We use a "더 보기" (load-more)
+// button rather than numbered pages because:
+//   1. The full recall envelope is already in memory — pagination is
+//      pure client-side slicing, no server round-trip per page.
+//   2. Load-more matches the way the user scans (top-down, score-
+//      ordered); jumping to "page 5" of a relevance list is an
+//      anti-pattern.
+//   3. It composes cleanly with the layer chip filter — flipping a
+//      filter chip resets the page window without surprise.
+// ---------------------------------------------------------------------------
+
+const PAGE_SIZE = 20;
+
+interface RecallPaginationFooterProps {
+  shown: number;
+  total: number;
+  onLoadMore: () => void;
+}
+
+function RecallPaginationFooter({
+  shown, total, onLoadMore,
+}: RecallPaginationFooterProps) {
+  if (total === 0) return null;
+  const hasMore = shown < total;
+  return (
+    <footer
+      data-testid="recall-pagination"
+      className="mt-2 mb-6 flex items-center justify-between text-xxs font-mono text-text-muted"
+    >
+      <span data-testid="recall-pagination-progress">
+        {shown}/{total}건 표시
+      </span>
+      {hasMore && (
+        <button
+          type="button"
+          data-testid="recall-pagination-more"
+          onClick={onLoadMore}
+          className="rounded-md border border-border-subtle bg-bg-card px-3 py-1 text-xs text-text-secondary hover:bg-bg-elevated/60"
+        >
+          더 보기 ({Math.min(PAGE_SIZE, total - shown)}건 추가)
+        </button>
+      )}
+    </footer>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // B-60 — Simple body. The "단순-기본" mode strips the left filter rail
 // and right facet rail; the page becomes a single column of fact cards
 // stacked vertically. Everything else (predicate Korean label, modal,
 // score badge, source chips) is identical to power mode — only the
 // chrome around the list changes.
+//
+// feat/recall-fact-type-summary — the fact_type summary box renders
+// directly under the signature line in both modes; the page slice is
+// derived in the shell and passed in via `pagedFacts`.
 // ---------------------------------------------------------------------------
 
 interface RecallSimpleBodyProps {
   result: RecallResponse | null;
   visibleFacts: RecallFact[];
+  pagedFacts: RecallFact[];
   error: string | null;
+  factTypeFilter: FactTypeKey | null;
+  onToggleFactType: (kind: FactTypeKey) => void;
+  onLoadMore: () => void;
+  query: string | null;
   onOpenDetail: (factUid: string) => void;
 }
 
 function RecallSimpleBody({
-  result, visibleFacts, error, onOpenDetail,
+  result, visibleFacts, pagedFacts, error,
+  factTypeFilter, onToggleFactType, onLoadMore,
+  query, onOpenDetail,
 }: RecallSimpleBodyProps) {
   return (
     <>
@@ -1335,11 +1539,23 @@ function RecallSimpleBody({
           >
             {result.signature}
           </p>
-          {visibleFacts.length > 0 && (
-            visibleFacts.map((f) => (
+          <RecallFactTypeSummary
+            total={result.total ?? result.facts.length}
+            factTypes={result.facets?.fact_types}
+            activeFilter={factTypeFilter}
+            onToggle={onToggleFactType}
+            query={query}
+          />
+          {pagedFacts.length > 0 && (
+            pagedFacts.map((f) => (
               <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
             ))
           )}
+          <RecallPaginationFooter
+            shown={pagedFacts.length}
+            total={visibleFacts.length}
+            onLoadMore={onLoadMore}
+          />
         </section>
       )}
     </>
@@ -1357,6 +1573,7 @@ interface RecallPowerBodyProps {
   result: RecallResponse | null;
   sortedFacts: RecallFact[];
   visibleFacts: RecallFact[];
+  pagedFacts: RecallFact[];
   error: string | null;
   controls: SearchControlsState;
   onControlsChange: (next: SearchControlsState) => void;
@@ -1365,15 +1582,20 @@ interface RecallPowerBodyProps {
   onToggleEntity: (uid: string) => void;
   onRemoveChip: (uid: string) => void;
   onClearAll: () => void;
+  factTypeFilter: FactTypeKey | null;
+  onToggleFactType: (kind: FactTypeKey) => void;
+  onLoadMore: () => void;
+  query: string | null;
   onOpenDetail: (factUid: string) => void;
 }
 
 function RecallPowerBody({
-  result, sortedFacts, visibleFacts, error,
+  result, sortedFacts, visibleFacts, pagedFacts, error,
   controls, onControlsChange,
   activeFilterDetails, activeEntities,
   onToggleEntity, onRemoveChip, onClearAll,
-  onOpenDetail,
+  factTypeFilter, onToggleFactType, onLoadMore,
+  query, onOpenDetail,
 }: RecallPowerBodyProps) {
   return (
     <div className="flex gap-4" data-testid="recall-power-body">
@@ -1403,6 +1625,13 @@ function RecallPowerBody({
             >
               {result.signature}
             </p>
+            <RecallFactTypeSummary
+              total={result.total ?? result.facts.length}
+              factTypes={result.facets?.fact_types}
+              activeFilter={factTypeFilter}
+              onToggle={onToggleFactType}
+              query={query}
+            />
             {result.entity_brief && (
               <EntityBriefPanel brief={result.entity_brief} />
             )}
@@ -1425,12 +1654,23 @@ function RecallPowerBody({
                     data-testid="recall-keyword-empty"
                     className="text-sm text-text-muted py-4"
                   >
-                    키워드 「{controls.keyword2.trim()}」 와 일치하는 결과가 없습니다.
+                    {controls.keyword2.trim()
+                      ? `키워드 「${controls.keyword2.trim()}」 와 일치하는 결과가 없습니다.`
+                      : factTypeFilter
+                      ? `${FACT_TYPE_LABELS[factTypeFilter]} 층위의 결과가 없습니다.`
+                      : '표시할 결과가 없습니다.'}
                   </p>
                 ) : (
-                  visibleFacts.map((f) => (
-                    <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
-                  ))
+                  <>
+                    {pagedFacts.map((f) => (
+                      <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
+                    ))}
+                    <RecallPaginationFooter
+                      shown={pagedFacts.length}
+                      total={visibleFacts.length}
+                      onLoadMore={onLoadMore}
+                    />
+                  </>
                 )}
               </>
             )}
@@ -1496,6 +1736,14 @@ export function RecallView({ spaceId }: Props) {
   // on SSR (deterministic markup) and hydrate from localStorage in an
   // effect so a returning user lands back in the rail they prefer.
   const [mode, setMode] = useState<RecallMode>('simple');
+  // feat/recall-fact-type-summary — fact_type chip filter. `null` =
+  // show all layers. Toggling a chip flips this to its kind; clicking
+  // the same chip again clears back to null. A new query also resets.
+  const [factTypeFilter, setFactTypeFilter] = useState<FactTypeKey | null>(null);
+  // feat/recall-fact-type-summary — pagination window. The body
+  // renders the first `displayLimit` facts of `visibleFacts`; "더 보기"
+  // bumps it by PAGE_SIZE. Resets on each new query + on filter flip.
+  const [displayLimit, setDisplayLimit] = useState<number>(PAGE_SIZE);
 
   useEffect(() => {
     const stored = loadStoredMode();
@@ -1546,6 +1794,16 @@ export function RecallView({ spaceId }: Props) {
     if (controls.measurementOnly) {
       out = out.filter((f) => f.fact_type === 'measurement');
     }
+    // feat/recall-fact-type-summary — the summary-box chip filter.
+    // 'action' matches both explicit action rows and legacy facts
+    // where fact_type is unset / null (legacy is treated as action
+    // throughout the codebase — see RecallFactCard / FactCard).
+    if (factTypeFilter) {
+      out = out.filter((f) => {
+        const t = f.fact_type ?? 'action';
+        return t === factTypeFilter;
+      });
+    }
     return out;
   }, [
     sortedFacts,
@@ -1553,7 +1811,31 @@ export function RecallView({ spaceId }: Props) {
     controls.matchKinds.entity_link,
     controls.claimOnly,
     controls.measurementOnly,
+    factTypeFilter,
   ]);
+
+  // feat/recall-fact-type-summary — paginated slice of visibleFacts.
+  // Client-side only; the backend already returned the full envelope
+  // and pagination is a render-window concern, not a fetch concern.
+  const pagedFacts = useMemo(
+    () => visibleFacts.slice(0, displayLimit),
+    [visibleFacts, displayLimit],
+  );
+
+  // Reset the page window whenever the underlying visible list
+  // shrinks/grows because of a filter flip — the user expects to land
+  // back at the top of the new bucket, not a half-scrolled offset.
+  useEffect(() => {
+    setDisplayLimit(PAGE_SIZE);
+  }, [factTypeFilter, controls.keyword2, controls.claimOnly, controls.measurementOnly, controls.matchKinds.entity_link]);
+
+  const onToggleFactType = (kind: FactTypeKey) => {
+    setFactTypeFilter((prev) => (prev === kind ? null : kind));
+  };
+
+  const onLoadMore = () => {
+    setDisplayLimit((prev) => prev + PAGE_SIZE);
+  };
 
   // Build the "active filter chips" view: walk the current facets to
   // find the name + bucket for each active uid (the backend already
@@ -1609,6 +1891,11 @@ export function RecallView({ spaceId }: Props) {
     // is starting fresh; the previously selected entities don't carry
     // over because they refer to a different result set.
     setActiveEntities([]);
+    // feat/recall-fact-type-summary — also reset the layer chip and
+    // pagination window so a new query lands on the unfiltered first
+    // page, matching the user's mental model of "fresh search".
+    setFactTypeFilter(null);
+    setDisplayLimit(PAGE_SIZE);
     await runRecall(q, []);
   };
 
@@ -1788,7 +2075,12 @@ export function RecallView({ spaceId }: Props) {
         <RecallSimpleBody
           result={result}
           visibleFacts={visibleFacts}
+          pagedFacts={pagedFacts}
           error={error}
+          factTypeFilter={factTypeFilter}
+          onToggleFactType={onToggleFactType}
+          onLoadMore={onLoadMore}
+          query={submittedQuery}
           onOpenDetail={onOpenDetail}
         />
       ) : (
@@ -1796,6 +2088,7 @@ export function RecallView({ spaceId }: Props) {
           result={result}
           sortedFacts={sortedFacts}
           visibleFacts={visibleFacts}
+          pagedFacts={pagedFacts}
           error={error}
           controls={controls}
           onControlsChange={onControlsChange}
@@ -1804,6 +2097,10 @@ export function RecallView({ spaceId }: Props) {
           onToggleEntity={onToggleEntity}
           onRemoveChip={onRemoveChip}
           onClearAll={onClearAll}
+          factTypeFilter={factTypeFilter}
+          onToggleFactType={onToggleFactType}
+          onLoadMore={onLoadMore}
+          query={submittedQuery}
           onOpenDetail={onOpenDetail}
         />
       )}
