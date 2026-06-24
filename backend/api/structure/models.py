@@ -91,7 +91,20 @@ class StructureFact(LucidBaseModel):
     uid: UID
     claim: str
     type_: FactType = Field(alias="type")
-    subject_uid: UID
+    # capture-naver-fix (PO 2026-06-24): `subject_uid` was a non-nullable
+    # required UID, but the LLM sometimes emits `subject_uid: null` on
+    # Korean-ellipsis claims where the subject is implicit ("코스피가
+    # 상승했다. 7월 이후 최고치였다." — the second fact's subject is
+    # inherited, not re-bound). Before this fix Pydantic rejected the
+    # entire envelope because of those few null facts and the route
+    # fell back to `malformed_llm_output` with facts=0 — the PO's
+    # "추출된 사실 없음" toast on n.news.naver.com mnews articles. We
+    # now accept None at the schema layer; the decomposer client
+    # (`api.structure.claude_client._build_result`) drops any
+    # subject_uid-less fact in a pre-validate normalization pass so
+    # the downstream object-matcher / link-creator never sees a fact
+    # without a subject. The salvaged majority of facts survive.
+    subject_uid: UID | None = None
     # B-62-fix-v2 (PO 2026-06-22): the LLM's verbatim source-text span
     # for the subject (and the object when it is an entity). Used by
     # the entity resolver so canonical primary_label preserves the

@@ -83,8 +83,43 @@ KOREAN_MEDIA_SELECTORS: dict[str, list[str]] = {
         "#article_body",
         ".article_body",
     ],
+    # naver.com — covers both n.news.naver.com mnews (modern layout,
+    # 2023+) and the legacy news.naver.com layout.
+    #
+    # Layout hits as of 2026-06-24:
+    #   - n.news.naver.com/mnews/article/<press>/<id>:
+    #       `#dic_area` (article body, ~2k chars) — current PO test case
+    #       `#newsct_article` (broader article wrapper, same content)
+    #       `#ct` (page-level container — superset; AVOID as it pulls in
+    #              the related-news rail too)
+    #   - news.naver.com (legacy):
+    #       `#articleBodyContents` (pre-2023 layout, kept as belt-and-
+    #        suspenders for archived links)
+    #
+    # capture-naver-fix (PO 2026-06-24): the selectors below already
+    # cover the PO's failing URL pattern — server-side reproduction
+    # confirmed #dic_area yields 1,984 chars on a vanilla GET, and
+    # trafilatura recovers 1,375 chars from the same payload. The
+    # observed "추출된 사실 없음" toast is NOT an extractor miss; it is
+    # the Structure-stage LLM emitting `subject_uid: null` on Korean-
+    # ellipsis facts which previously trashed the whole envelope.
+    # See `api/structure/claude_client._drop_facts_without_subject`
+    # for the actual fix.
+    #
+    # When the chrome extension's `captureRenderedHtml` ships an empty
+    # outerHTML (CSP / iframe sandbox / SPA pre-hydration), all four
+    # selectors miss and the chain falls through to ExtractorError.
+    # The user-facing recovery in that case is the selection-save
+    # action (extension/src/background/context-menu.ts): the user
+    # highlights the article body and right-clicks "선택 영역 저장하기",
+    # which posts `selection_text` in client_metadata and is handled
+    # by `processor._try_selection_bypass` (bypassing the entire
+    # extractor chain). The selection-save path is the
+    # "보이는 화면 = 만능 백스톱" fallback for any JS-rendered or
+    # CSP-locked page.
     "naver.com": [
         "#dic_area",
+        "#newsct_article",
         "#articleBodyContents",
     ],
     "daum.net": [
