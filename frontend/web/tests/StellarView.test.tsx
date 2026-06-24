@@ -138,19 +138,28 @@ describe('StellarView', () => {
     expect(screen.getByTestId('mock-renderer')).toBeInTheDocument();
   });
 
-  it('hover callback opens the tooltip; click callback opens the fact drawer', async () => {
+  it('hover is a no-op (no floating tooltip); click opens the side fact panel', async () => {
+    // stellar-zoom-recover — the floating HoverTooltip was removed
+    // because it duplicated the FocusPanel info while the side panel
+    // was open (the "2중 표시" PO repro). Hover still passes through
+    // to the renderer's onNodeHover prop, but the parent treats it as
+    // a no-op; only click → focus opens the side panel.
     render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
     // Bind the callbacks must have been passed.
     expect(typeof lastRendererProps.current.onNodeHover).toBe('function');
     expect(typeof lastRendererProps.current.onNodeClick).toBe('function');
 
-    // Simulate hover by clicking the mock "hover" button.
+    // Simulate hover by clicking the mock "hover" button → no tooltip,
+    // no side panel.
     fireEvent.click(screen.getByTestId('mock-fire-hover'));
-    await waitFor(() => expect(screen.getByTestId('stellar-hover-tooltip')).toBeInTheDocument());
+    expect(screen.queryByTestId('stellar-hover-tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
 
-    // Simulate click → drawer opens.
+    // Simulate click → side panel opens.
     fireEvent.click(screen.getByTestId('mock-fire-click'));
     await waitFor(() => expect(screen.getByTestId('stellar-fact-drawer')).toBeInTheDocument());
+    // Still no floating tooltip even while a node is focused.
+    expect(screen.queryByTestId('stellar-hover-tooltip')).not.toBeInTheDocument();
   });
 
   // B-62-v1 — focus mode tests.
