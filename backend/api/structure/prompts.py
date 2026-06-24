@@ -527,5 +527,10 @@ def build_user_message(merged_text: str, metadata: dict | None = None) -> str:
         "\n"
         "Decompose this text per the 7-step algorithm above and reply "
         "with a single JSON object matching the schema. NO markdown fences, "
-        "NO prose outside the JSON."
+        "NO prose outside the JSON.\n"
+        "\n"
+        "## 출력 형식 (STRICT)\n"
+        "  - JSON 객체 하나만 출력. 마크다운 fence ```json ... ``` 금지.\n"
+        "  - 설명 / 주석 / 인사말 / \"Here's the JSON:\" 등 부가 텍스트 절대 금지.\n"
+        "  - 답변 전체 = { ... } 만."
     )
