@@ -1796,3 +1796,129 @@ describe('FactCard — measurement (v0.2.0 step 2)', () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// decide-claim-format-apply — PO dogfood evidence 2026-06-24.
+//
+// After fact-display-unification (62993df) the FactTypeStrip was already
+// rendering the PO-spec layout (**speaker** [speech_act]: "content") in
+// both Decide and Recall. PO still observed that Decide claim cards
+// showed the OLD rejected layout [speaker]"speech_act":content above the
+// strip, while Recall did not.
+//
+// Root cause: Decide forces lang='en' on FactCard, so displayClaim()
+// returned `fact.claim_en`. The LLM populates claim_en for claim facts
+// with a synthesized template that mirrors the rejected layout, and
+// Decide rendered it verbatim as the card title before the strip below.
+// Recall renders `fact.claim` (the original natural sentence) directly,
+// so it was unaffected.
+//
+// Fix: displayClaim() now prefers `fact.claim` for claim facts
+// regardless of UI lang. The card title becomes the original sentence
+// — identical to what Recall already shows — and FactTypeStrip remains
+// the single source of the PO-spec structured rendering.
+// ---------------------------------------------------------------------------
+describe('FactCard — decide-claim-format-apply: claim title prefers fact.claim', () => {
+  const oldFormatTemplate = '[안도걸 의원]"밝혔다":디지털자산기본법 제정에 속도를 낼 것';
+  const naturalKr = '안도걸 의원은 디지털자산기본법 제정에 속도를 낼 것이라고 밝혔다.';
+  const claimFactWithTemplatedEn: FactSummary = {
+    fact_uid: 'fn-claim-decide',
+    claim: naturalKr,
+    claim_en: oldFormatTemplate,
+    type: 'proposition',
+    subject_uid: 'obj-1',
+    predicate: '밝혔다',
+    object_value: '디지털자산기본법 제정에 속도를 낼 것',
+    fact_type: 'claim',
+    speaker_uid: 'obj-1',
+    speaker_label: '안도걸 의원',
+    speech_act: '밝혔다',
+    content_claim: '디지털자산기본법 제정에 속도를 낼 것',
+    stance: 'neutral',
+  };
+
+  it('Decide (lang=en) renders fact.claim, NOT the templated claim_en', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={claimFactWithTemplatedEn}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const title = screen.getByTestId('fact-claim-fn-claim-decide');
+    // Title surfaces the original natural sentence — identical to Recall.
+    expect(title).toHaveTextContent(naturalKr);
+    // The OLD format template (bracketed speaker + quoted speech_act +
+    // plain content) MUST NOT appear in the title.
+    expect(title.textContent).not.toContain(oldFormatTemplate);
+    expect(title.textContent).not.toMatch(/\[안도걸 의원\]/);
+    expect(title.textContent).not.toMatch(/"밝혔다":/);
+  });
+
+  it('Recall-style (lang=kr) renders fact.claim (regression guard — Recall was already correct)', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={claimFactWithTemplatedEn}
+        action="accept"
+        lang="kr"
+        onChange={onChange}
+      />,
+    );
+    const title = screen.getByTestId('fact-claim-fn-claim-decide');
+    expect(title).toHaveTextContent(naturalKr);
+    expect(title.textContent).not.toContain(oldFormatTemplate);
+  });
+
+  it('Decide claim card shows the PO-spec strip identical to Recall (**speaker** [speech_act]: "content")', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={claimFactWithTemplatedEn}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    const strip = screen.getByTestId('fact-claim-strip-fn-claim-decide');
+    const speaker = strip.querySelector('strong');
+    expect(speaker).not.toBeNull();
+    expect(speaker!.textContent).toBe('안도걸 의원');
+    expect(speaker!.className).toMatch(/font-bold/);
+    expect(strip.textContent).toContain('[밝혔다]:');
+    expect(strip.textContent).toContain('“디지털자산기본법 제정에 속도를 낼 것”');
+    // Same negative guards as the unified PO format test for FactCard.
+    expect(strip.textContent).not.toContain('[안도걸 의원]');
+    expect(strip.textContent).not.toContain('"밝혔다":');
+  });
+
+  it('non-claim facts still prefer claim_en when lang=en (regression guard)', () => {
+    // For action / measurement / legacy facts the existing lang behavior
+    // is preserved — only claim facts get the override. This protects
+    // the dominant Decide path that the PO has been happy with.
+    const onChange = vi.fn();
+    const actionFact: FactSummary = {
+      ...claimFactWithTemplatedEn,
+      fact_uid: 'fn-action-en',
+      fact_type: 'action',
+      claim: '안도걸 의원은 디지털자산기본법 제정에 속도를 낼 것이라고 밝혔다.',
+      claim_en: 'Rep. Ahn Do-geol said he will speed up the Digital Asset Framework Act.',
+      speaker_label: null,
+      speech_act: null,
+      content_claim: null,
+    };
+    render(
+      <FactCard
+        fact={actionFact}
+        action="accept"
+        lang="en"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-claim-fn-action-en')).toHaveTextContent(
+      'Rep. Ahn Do-geol said he will speed up the Digital Asset Framework Act.',
+    );
+  });
+});

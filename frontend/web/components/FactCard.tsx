@@ -170,6 +170,21 @@ interface Props {
 }
 
 function displayClaim(fact: FactSummary, lang: Lang): string {
+  // decide-claim-format-apply (2026-06-24): for claim facts, always
+  // surface the ORIGINAL fact.claim sentence, NEVER fact.claim_en,
+  // regardless of UI lang. PO dogfood evidence: the LLM populates
+  // claim_en for claim facts with a synthesized template that
+  // matches the OLD rejected layout — [speaker_label]"speech_act":content_claim
+  // (bracketed speaker, quoted speech_act, plain content) — so Decide
+  // (which forces lang=en) was rendering that template as the card
+  // title, even though FactTypeStrip below shows the correct PO spec.
+  // Recall renders fact.claim (original natural sentence) directly and
+  // was therefore unaffected; this branch makes Decide consume the same
+  // surface so the title is the natural sentence everywhere and the
+  // PO-spec strip is the single source of structure.
+  if (fact.fact_type === 'claim') {
+    return fact.claim;
+  }
   if (lang === 'en') {
     return fact.claim_en || fact.claim;
   }
