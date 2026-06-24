@@ -212,6 +212,65 @@ def test_strategy_threshold_is_200_chars():
 
 
 # ---------------------------------------------------------------------------
+# capture-naver-fix (PO 2026-06-24): n.news.naver.com mnews URL pattern
+# ---------------------------------------------------------------------------
+
+def test_naver_mnews_host_routes_to_naver_selectors():
+    """The PO's failing URL pattern: n.news.naver.com/mnews/article/...
+
+    Server-side reproduction confirmed `#dic_area` recovers the body
+    cleanly on this layout. The host-suffix matcher must therefore
+    route `n.news.naver.com` -> the `naver.com` selector entry.
+    """
+    key, sels = _selectors_for_host("n.news.naver.com")
+    assert key == "naver.com"
+    assert "#dic_area" in sels
+
+
+def test_naver_selectors_cover_modern_mnews_layout():
+    """The 2023+ mnews layout uses `#newsct_article` as the article
+    wrapper. We keep it as belt-and-suspenders for when the inner
+    `#dic_area` disappears in a future redesign."""
+    _, sels = _selectors_for_host("n.news.naver.com")
+    assert "#newsct_article" in sels
+    # `#articleBodyContents` is kept for the pre-2023 archive layout.
+    assert "#articleBodyContents" in sels
+
+
+def test_naver_mnews_selector_chain_recovers_body():
+    """End-to-end on a synthetic n.news.naver.com mnews HTML: trafilatura
+    is stubbed to miss (simulating the "extension shipped empty
+    outerHTML" failure mode where trafilatura returned <200 chars),
+    and the selector chain rescues #dic_area.
+
+    This is the regression test for the failing URL pattern. The fix
+    is in `api.structure.claude_client._drop_facts_without_subject`
+    (the actual root cause was Structure-stage subject_uid=null
+    rejection), but extractor robustness on this layout is also part
+    of the fix scope and the chain must continue to work.
+    """
+    body = _kor_long(30)
+    raw = _html(
+        f"<article id='newsct_article'>"
+        f"<div id='dic_area'>{body}</div>"
+        f"</article>"
+    )
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value="",
+    ):
+        result = WebArticleExtractor().extract(
+            raw,
+            {"source_url": "https://n.news.naver.com/mnews/article/001/0015421921"},
+        )
+    strat = result.extracted_metadata["extractor_strategy"]
+    assert strat.startswith("selector:")
+    # Either #dic_area or #newsct_article is acceptable — both are in
+    # the chain and either is a correct outcome.
+    assert "dic_area" in strat or "newsct_article" in strat
+    assert body[:20] in result.merged_text
+
+
+# ---------------------------------------------------------------------------
 # 12 Korean publishers must all have entries
 # ---------------------------------------------------------------------------
 

@@ -195,6 +195,81 @@ def _empty_failure(reason: str) -> dict[str, Any]:
     }
 
 
+def _drop_facts_without_subject(parsed: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """Filter the parsed envelope to remove facts with no subject_uid.
+
+    capture-naver-fix (PO 2026-06-24): the LLM occasionally emits
+    `subject_uid: null` on Korean-ellipsis claims where the subject is
+    implicit (e.g. "코스피가 상승했다. 7월 이후 최고치였다." — the second
+    fact inherits the first fact's subject without re-binding). The
+    schema now accepts None at the inner-model layer (see
+    StructureFact.subject_uid), but a fact with no subject is useless
+    downstream — the object-matcher / link-creator both index by
+    subject. We drop such facts here BEFORE Pydantic validation so:
+
+      - The salvaged facts (the majority) still land in the result.
+      - The PO's n.news.naver.com mnews failure (4+ null subject_uid
+        facts in a 17-fact response) stops trashing the whole envelope.
+      - The dropped count is returned for logging so we can spot a
+        regression in LLM behavior.
+
+    Empty-string and whitespace-only subject_uid are treated the same
+    as null. The `facts` key is mutated to a filtered list in-place
+    on a shallow copy of `parsed`; cross-references in
+    `fact_object_links` / `fact_fact_links` that point at the dropped
+    facts are also filtered so the link layer doesn't dangle. Returns
+    (mutated_dict, drop_count).
+    """
+    facts = parsed.get("facts")
+    if not isinstance(facts, list):
+        return parsed, 0
+
+    kept_facts: list[dict[str, Any]] = []
+    dropped_fact_uids: set[str] = set()
+    for fact in facts:
+        if not isinstance(fact, dict):
+            kept_facts.append(fact)
+            continue
+        subj = fact.get("subject_uid")
+        if subj is None or (isinstance(subj, str) and not subj.strip()):
+            uid = fact.get("uid")
+            if isinstance(uid, str):
+                dropped_fact_uids.add(uid)
+            continue
+        kept_facts.append(fact)
+
+    if not dropped_fact_uids and len(kept_facts) == len(facts):
+        return parsed, 0
+
+    out = dict(parsed)
+    out["facts"] = kept_facts
+
+    # Filter any links that reference a dropped fact so we don't leave
+    # dangling fact_uid / from_uid / to_uid pointers.
+    fol = out.get("fact_object_links")
+    if isinstance(fol, list) and dropped_fact_uids:
+        out["fact_object_links"] = [
+            link for link in fol
+            if not (
+                isinstance(link, dict)
+                and link.get("fact_uid") in dropped_fact_uids
+            )
+        ]
+    ffl = out.get("fact_fact_links")
+    if isinstance(ffl, list) and dropped_fact_uids:
+        out["fact_fact_links"] = [
+            link for link in ffl
+            if not (
+                isinstance(link, dict)
+                and (
+                    link.get("from_uid") in dropped_fact_uids
+                    or link.get("to_uid") in dropped_fact_uids
+                )
+            )
+        ]
+    return out, len(dropped_fact_uids)
+
+
 def decompose_via_claude(
     merged_text: str,
     metadata: dict[str, Any] | None = None,
@@ -306,6 +381,19 @@ def _build_result(
     latency_ms: int,
 ) -> StructureResult:
     """Hydrate StructureResult from the parsed JSON; add bookkeeping fields."""
+    # capture-naver-fix (PO 2026-06-24): drop facts the LLM emitted with
+    # `subject_uid: null` BEFORE schema validation. Pre-fix, even though
+    # `subject_uid` is now `UID | None` at the schema layer, downstream
+    # code can't do anything useful with a subjectless fact, and prior
+    # versions of the schema rejected the entire envelope on this case.
+    # The dropped count lands in logs so a regression in LLM behavior
+    # (n+1 facts going null) is visible.
+    parsed, dropped_subjectless = _drop_facts_without_subject(parsed)
+    if dropped_subjectless:
+        logger.info(
+            "Structure: dropped %d facts with null/empty subject_uid "
+            "(LLM ellipsis artifact)", dropped_subjectless,
+        )
     try:
         result = StructureResult.model_validate(parsed)
     except Exception as exc:  # noqa: BLE001 - schema mismatch -> empty failure
