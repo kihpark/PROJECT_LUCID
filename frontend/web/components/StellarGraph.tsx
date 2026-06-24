@@ -158,49 +158,6 @@ export function computeInitialCameraDistance(totalNodes: number): number {
   return Math.round(Math.max(130, Math.min(900, 30 + 18 * Math.sqrt(n))));
 }
 
-// ---------------------------------------------------------------------------
-// feat/stellar-zoom-sync — unified zoom contract.
-//
-// PO repro: wheel and +/- controller showed mismatching values; wheel could
-// reach 100x+ in the readout while the camera was visually stuck, +/- capped
-// at 4.00x but the visual delta was small. Root cause: two competing paths
-// (OrbitControls' built-in wheel dolly + applyZoom for buttons) wrote to two
-// different effective states.
-//
-// Fix: ZOOM_MIN / ZOOM_MAX are the single absolute clamp for the displayed
-// scale. Both wheel handling and +/- buttons funnel through `applyZoom`,
-// which calls `clampZoom` before committing. The OrbitControls built-in
-// wheel dolly is disabled (see handleEngineReady → controls.enableZoom =
-// false) so it cannot race against the unified path.
-//
-// Value choice:
-//   ZOOM_MIN 0.25 — same lower bound as the previous +/- button clamp;
-//                   farthest zoom-out. At default 130-distance scene
-//                   that means camera sits at distance 520 (well inside
-//                   the 4500-radius starfield sphere).
-//   ZOOM_MAX 4    — same upper bound as the previous +/- button clamp;
-//                   closest zoom-in. At default 130-distance scene that
-//                   means camera sits at distance 32.5 (above the
-//                   computeInitialCameraDistance floor of 130's old
-//                   "too close" zone, but inside cluster).
-// ---------------------------------------------------------------------------
-export const ZOOM_MIN = 0.25;
-export const ZOOM_MAX = 4;
-
-/** Clamp a zoom scalar to the unified [ZOOM_MIN, ZOOM_MAX] range. Exported so
- *  the vitest suite can pin the contract without re-deriving the constants. */
-export function clampZoom(z: number): number {
-  if (!Number.isFinite(z)) return 1;
-  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
-}
-
-/** Derive the displayed "Nx" string for a given zoom scalar. Single formula
- *  used by both wheel and +/- paths so the readout cannot diverge from the
- *  underlying camera distance. */
-export function formatZoomLabel(z: number): string {
-  return `${clampZoom(z).toFixed(2)}x`;
-}
-
 export interface StellarGraphProps {
   /** Graph payload. Updating swaps the canvas data; the camera is preserved. */
   data: StellarGraphData;
@@ -299,12 +256,6 @@ interface ForceGraphRefHandle {
     autoRotateSpeed?: number;
     enableDamping?: boolean;
     dampingFactor?: number;
-    // feat/stellar-zoom-sync — OrbitControls' built-in mouse-wheel dolly.
-    // Must be disabled so our unified wheel handler (in StellarGraph) is
-    // the single writer of camera distance. With both enabled the two
-    // paths race and the displayed zoom drifts away from the actual
-    // camera distance — PO repro: wheel reads 100x while camera frozen.
-    enableZoom?: boolean;
   };
   // B-62-fix2 — added for bloom-accumulation defeat. We need the renderer
   // to wipe UnrealBloomPass's ping-pong targets every frame.
@@ -664,14 +615,6 @@ export function StellarGraph(props: StellarGraphProps) {
       controls.autoRotateSpeed = 0.25; // ~0.3 deg/s feel
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
-      // feat/stellar-zoom-sync — disable OrbitControls' built-in mouse-wheel
-      // dolly so the StellarGraph-level wheel handler is the SINGLE writer
-      // of camera distance. Without this the OrbitControls dolly and our
-      // unified applyZoom race; PO repro showed wheel readout climbing past
-      // 100x while the camera was visually frozen (OrbitControls' internal
-      // min/max collided with our display formula). Buttons + wheel now
-      // both funnel through applyZoom → clampZoom, single source of truth.
-      controls.enableZoom = false;
     }
 
     // B-62-demo-clusters-edges + feat/stellar-camera-focus — d3-force tune
@@ -829,36 +772,23 @@ export function StellarGraph(props: StellarGraphProps) {
     }
   }, [mode]);
 
-  // feat/stellar-zoom-sync — wheel handler is now the single explicit writer
-  // of camera distance for mouse-wheel zoom. OrbitControls' built-in dolly
-  // is disabled in handleEngineReady (enableZoom=false), so this listener
-  // owns the wheel UX end-to-end:
-  //
-  //   1. preventDefault so the page doesn't scroll behind the canvas.
-  //   2. Compute a step factor from deltaY (1.1× per notch matches the
-  //      tactile feel of the +/- buttons' 1.25× / 0.8× steps roughly).
-  //   3. Funnel through `applyZoom`, which clampZoom's and writes both
-  //      the `zoom` state (drives the +/− readout) AND the actual camera
-  //      position. The +/− buttons call the SAME function, guaranteeing
-  //      readout consistency.
-  //
-  // Bound to the container ref (not window) so wheel events outside the
-  // stellar canvas — e.g. scrolling the page header — keep their default
-  // behaviour. `{ passive: false }` is required because we preventDefault.
+  // B-62-fix-glow-clamp — keep the zoom readout in sync with the actual
+  // camera distance. The +/- buttons drive this directly via applyZoom,
+  // but the user can ALSO zoom with the mouse wheel (OrbitControls dolly)
+  // — that bypasses applyZoom, so the displayed scale stayed stuck. We
+  // poll the camera at 150ms (≈ 6Hz, fast enough to feel live, slow
+  // enough to avoid spamming setState during autoRotate). Only commits
+  // when the change exceeds 2% so React doesn't re-render every tick.
   useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      // 1.1× per notch. Wheel down (positive deltaY) → zoom out → smaller
-      // scale. Wheel up → zoom in → larger scale. Use the latest zoom via
-      // the functional setter inside applyZoom so we don't capture stale
-      // closure state across renders.
-      const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
-      applyZoomRef.current(zoomRef.current * factor);
-    };
-    node.addEventListener('wheel', onWheel, { passive: false });
-    return () => node.removeEventListener('wheel', onWheel);
+    const id = window.setInterval(() => {
+      const camera = fgRef.current?.camera?.();
+      if (!camera) return;
+      const dist = camera.position.length();
+      if (!Number.isFinite(dist) || dist < 1) return;
+      const actualZoom = initialDistRef.current / dist;
+      setZoom((prev) => (Math.abs(actualZoom - prev) > 0.02 ? actualZoom : prev));
+    }, 150);
+    return () => window.clearInterval(id);
   }, []);
 
   // B-62-search-legibility — fly camera to the focused node. Triggers
@@ -947,22 +877,11 @@ export function StellarGraph(props: StellarGraphProps) {
     );
   }, [viewResetTick]);
 
-  // feat/stellar-zoom-sync — imperative zoom step. Single source of truth
-  // for BOTH wheel and +/- button paths. Reads the current camera direction
-  // from the live ref so it composes correctly with autoRotate and user
-  // orbit; only the distance along the eye→origin axis changes.
-  //
-  // The unified [ZOOM_MIN, ZOOM_MAX] clamp from the module-level constants
-  // is applied here exactly once — wheel callers and button callers share
-  // it. The displayed `zoom` state is set from the SAME clamped value, so
-  // the readout cannot drift past the physical limits.
-  //
-  // Animation duration was 250ms when only buttons drove this; we keep that
-  // for buttons but the wheel-handler will accept a 0 to make wheel feel
-  // immediate. (The 250ms tween on buttons makes the stepwise zoom feel
-  // deliberate; wheel wants tactile 1:1 response.)
-  const applyZoom = useCallback((nextZoom: number, durationMs = 250) => {
-    const clamped = clampZoom(nextZoom);
+  // B-62-fix4 — imperative zoom step. Reads the current camera
+  // direction from the live ref so it composes correctly with autoRotate
+  // and user orbit; only the distance along the eye→origin axis changes.
+  const applyZoom = useCallback((nextZoom: number) => {
+    const clamped = Math.max(0.25, Math.min(4, nextZoom));
     setZoom(clamped);
     const handle = fgRef.current;
     const camera = handle?.camera?.();
@@ -975,24 +894,9 @@ export function StellarGraph(props: StellarGraphProps) {
     handle.cameraPosition(
       { x: target.x, y: target.y, z: target.z },
       { x: 0, y: 0, z: 0 },
-      durationMs,
+      250,
     );
   }, []);
-
-  // feat/stellar-zoom-sync — refs that mirror the latest `zoom` value and
-  // the latest `applyZoom` callable so the wheel-handler effect (which
-  // runs ONCE at mount, no deps) always sees the freshest closure. Without
-  // these the wheel would multiply factor against the initial 1.0 forever
-  // and applyZoom would be a stale closure. The +/- buttons read from
-  // `zoom` state directly so they re-render with the live value.
-  const zoomRef = useRef(1.0);
-  const applyZoomRef = useRef(applyZoom);
-  useEffect(() => {
-    zoomRef.current = zoom;
-  }, [zoom]);
-  useEffect(() => {
-    applyZoomRef.current = applyZoom;
-  }, [applyZoom]);
 
   // B-62-v1 — link colour reflects edge TYPE (synthetic) or the single
   // accent (real). Focus mode adds a second layer: edges incident on the
@@ -1277,18 +1181,18 @@ export function StellarGraph(props: StellarGraphProps) {
           type="button"
           data-testid="stellar-zoom-in"
           aria-label="zoom in"
-          disabled={zoom >= ZOOM_MAX}
+          disabled={zoom >= 4}
           onClick={() => applyZoom(zoom * 1.25)}
           style={{
             width: 36,
             height: 28,
             borderRadius: 7,
-            background: zoom >= ZOOM_MAX ? '#0d1417' : '#102023',
+            background: zoom >= 4 ? '#0d1417' : '#102023',
             border: '1px solid #1d2b2f',
             color: '#3fe0c6',
             fontWeight: 600,
-            cursor: zoom >= ZOOM_MAX ? 'not-allowed' : 'pointer',
-            opacity: zoom >= ZOOM_MAX ? 0.4 : 1,
+            cursor: zoom >= 4 ? 'not-allowed' : 'pointer',
+            opacity: zoom >= 4 ? 0.4 : 1,
           }}
         >
           +
@@ -1302,27 +1206,24 @@ export function StellarGraph(props: StellarGraphProps) {
             letterSpacing: '0.04em',
           }}
         >
-          {/* feat/stellar-zoom-sync — formatZoomLabel re-applies the unified
-           *  clamp before formatting, so even if a future code path writes
-           *  an out-of-range `zoom` value the readout cannot show 100x. */}
-          {formatZoomLabel(zoom)}
+          {zoom.toFixed(2)}x
         </div>
         <button
           type="button"
           data-testid="stellar-zoom-out"
           aria-label="zoom out"
-          disabled={zoom <= ZOOM_MIN}
+          disabled={zoom <= 0.25}
           onClick={() => applyZoom(zoom * 0.8)}
           style={{
             width: 36,
             height: 28,
             borderRadius: 7,
-            background: zoom <= ZOOM_MIN ? '#0d1417' : '#102023',
+            background: zoom <= 0.25 ? '#0d1417' : '#102023',
             border: '1px solid #1d2b2f',
             color: '#3fe0c6',
             fontWeight: 600,
-            cursor: zoom <= ZOOM_MIN ? 'not-allowed' : 'pointer',
-            opacity: zoom <= ZOOM_MIN ? 0.4 : 1,
+            cursor: zoom <= 0.25 ? 'not-allowed' : 'pointer',
+            opacity: zoom <= 0.25 ? 0.4 : 1,
           }}
         >
           −
