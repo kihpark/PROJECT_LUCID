@@ -57,11 +57,23 @@ class RecallFact(LucidBaseModel):
     # recall route defaults the bucket to 'action' when filtering).
     # The FactCard branches on fact_type=='claim' to show the
     # speaker/speech_act strip; otherwise it renders as an action.
-    fact_type: Literal["action", "claim"] | None = None
+    #
+    # v0.2.0 step 2 (fact-measurement-layer-v1): 3-way split adds
+    # 'measurement' — numeric value tied to a point in time. FactCard
+    # branches on fact_type=='measurement' to show the metric / value /
+    # unit / as_of strip.
+    fact_type: Literal["action", "claim", "measurement"] | None = None
     speaker_label: str | None = None
     speech_act: str | None = None
     content_claim: str | None = None
     stance: str | None = None
+    # Measurement-only fields. All None on action / claim / legacy
+    # facts; the FactCard branches on fact_type=='measurement' before
+    # reading them, so missing values never render.
+    metric: str | None = None
+    measurement_value: float | None = None
+    measurement_unit: str | None = None
+    as_of: str | None = None
 
 
 class RecallResponse(LucidBaseModel):
@@ -157,17 +169,22 @@ class PredicateFacetItem(LucidBaseModel):
 
 
 class FactTypeFacets(LucidBaseModel):
-    """v0.2.0 step 1 — Action vs Claim split counts.
+    """v0.2.0 step 1/2 — Action / Claim / Measurement split counts.
 
     Aggregated from the `fact_type` keyword field on lucid_facts.
     Recomputed on every recall call alongside entity / predicate
     facets. Legacy / null fact_type docs do NOT bucket here (the
     terms agg skips missing values); the FE treats them as 'action'
     via the FactCard fallback.
+
+    Step 2 (fact-measurement-layer-v1) adds the `measurement` bucket.
+    Legacy clients that didn't expect it still parse cleanly because
+    it's a plain int with a 0 default.
     """
 
     action: int = 0
     claim: int = 0
+    measurement: int = 0
 
 
 class RecallFacets(LucidBaseModel):

@@ -112,12 +112,35 @@ class StructureFact(LucidBaseModel):
     # Default 'action' on legacy / silent payloads — back-compat.
     # `speech_act` is intentionally open natural-language (no enum)
     # so the loose ontology survives unknown verbs.
-    fact_type: Literal["action", "claim"] = "action"
+    #
+    # v0.2.0 step 2 (fact-measurement-layer-v1): 3-way split adds
+    # 'measurement' — a numeric value tied to a point in time. The
+    # essence is `as_of` (시점); multiple measurements of the same
+    # metric across time become a verified time series — the moat
+    # that note-apps and LLMs can't fabricate.
+    fact_type: Literal["action", "claim", "measurement"] = "action"
     speaker_uid: str | None = None
     speaker_label: str | None = None
     speech_act: str | None = None
     content_claim: str | None = None
     stance: str | None = None
+    # Measurement-specific fields (v0.2.0 step 2).
+    # `metric` is OPEN Korean / source-language string — no enum at
+    # extraction time so the loose ontology survives unknown
+    # measurements ("MAU", "매출", "실업률", "1인당 GDP").
+    # `measurement_value` is a float (not Decimal) — the PO use
+    # cases (MAU ~ 1e9, %, 조 원) all fit safely in IEEE-754, and
+    # JSON / ES double is the natural carrier. The prefixed names
+    # avoid collision with any future generic `value` / `unit`
+    # field on the FactNode shape.
+    # `as_of` is intentionally OPEN string — "2026", "2026-03",
+    # "2026-Q1", "2026-03-23" are all valid; the LLM emits whatever
+    # granularity the source supports, and the future time-series
+    # aggregator does the bucketing.
+    metric: str | None = None
+    measurement_value: float | None = None
+    measurement_unit: str | None = None
+    as_of: str | None = None
 
 
 class StructureFactObjectLink(LucidBaseModel):

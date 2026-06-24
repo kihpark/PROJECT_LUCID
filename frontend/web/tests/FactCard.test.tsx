@@ -1588,3 +1588,131 @@ describe('FactCard — claim (v0.2.0 step 1)', () => {
   });
 });
 
+// v0.2.0 step 2 (fact-measurement-layer-v1): measurement bucket.
+// The FactCard renders a [MEASUREMENT] badge in the header when
+// fact_type='measurement' and a metric / value / unit / as_of strip
+// below the claim. Action / claim / legacy facts render unchanged.
+describe('FactCard — measurement (v0.2.0 step 2)', () => {
+  const measurementFact: FactSummary = {
+    ...baseFact,
+    fact_uid: 'fn-measure-1',
+    fact_type: 'measurement',
+    claim: 'ChatGPT 의 MAU 는 2026년 3월 기준 8억 명이다.',
+    metric: 'MAU',
+    measurement_value: 800000000,
+    measurement_unit: '명',
+    as_of: '2026-03',
+  };
+
+  it('renders [MEASUREMENT] badge when fact_type=measurement', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={measurementFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    expect(
+      screen.getByTestId('fact-measurement-badge-fn-measure-1'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders metric + value + unit + as_of strip', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={measurementFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    const strip = screen.getByTestId('fact-measurement-strip-fn-measure-1');
+    expect(strip).toHaveTextContent('MAU');
+    expect(strip).toHaveTextContent('명');
+    expect(strip).toHaveTextContent('2026-03');
+  });
+
+  it('formats measurement_value with locale thousand separators', () => {
+    // 800,000,000 should not render as the raw "800000000" — the locale
+    // commas give the number scannability. Browser default locale on
+    // jsdom is en-US so the separator is a comma.
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={measurementFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    const valueNode = screen.getByTestId('fact-measurement-value-fn-measure-1');
+    expect(valueNode.textContent).toContain(',');
+    // Round-trip parse confirms the displayed number equals the value
+    // we passed in (modulo formatting). Parsing strips commas back out.
+    expect(Number(valueNode.textContent!.replace(/,/g, ''))).toBe(800000000);
+  });
+
+  it('does NOT render [MEASUREMENT] badge when fact_type=action', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{ ...baseFact, fact_type: 'action' }}
+        action="accept"
+        lang="kr"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.queryByTestId('fact-measurement-badge-fn-1')).toBeNull();
+    expect(screen.queryByTestId('fact-measurement-strip-fn-1')).toBeNull();
+  });
+
+  it('does NOT render [MEASUREMENT] badge when fact_type is undefined (legacy)', () => {
+    // Back-compat: legacy facts pre-measurement-layer have no fact_type
+    // field. They MUST render exactly like action facts — no measurement
+    // badge, no measurement strip.
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={baseFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    expect(screen.queryByTestId('fact-measurement-badge-fn-1')).toBeNull();
+    expect(screen.queryByTestId('fact-measurement-strip-fn-1')).toBeNull();
+  });
+
+  it('renders strip even when measurement_value is zero', () => {
+    // Defensive: `!measurement_value` would hide a zero strip, which
+    // is a legitimate value (강수량 0 mm, deficit 0). The strip's
+    // visibility check uses `!== null && !== undefined`.
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{
+          ...measurementFact,
+          fact_uid: 'fn-zero',
+          measurement_value: 0,
+        }}
+        action="accept"
+        lang="kr"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-measurement-strip-fn-zero')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-measurement-value-fn-zero')).toHaveTextContent('0');
+  });
+
+  it('renders strip with only metric + as_of (no value/unit) when LLM partial', () => {
+    // Defensive: if the LLM tags fact_type='measurement' but only
+    // emits metric + as_of (unit / value extracted poorly), the strip
+    // still renders the available fields — the badge alone is the
+    // type signal; missing sub-fields just get omitted.
+    const onChange = vi.fn();
+    render(
+      <FactCard
+        fact={{
+          ...baseFact,
+          fact_uid: 'fn-partial',
+          fact_type: 'measurement',
+          metric: '실업률',
+          as_of: '2026-06',
+          measurement_value: null,
+          measurement_unit: null,
+        }}
+        action="accept"
+        lang="kr"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('fact-measurement-badge-fn-partial')).toBeInTheDocument();
+    const strip = screen.getByTestId('fact-measurement-strip-fn-partial');
+    expect(strip).toHaveTextContent('실업률');
+    expect(strip).toHaveTextContent('2026-06');
+  });
+});
+

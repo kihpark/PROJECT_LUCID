@@ -102,17 +102,34 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             "negation_flag": {"type": "boolean"},
             "negation_scope": {"type": "keyword"},
             # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split.
-            # `fact_type` keyword (action | claim) drives the recall facet
-            # bucket. The 5 claim-only fields are populated by the LLM
-            # only when fact_type=='claim'; legacy / action docs leave
-            # them null. `speech_act` is open natural-language — keyword
-            # for exact-match facet/aggregation, NOT a controlled enum.
+            # `fact_type` keyword (action | claim | measurement) drives the
+            # recall facet bucket. The 5 claim-only fields are populated by
+            # the LLM only when fact_type=='claim'; legacy / action / measurement
+            # docs leave them null. `speech_act` is open natural-language —
+            # keyword for exact-match facet/aggregation, NOT a controlled enum.
             "fact_type": {"type": "keyword"},
             "speaker_uid": {"type": "keyword"},
             "speaker_label": {"type": "keyword"},
             "speech_act": {"type": "keyword"},
             "content_claim": {"type": "text", "analyzer": "korean_analyzer"},
             "stance": {"type": "keyword"},
+            # v0.2.0 step 2 (fact-measurement-layer-v1): measurement layer.
+            # 4 fields populated only when fact_type=='measurement'.
+            # `metric` is OPEN Korean / source-language string — keyword for
+            # exact-match facet, no controlled vocabulary at extraction time.
+            # `measurement_value` is the numeric value (8e8 for MAU, 70 for
+            # 매출 70 조 원, 3.4 for 실업률 3.4%). Stored as `double` so
+            # ES range queries and future time-series aggregations land
+            # without precision surprises.
+            # `measurement_unit` is the OPEN string companion ("명", "조 원",
+            # "%", "달러"); keyword for facet bucket on unit-of-measure.
+            # `as_of` is the timepoint — accepts year / year-month / quarter /
+            # date granularity. Kept as keyword (not date) because the LLM
+            # emits ranges / approximations no single date format covers.
+            "metric": {"type": "keyword"},
+            "measurement_value": {"type": "double"},
+            "measurement_unit": {"type": "keyword"},
+            "as_of": {"type": "keyword"},
             "edit_history": {
                 "type": "nested",
                 "properties": {

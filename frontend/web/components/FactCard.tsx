@@ -467,6 +467,21 @@ export function FactCard({
                 CLAIM
               </span>
             )}
+            {/* v0.2.0 step 2 (fact-measurement-layer-v1) — MEASUREMENT
+                badge. The fact is a numeric value pinned to a timepoint
+                (as_of). Same metric across multiple as_of → a verified
+                time series — Lucid's structural moat over note-apps /
+                LLM completion. Color is warm (vs cool CLAIM) so the
+                two badges differentiate at a glance. */}
+            {fact.fact_type === 'measurement' && (
+              <span
+                data-testid={`fact-measurement-badge-${factUid}`}
+                className="inline-flex items-center text-xxs font-mono text-accent-warm bg-accent-warm/10 border border-accent-warm/30 rounded px-1.5 py-0.5"
+                title="수치 측정 (numeric data pinned to a timepoint — 시계열의 한 점)"
+              >
+                MEASUREMENT
+              </span>
+            )}
             {/* decide-ux-v3: negation badge UI removed per PO ("필요 없다"). */}
             {/* The underlying fact.negation_flag + negation_scope data is */}
             {/* preserved on the FactNode in storage — kept as substrate for */}
@@ -514,6 +529,61 @@ export function FactCard({
           )}
           {fact.content_claim && (
             <span className="ml-1">{fact.content_claim}</span>
+          )}
+        </p>
+      )}
+
+      {/* v0.2.0 step 2 (fact-measurement-layer-v1) — metric / value /
+          unit / as_of strip. Only renders for measurement facts.
+          Format example: "MAU = 800,000,000 명 (2026-03)".
+          Locale formatting (`toLocaleString`) puts thousands separators
+          on the value so 8e8 reads as "800,000,000" not "800000000".
+          Strict mono-font keeps the value-unit-timepoint alignment
+          stable regardless of UI lang. */}
+      {!isEditing && fact.fact_type === 'measurement'
+        && (
+          fact.metric
+          || fact.measurement_value !== null && fact.measurement_value !== undefined
+          || fact.measurement_unit
+          || fact.as_of
+        )
+        && (
+        <p
+          data-testid={`fact-measurement-strip-${factUid}`}
+          className="text-sm text-text-secondary mb-3 pl-7 font-mono"
+          lang={lang === 'kr' ? 'ko' : 'en'}
+        >
+          {fact.metric && (
+            <span
+              data-testid={`fact-measurement-metric-${factUid}`}
+              className="font-medium text-accent-warm"
+            >
+              {fact.metric}
+            </span>
+          )}
+          {(fact.measurement_value !== null && fact.measurement_value !== undefined) && (
+            <>
+              {fact.metric && <span className="mx-1 opacity-60">=</span>}
+              <span data-testid={`fact-measurement-value-${factUid}`}>
+                {Number(fact.measurement_value).toLocaleString()}
+              </span>
+            </>
+          )}
+          {fact.measurement_unit && (
+            <span
+              data-testid={`fact-measurement-unit-${factUid}`}
+              className="ml-1"
+            >
+              {fact.measurement_unit}
+            </span>
+          )}
+          {fact.as_of && (
+            <span
+              data-testid={`fact-measurement-asof-${factUid}`}
+              className="ml-2 opacity-70"
+            >
+              ({fact.as_of})
+            </span>
           )}
         </p>
       )}
