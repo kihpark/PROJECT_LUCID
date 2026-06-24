@@ -257,6 +257,30 @@ function RecallFactCard({
   );
 }
 
+// feat/recall-fact-type-summary — fact_type taxonomy. Hoisted to the
+// top of the module so the EntityBriefPanel (which renders the per-
+// entity chip row introduced by feat/recall-entity-fact-type-breakdown)
+// can reference the same labels / order constants as the page-level
+// RecallFactTypeSummary further down. `const`/`type` are NOT hoisted
+// like `function` declarations are; without this move, the per-entity
+// breakdown would crash with a TDZ ReferenceError on first render.
+
+type FactTypeKey = 'action' | 'claim' | 'measurement';
+
+const FACT_TYPE_LABELS: Record<FactTypeKey, string> = {
+  action: '행동',
+  claim: '발언',
+  measurement: '수치',
+};
+
+const FACT_TYPE_GLOSS: Record<FactTypeKey, string> = {
+  action: 'Action',
+  claim: 'Claim',
+  measurement: 'Measurement',
+};
+
+const FACT_TYPE_ORDER: FactTypeKey[] = ['action', 'claim', 'measurement'];
+
 function BriefGroup({
   group, role,
 }: { group: EntityBriefGroup; role: 'subject' | 'object' }) {
@@ -286,8 +310,70 @@ function BriefGroup({
   );
 }
 
+// feat/recall-entity-fact-type-breakdown — PO live evidence 2026-06-24.
+//
+// The brief panel used to surface the entity's facts as a role split —
+// "주어로서 (N)" / "목적어로서 (N)" with a "생성 0" line baked into the
+// signature. PO escalation: that role split is meaningless to the user;
+// what they want, mirroring the top-level summary box from
+// feat/recall-fact-type-summary, is a fact_type breakdown PER entity
+// (행동 / 발언 / 수치). This way each entity's contribution to the
+// search is decomposed across the three knowledge layers the whole UI
+// is already organised around.
+//
+// Data path. The backend EntityBrief / EntityFactRef shape doesn't
+// carry fact_type (a deliberate constraint of this PR: no backend
+// changes). The breakdown is computed frontend-side from `result.facts`
+// — the recall hit set already carries `fact_type` on every RecallFact
+// — filtering to facts where this entity appears as subject or object.
+// This works exactly for the dogfood case PO is hitting (search-by-
+// entity-name where every hit is the same entity); for the wider case
+// it surfaces the fact_type split of the entity's CURRENT search hits
+// rather than its lifetime facts. That tradeoff matches the rest of
+// the recall surface (facets are also computed over the current hit
+// set, not lifetime).
+//
+// The chips are clickable and dispatch to the SAME factTypeFilter that
+// the top-level summary owns — so a per-entity chip click filters the
+// whole result list, identical to clicking the top-level chip. That
+// keeps a single source of truth (one filter, not a per-entity-local
+// filter that would compete with the global one) and matches the
+// muscle memory of users who already learned the top-level summary.
 
-function EntityBriefPanel({ brief }: { brief: EntityBrief }) {
+function computeEntityFactTypeBreakdown(
+  entityUid: string,
+  facts: RecallFact[],
+): Record<FactTypeKey, number> {
+  const counts: Record<FactTypeKey, number> = {
+    action: 0,
+    claim: 0,
+    measurement: 0,
+  };
+  for (const f of facts) {
+    const touchesEntity =
+      f.subject_uid === entityUid || f.object_value === entityUid;
+    if (!touchesEntity) continue;
+    // Legacy / null fact_type — treat as 'action' to match the
+    // codebase-wide fallback (RecallFactCard, FactCard, visibleFacts
+    // filter all do the same).
+    const t = (f.fact_type ?? 'action') as FactTypeKey;
+    if (t === 'action' || t === 'claim' || t === 'measurement') {
+      counts[t] += 1;
+    }
+  }
+  return counts;
+}
+
+interface EntityBriefPanelProps {
+  brief: EntityBrief;
+  factTypeCounts: Record<FactTypeKey, number>;
+  activeFactType: FactTypeKey | null;
+  onToggleFactType: (kind: FactTypeKey) => void;
+}
+
+function EntityBriefPanel({
+  brief, factTypeCounts, activeFactType, onToggleFactType,
+}: EntityBriefPanelProps) {
   if (brief.total_facts === 0) {
     return (
       <section
@@ -325,29 +411,79 @@ function EntityBriefPanel({ brief }: { brief: EntityBrief }) {
           )}
         </h2>
         <p className="text-xxs text-text-muted font-mono">
-          {brief.total_facts}개 검증 사실 · 술어별 그룹 · 생성 0
+          {brief.total_facts}개 검증 사실 · 술어별 그룹
         </p>
       </header>
-      {brief.as_subject.length > 0 && (
-        <div className="mb-3" data-testid="brief-as-subject">
-          <h3 className="text-xs font-medium text-text-secondary mb-2">
-            주어로서 ({brief.as_subject.reduce((n, g) => n + g.facts.length, 0)})
-          </h3>
-          {brief.as_subject.map((g) => (
-            <BriefGroup key={`s-${g.predicate}`} group={g} role="subject" />
-          ))}
-        </div>
-      )}
-      {brief.as_object.length > 0 && (
-        <div data-testid="brief-as-object">
-          <h3 className="text-xs font-medium text-text-secondary mb-2">
-            목적어로서 ({brief.as_object.reduce((n, g) => n + g.facts.length, 0)})
-          </h3>
-          {brief.as_object.map((g) => (
-            <BriefGroup key={`o-${g.predicate}`} group={g} role="object" />
-          ))}
-        </div>
-      )}
+      {/* feat/recall-entity-fact-type-breakdown — chip row replacing the
+          old 주어로서 / 목적어로서 / 생성 0 facet. Visually smaller than
+          the top-level summary chips (text-xxs vs text-xs, py-0.5 vs
+          py-1) so the hierarchy reads as "page-level summary > entity-
+          level summary"; same border / active state / disabled state
+          semantics so the user instantly knows they're chips of the
+          same kind. */}
+      <div
+        role="group"
+        aria-label="entity fact type breakdown"
+        data-testid="brief-fact-type-breakdown"
+        data-active-filter={activeFactType ?? ''}
+        className="flex flex-wrap items-center gap-2 mb-3"
+      >
+        {FACT_TYPE_ORDER.map((kind) => {
+          const count = factTypeCounts[kind];
+          const active = activeFactType === kind;
+          const empty = count === 0;
+          return (
+            <button
+              key={kind}
+              type="button"
+              data-testid={`brief-fact-type-chip-${kind}`}
+              data-active={active ? 'true' : 'false'}
+              data-empty={empty ? 'true' : 'false'}
+              aria-pressed={active}
+              disabled={empty}
+              onClick={() => onToggleFactType(kind)}
+              title={
+                empty
+                  ? `${FACT_TYPE_LABELS[kind]} 층위의 결과 없음`
+                  : active
+                  ? `${FACT_TYPE_LABELS[kind]} 필터 해제`
+                  : `${FACT_TYPE_LABELS[kind]} 층위만 보기`
+              }
+              className={[
+                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xxs font-medium transition-colors',
+                empty
+                  ? 'border-border-subtle bg-bg-card/40 text-text-muted cursor-not-allowed opacity-60'
+                  : active
+                  ? 'border-accent-cool/70 bg-accent-cool/15 text-accent-cool'
+                  : 'border-border-subtle bg-bg-card text-text-secondary hover:bg-bg-elevated/60 cursor-pointer',
+              ].join(' ')}
+            >
+              <span>{FACT_TYPE_LABELS[kind]}</span>
+              <span
+                className="font-mono text-xxs opacity-80"
+                data-testid={`brief-fact-type-count-${kind}`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {/* Predicate-grouped fact lists. The role split (주어로서 /
+          목적어로서) is gone — we render the subject and object groups
+          inline as one flat predicate list because the role distinction
+          is implementation detail, not a user-facing axis. The data-
+          testid prefixes (brief-group-subject- / brief-group-object-)
+          remain so existing predicate-level assertions still pin to a
+          stable selector. */}
+      <div data-testid="brief-predicate-groups">
+        {brief.as_subject.map((g) => (
+          <BriefGroup key={`s-${g.predicate}`} group={g} role="subject" />
+        ))}
+        {brief.as_object.map((g) => (
+          <BriefGroup key={`o-${g.predicate}`} group={g} role="object" />
+        ))}
+      </div>
     </section>
   );
 }
@@ -1324,23 +1460,13 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
 // chips in the power rail keep working — toggling either reads the
 // same `factTypeFilter` state, so the new summary box is the single
 // source of truth. The checkboxes act as a redundant power-user knob.
+//
+// Note — FactTypeKey / FACT_TYPE_LABELS / FACT_TYPE_GLOSS / FACT_TYPE_ORDER
+// were hoisted to the top of the module by
+// feat/recall-entity-fact-type-breakdown so EntityBriefPanel can share
+// the same taxonomy; the summary box below reuses those constants
+// verbatim.
 // ---------------------------------------------------------------------------
-
-type FactTypeKey = 'action' | 'claim' | 'measurement';
-
-const FACT_TYPE_LABELS: Record<FactTypeKey, string> = {
-  action: '행동',
-  claim: '발언',
-  measurement: '수치',
-};
-
-const FACT_TYPE_GLOSS: Record<FactTypeKey, string> = {
-  action: 'Action',
-  claim: 'Claim',
-  measurement: 'Measurement',
-};
-
-const FACT_TYPE_ORDER: FactTypeKey[] = ['action', 'claim', 'measurement'];
 
 interface RecallFactTypeSummaryProps {
   total: number;
@@ -1633,7 +1759,15 @@ function RecallPowerBody({
               query={query}
             />
             {result.entity_brief && (
-              <EntityBriefPanel brief={result.entity_brief} />
+              <EntityBriefPanel
+                brief={result.entity_brief}
+                factTypeCounts={computeEntityFactTypeBreakdown(
+                  result.entity_brief.entity_uid,
+                  result.facts,
+                )}
+                activeFactType={factTypeFilter}
+                onToggleFactType={onToggleFactType}
+              />
             )}
             {sortedFacts.length > 0 && (
               <>

@@ -527,10 +527,15 @@ describe('RecallView — entity brief panel (B-41)', () => {
     expect(brief).toHaveTextContent('SpaceX');
     expect(brief).toHaveTextContent('organization');
     expect(brief).toHaveTextContent(/3개 검증 사실/);
-    expect(brief).toHaveTextContent(/생성 0/);
+    // feat/recall-entity-fact-type-breakdown — the old "생성 0" tagline
+    // and "주어로서" / "목적어로서" role labels are gone. The brief
+    // header no longer mentions them.
+    expect(brief).not.toHaveTextContent(/생성 0/);
+    expect(brief).not.toHaveTextContent(/주어로서/);
+    expect(brief).not.toHaveTextContent(/목적어로서/);
   });
 
-  it('shows subject-role and object-role groups separately', async () => {
+  it('renders the predicate-grouped fact lists from both role buckets', async () => {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(BRIEF_RESPONSE);
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
@@ -539,8 +544,14 @@ describe('RecallView — entity brief panel (B-41)', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    expect(await screen.findByTestId('brief-as-subject')).toBeInTheDocument();
-    expect(screen.getByTestId('brief-as-object')).toBeInTheDocument();
+    // feat/recall-entity-fact-type-breakdown — the brief-as-subject /
+    // brief-as-object wrappers are gone; the predicate groups
+    // themselves stay so existing per-predicate assertions keep
+    // pinning. They now live under a single brief-predicate-groups
+    // container that doesn't split on role.
+    expect(await screen.findByTestId('brief-predicate-groups')).toBeInTheDocument();
+    expect(screen.queryByTestId('brief-as-subject')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('brief-as-object')).not.toBeInTheDocument();
     expect(screen.getByTestId('brief-group-subject-total_funds_raised'))
       .toBeInTheDocument();
     expect(screen.getByTestId('brief-group-subject-set_ipo_price'))
@@ -587,6 +598,248 @@ describe('RecallView — entity brief panel (B-41)', () => {
     const brief = await screen.findByTestId('entity-brief');
     expect(brief).toHaveTextContent('Nobody');
     expect(brief).toHaveTextContent(/검증된 사실이 없습니다/);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// feat/recall-entity-fact-type-breakdown — PER-entity 행동 / 발언 / 수치
+// chip row inside the brief panel, replacing the role facet (주어로서 /
+// 목적어로서) that was meaningless to PO during the 2026-06-24 dogfood.
+// ---------------------------------------------------------------------------
+
+describe('RecallView — entity brief fact_type breakdown', () => {
+  const SHARED_ENTITY_UID = 'ent-birth-metric';
+
+  // Mixed-type response: the entity is touched by 1 action, 2 claim,
+  // and 3 measurement facts. The brief total matches (6).
+  const MIXED_RESPONSE: RecallResponse = {
+    signature: 'As far as I know — 그래프에 6개 검증 사실이 있습니다',
+    total: 6,
+    entity_brief: {
+      entity_uid: SHARED_ENTITY_UID,
+      entity_name: '출생아 수',
+      entity_class: 'concept',
+      total_facts: 6,
+      as_subject: [
+        {
+          predicate: 'measured_as',
+          facts: [
+            { fact_uid: 'm-1', claim: '출생아 수는 230,000명.', predicate: 'measured_as', other_uid: '230000', other_label: null },
+          ],
+        },
+      ],
+      as_object: [],
+    },
+    facets: {
+      entities: { organization: [], person: [], place: [], other: [] },
+      predicates: [],
+      fact_types: { action: 1, claim: 2, measurement: 3 },
+    },
+    facts: [
+      {
+        fact_uid: 'a-1', claim: '통계청이 출생아 수를 집계했다.', claim_en: null,
+        subject_uid: 'ent-stat', subject_label: '통계청',
+        predicate: 'reports', object_value: SHARED_ENTITY_UID, object_label: '출생아 수',
+        source_uids: [], validated_at: new Date('2026-06-15T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.92, match_kind: 'embedding',
+        fact_type: 'action',
+      },
+      {
+        fact_uid: 'c-1', claim: '장관이 "출생아 수 반등"이라 말했다.', claim_en: null,
+        subject_uid: 'ent-minister', subject_label: '장관',
+        predicate: 'says', object_value: SHARED_ENTITY_UID, object_label: '출생아 수',
+        source_uids: [], validated_at: new Date('2026-06-16T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.90, match_kind: 'embedding',
+        fact_type: 'claim',
+      },
+      {
+        fact_uid: 'c-2', claim: '대통령이 "출생아 수 위기"라 말했다.', claim_en: null,
+        subject_uid: 'ent-president', subject_label: '대통령',
+        predicate: 'says', object_value: SHARED_ENTITY_UID, object_label: '출생아 수',
+        source_uids: [], validated_at: new Date('2026-06-17T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.89, match_kind: 'embedding',
+        fact_type: 'claim',
+      },
+      {
+        fact_uid: 'm-1', claim: '출생아 수는 230,000명.', claim_en: null,
+        subject_uid: SHARED_ENTITY_UID, subject_label: '출생아 수',
+        predicate: 'measured_as', object_value: '230000', object_label: null,
+        source_uids: [], validated_at: new Date('2026-06-18T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.91, match_kind: 'embedding',
+        fact_type: 'measurement',
+      },
+      {
+        fact_uid: 'm-2', claim: '출생아 수는 225,000명.', claim_en: null,
+        subject_uid: SHARED_ENTITY_UID, subject_label: '출생아 수',
+        predicate: 'measured_as', object_value: '225000', object_label: null,
+        source_uids: [], validated_at: new Date('2026-06-19T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.88, match_kind: 'embedding',
+        fact_type: 'measurement',
+      },
+      {
+        fact_uid: 'm-3', claim: '출생아 수는 240,000명.', claim_en: null,
+        subject_uid: SHARED_ENTITY_UID, subject_label: '출생아 수',
+        predicate: 'measured_as', object_value: '240000', object_label: null,
+        source_uids: [], validated_at: new Date('2026-06-20T09:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.85, match_kind: 'embedding',
+        fact_type: 'measurement',
+      },
+    ],
+  };
+
+  // Single-type legacy response: every fact has fact_type=undefined
+  // (= 'action' by codebase convention). The chip row should still
+  // render all three buckets so the visual hierarchy stays constant.
+  const LEGACY_ACTION_ONLY: RecallResponse = {
+    signature: 'As far as I know — 그래프에 2개 검증 사실이 있습니다',
+    total: 2,
+    entity_brief: {
+      entity_uid: 'ent-legacy',
+      entity_name: 'Legacy',
+      entity_class: 'organization',
+      total_facts: 2,
+      as_subject: [],
+      as_object: [],
+    },
+    facts: [
+      {
+        fact_uid: 'l-1', claim: 'Legacy did X.', claim_en: null,
+        subject_uid: 'ent-legacy', subject_label: 'Legacy',
+        predicate: 'did', object_value: 'X', object_label: null,
+        source_uids: [], validated_at: new Date('2026-06-01T10:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.80, match_kind: 'embedding',
+      },
+      {
+        fact_uid: 'l-2', claim: 'Legacy did Y.', claim_en: null,
+        subject_uid: 'ent-legacy', subject_label: 'Legacy',
+        predicate: 'did', object_value: 'Y', object_label: null,
+        source_uids: [], validated_at: new Date('2026-06-02T10:00:00Z').toISOString(),
+        validator_id: 'u', validation_method: 'manual', knowledge_space_id: 'ks-1',
+        negation_flag: false, negation_scope: null, score: 0.79, match_kind: 'embedding',
+      },
+    ],
+  };
+
+  it('renders three fact_type chips (행동 / 발언 / 수치) inside the brief panel', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED_RESPONSE);
+    render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '출생아' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const breakdown = await screen.findByTestId('brief-fact-type-breakdown');
+    // All three chips must be present, in canonical order action /
+    // claim / measurement.
+    expect(screen.getByTestId('brief-fact-type-chip-action')).toBeInTheDocument();
+    expect(screen.getByTestId('brief-fact-type-chip-claim')).toBeInTheDocument();
+    expect(screen.getByTestId('brief-fact-type-chip-measurement')).toBeInTheDocument();
+    // Each chip carries its Korean label.
+    expect(breakdown).toHaveTextContent('행동');
+    expect(breakdown).toHaveTextContent('발언');
+    expect(breakdown).toHaveTextContent('수치');
+  });
+
+  it('counts the per-entity fact_type breakdown from result.facts', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED_RESPONSE);
+    render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '출생아' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    await screen.findByTestId('brief-fact-type-breakdown');
+    // 1 action, 2 claim, 3 measurement — all of which touch the entity
+    // (either as subject_uid or object_value).
+    expect(screen.getByTestId('brief-fact-type-count-action'))
+      .toHaveTextContent('1');
+    expect(screen.getByTestId('brief-fact-type-count-claim'))
+      .toHaveTextContent('2');
+    expect(screen.getByTestId('brief-fact-type-count-measurement'))
+      .toHaveTextContent('3');
+  });
+
+  it('clicking a per-entity chip flips the global fact_type filter', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED_RESPONSE);
+    render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '출생아' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const breakdown = await screen.findByTestId('brief-fact-type-breakdown');
+    expect(breakdown).toHaveAttribute('data-active-filter', '');
+    // Click 발언 chip → both the per-entity chip AND the top-level
+    // summary chip should now read as the active filter ('claim').
+    fireEvent.click(screen.getByTestId('brief-fact-type-chip-claim'));
+    expect(screen.getByTestId('brief-fact-type-breakdown'))
+      .toHaveAttribute('data-active-filter', 'claim');
+    expect(screen.getByTestId('brief-fact-type-chip-claim'))
+      .toHaveAttribute('data-active', 'true');
+    expect(screen.getByTestId('recall-fact-type-summary'))
+      .toHaveAttribute('data-active-filter', 'claim');
+    // Click again → filter clears, both chip rows go back to neutral.
+    fireEvent.click(screen.getByTestId('brief-fact-type-chip-claim'));
+    expect(screen.getByTestId('brief-fact-type-breakdown'))
+      .toHaveAttribute('data-active-filter', '');
+    expect(screen.getByTestId('recall-fact-type-summary'))
+      .toHaveAttribute('data-active-filter', '');
+  });
+
+  it('renders zero-count chips disabled and visually muted', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(LEGACY_ACTION_ONLY);
+    render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'Legacy' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    await screen.findByTestId('brief-fact-type-breakdown');
+    // Even with only action facts, all three chips must render — the
+    // visual hierarchy is constant; the empty buckets get the
+    // disabled / muted treatment.
+    expect(screen.getByTestId('brief-fact-type-count-action'))
+      .toHaveTextContent('2');
+    expect(screen.getByTestId('brief-fact-type-count-claim'))
+      .toHaveTextContent('0');
+    expect(screen.getByTestId('brief-fact-type-count-measurement'))
+      .toHaveTextContent('0');
+    const claimChip = screen.getByTestId('brief-fact-type-chip-claim');
+    const measurementChip = screen.getByTestId('brief-fact-type-chip-measurement');
+    expect(claimChip).toBeDisabled();
+    expect(measurementChip).toBeDisabled();
+    expect(claimChip).toHaveAttribute('data-empty', 'true');
+    expect(measurementChip).toHaveAttribute('data-empty', 'true');
+    // Action chip is non-empty so it stays enabled even though its
+    // count is the only non-zero one.
+    expect(screen.getByTestId('brief-fact-type-chip-action')).not.toBeDisabled();
+  });
+
+  it('no longer shows the "주어로서 / 목적어로서 / 생성 0" role labels', async () => {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(MIXED_RESPONSE);
+    render(<RecallView spaceId="ks-1" />);
+    switchToPowerMode();
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '출생아' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const brief = await screen.findByTestId('entity-brief');
+    expect(brief).not.toHaveTextContent(/주어로서/);
+    expect(brief).not.toHaveTextContent(/목적어로서/);
+    expect(brief).not.toHaveTextContent(/생성 0/);
   });
 });
 
