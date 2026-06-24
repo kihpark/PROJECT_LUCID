@@ -779,6 +779,13 @@ def decide(
         _mark_job_validated(job)
         session.commit()
 
+        # feat/fact-contradiction-detection-v1 (v0.2.0 step 3): rule-based
+        # contradiction scan over measurement + action layers, persists
+        # CONTRADICTS edges to fact_relations. Non-blocking: the user-
+        # facing Submit has already succeeded by this point, so any
+        # detector failure must NEVER promote to an HTTP error.
+        _trigger_contradiction_detection(session, ks_id=str(ks.id))
+
         return DecideResponse(
             accepted_facts=accepted,
             edited_facts=edited,
@@ -790,6 +797,37 @@ def decide(
         )
     finally:
         session.close()
+
+
+def _trigger_contradiction_detection(session, *, ks_id: str) -> None:
+    """Run the contradiction detector for a KS, swallowing every error.
+
+    The detector commits its OWN session writes; we pass the same
+    decide() session so the new rows land in the same transactional
+    context. Wrapped in a top-level try/except because:
+      - rule-based but ES-dependent (scan failures are best-effort),
+      - the Submit transaction is already committed by the caller,
+      - we must NEVER let detection failure surface as a 500 — the
+        user's Submit must always succeed.
+    """
+    try:
+        from api.storage.elasticsearch.client import get_client
+        from api.structure.contradiction_detector import detect_and_persist
+        client = get_client()
+        summary = detect_and_persist(client, session, ks_id)
+        if summary["candidates_found"] > 0:
+            logger.info(
+                "validate.decide: contradiction scan ks=%s found=%d written=%d by_layer=%s",
+                ks_id,
+                summary["candidates_found"],
+                summary["relations_written"],
+                summary["by_layer"],
+            )
+    except Exception as exc:  # noqa: BLE001 — never block decide()
+        logger.warning(
+            "validate.decide: contradiction detection failed (non-blocking) for ks=%s: %s",
+            ks_id, exc,
+        )
 
 
 def _mark_job_validated(job: SourceJobORM) -> None:
@@ -904,6 +942,10 @@ def accept_all(
         # for the job — flip status so the home count drops.
         _mark_job_validated(job)
         session.commit()
+
+        # feat/fact-contradiction-detection-v1: accept_all also writes new
+        # facts (one bulk path per job), so we run the detector here too.
+        _trigger_contradiction_detection(session, ks_id=str(ks.id))
 
         return DecideResponse(
             accepted_facts=pending_fact_uids,

@@ -221,6 +221,11 @@ export interface RecallFact {
   measurement_value?: number | null;
   measurement_unit?: string | null;
   as_of?: string | null;
+  // v0.2.0 step 3 (fact-contradiction-detection-v1): count of CONTRADICTS
+  // edges where this fact participates. The RecallFactCard renders an
+  // amber [⚠ 모순 N건] badge when > 0. Defaults to 0 on legacy responses
+  // / older clients — undefined coerces to 0 in the badge guard.
+  contradiction_count?: number;
 }
 
 export interface EntityFactRef {

@@ -74,6 +74,12 @@ class RecallFact(LucidBaseModel):
     measurement_value: float | None = None
     measurement_unit: str | None = None
     as_of: str | None = None
+    # v0.2.0 step 3 (fact-contradiction-detection-v1): count of CONTRADICTS
+    # edges in fact_relations where THIS fact is on either side. 0 on
+    # facts with no detected contradiction. The RecallFactCard shows an
+    # amber [⚠ 모순 N건] badge when > 0. Resolution (merge / pick winner)
+    # is deferred — the badge is observational only.
+    contradiction_count: int = 0
 
 
 class RecallResponse(LucidBaseModel):
