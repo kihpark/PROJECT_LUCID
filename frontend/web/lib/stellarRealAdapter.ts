@@ -91,6 +91,18 @@ function pushFactAsNode(acc: NodeAccumulator, fact: RecallFact, clusterHint: num
     subject,
     predicate: fact.predicate,
     object,
+    // feat/stellar-hover-restore-by-type — pipe the v0.2 fact_type
+    // surface through so StellarView's hover tooltip can branch on
+    // action / claim / measurement. Older facts (legacy, pre-v0.2)
+    // carry fact_type === null → the tooltip falls back to action.
+    fact_type: fact.fact_type ?? null,
+    speaker_label: fact.speaker_label ?? null,
+    speech_act: fact.speech_act ?? null,
+    content_claim: fact.content_claim ?? null,
+    metric: fact.metric ?? null,
+    measurement_value: fact.measurement_value ?? null,
+    measurement_unit: fact.measurement_unit ?? null,
+    as_of: fact.as_of ?? null,
   });
 }
 

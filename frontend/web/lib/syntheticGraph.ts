@@ -83,6 +83,26 @@ export interface StellarNode {
   subject: string;
   predicate: string;
   object: string;
+  // feat/stellar-hover-restore-by-type — fact_type-specific fields used
+  // by the floating hover tooltip in StellarView to render an adaptive
+  // summary (action / claim / measurement). All optional: synthetic
+  // nodes leave them undefined → tooltip falls back to the action shape.
+  /** 'action' (default), 'claim' (speech act), 'measurement' (metric+value+unit). */
+  fact_type?: 'action' | 'claim' | 'measurement' | null;
+  /** claim — natural speaker label (defaults to subject when absent). */
+  speaker_label?: string | null;
+  /** claim — verb like 말했다 / 발표했다 / 주장했다. */
+  speech_act?: string | null;
+  /** claim — short content body the speaker uttered. */
+  content_claim?: string | null;
+  /** measurement — metric name (e.g. MAU, 환율, GDP). */
+  metric?: string | null;
+  /** measurement — numeric value. */
+  measurement_value?: number | null;
+  /** measurement — unit string (명, 원, %, ppm, ℃ …). */
+  measurement_unit?: string | null;
+  /** measurement — timepoint the measurement is pinned to. */
+  as_of?: string | null;
 }
 
 export interface StellarLink {
