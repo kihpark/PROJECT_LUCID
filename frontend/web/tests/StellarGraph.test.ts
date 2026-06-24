@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  WHEEL_ZOOM_FACTOR,
   ZOOM_MAX,
   ZOOM_MIN,
   clampZoom,
@@ -20,6 +21,7 @@ import {
   computeChargeStrength,
   computeInitialCameraDistance,
   computeLinkDistance,
+  computeNodeCentroid,
   computeNodeSizeFloor,
   formatZoomLabel,
 } from '@/components/StellarGraph';
@@ -157,6 +159,82 @@ describe('feat/stellar-zoom-sync — unified zoom contract', () => {
     expect(formatZoomLabel(2.5)).toBe('2.50x');
     expect(formatZoomLabel(100)).toBe(`${ZOOM_MAX.toFixed(2)}x`);
     expect(formatZoomLabel(0)).toBe(`${ZOOM_MIN.toFixed(2)}x`);
+  });
+});
+
+describe('feat/stellar-zoom-amplify — amplitude expansion', () => {
+  it('widens ZOOM_MIN / ZOOM_MAX to a 10x camera-distance swing', () => {
+    // sync's [0.25, 4] gave a 16:1 max swing but realistic 3-5 wheel
+    // clicks only spanned ~1.5x distance. amplify pushes the bounds to
+    // [0.1, 10] so the user can pull all the way out to the starfield
+    // and dive into the cluster core. The contract is the absolute
+    // numeric value — pinned here so future refactors can't quietly
+    // narrow the range and reintroduce the "수치만 바뀌고 안 움직임" repro.
+    expect(ZOOM_MIN).toBe(0.1);
+    expect(ZOOM_MAX).toBe(10);
+  });
+
+  it('WHEEL_ZOOM_FACTOR is 1.25 — 25% per notch for visible deltas', () => {
+    // sync shipped with a 1.1 per-notch factor; PO repro: "수치만 바뀜".
+    // 1.25 (25% per click) means 3 clicks ≈ 2x distance, which IS
+    // visible on the canvas.
+    expect(WHEEL_ZOOM_FACTOR).toBe(1.25);
+  });
+
+  it('formatZoomLabel rolls past the old 4.00x ceiling on the way to 10.00x', () => {
+    // The new ceiling must show in the readout exactly — no display
+    // formula is allowed to silently cap at the old 4x.
+    expect(formatZoomLabel(8)).toBe('8.00x');
+    expect(formatZoomLabel(10)).toBe('10.00x');
+    // And the new floor 0.10x is reachable, not stuck at the old 0.25.
+    expect(formatZoomLabel(0.1)).toBe('0.10x');
+  });
+});
+
+describe('computeNodeCentroid', () => {
+  it('returns the unweighted centroid for evenly weighted nodes', () => {
+    const c = computeNodeCentroid([
+      { x: 10, y: 0, z: 0 },
+      { x: -10, y: 0, z: 0 },
+      { x: 0, y: 10, z: 0 },
+      { x: 0, y: -10, z: 0 },
+    ]);
+    expect(c).not.toBeNull();
+    expect(c?.x).toBeCloseTo(0, 5);
+    expect(c?.y).toBeCloseTo(0, 5);
+    expect(c?.z).toBeCloseTo(0, 5);
+  });
+
+  it('weights heavy hubs harder so the centroid drifts toward dense nodes', () => {
+    // One node sits at (100, 0, 0) with weight 9; three counterweights
+    // at (-10, 0, 0) with weight 1 each. The weighted centroid lands
+    // closer to the heavy hub than the geometric centre. This matches
+    // the visual centre the eye reads — applyZoom's lookAt target.
+    const c = computeNodeCentroid([
+      { x: 100, y: 0, z: 0, weight: 9 },
+      { x: -10, y: 0, z: 0, weight: 1 },
+      { x: -10, y: 0, z: 0, weight: 1 },
+      { x: -10, y: 0, z: 0, weight: 1 },
+    ]);
+    expect(c).not.toBeNull();
+    // weighted mean = (100*9 + -10*3) / 12 = 870/12 = 72.5
+    expect(c?.x).toBeCloseTo(72.5, 3);
+  });
+
+  it('returns null when no node has a placed position (cold start)', () => {
+    // d3-force hasn't run yet → no x/y/z assigned → applyZoom must
+    // fall back to origin instead of NaNing the camera position.
+    expect(computeNodeCentroid([])).toBeNull();
+    expect(computeNodeCentroid([{ weight: 1 }, { weight: 2 }])).toBeNull();
+    // All-zero positions also count as "not yet placed" — d3-force
+    // initialises positions to small jitter, so an exact (0,0,0) is
+    // overwhelmingly "not placed".
+    expect(
+      computeNodeCentroid([
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0 },
+      ]),
+    ).toBeNull();
   });
 });
 
