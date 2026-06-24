@@ -13,11 +13,15 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  ZOOM_MAX,
+  ZOOM_MIN,
+  clampZoom,
   computeCenterStrength,
   computeChargeStrength,
   computeInitialCameraDistance,
   computeLinkDistance,
   computeNodeSizeFloor,
+  formatZoomLabel,
 } from '@/components/StellarGraph';
 
 describe('computeChargeStrength', () => {
@@ -109,6 +113,50 @@ describe('computeNodeSizeFloor', () => {
       expect(Number.isFinite(v)).toBe(true);
       expect(v).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('feat/stellar-zoom-sync — unified zoom contract', () => {
+  it('exposes finite ZOOM_MIN / ZOOM_MAX with MIN < 1 < MAX', () => {
+    // The "1.00x" rest position must sit strictly inside the clamp band;
+    // otherwise the +/- buttons would arrive disabled on first paint.
+    expect(Number.isFinite(ZOOM_MIN)).toBe(true);
+    expect(Number.isFinite(ZOOM_MAX)).toBe(true);
+    expect(ZOOM_MIN).toBeLessThan(1);
+    expect(ZOOM_MAX).toBeGreaterThan(1);
+  });
+
+  it('clampZoom holds in-band values unchanged', () => {
+    expect(clampZoom(1)).toBe(1);
+    expect(clampZoom(0.5)).toBe(0.5);
+    expect(clampZoom(3)).toBe(3);
+    expect(clampZoom(ZOOM_MIN)).toBe(ZOOM_MIN);
+    expect(clampZoom(ZOOM_MAX)).toBe(ZOOM_MAX);
+  });
+
+  it('clampZoom rejects the PO-repro 100x wheel overshoot', () => {
+    // PO live evidence: mouse wheel was driving the readout past 100x while
+    // the camera was visually frozen. The unified clamp must catch that
+    // before it reaches the readout, regardless of which path computed it.
+    expect(clampZoom(100)).toBe(ZOOM_MAX);
+    expect(clampZoom(9999)).toBe(ZOOM_MAX);
+    expect(clampZoom(0)).toBe(ZOOM_MIN);
+    expect(clampZoom(-50)).toBe(ZOOM_MIN);
+  });
+
+  it('clampZoom returns 1.0 for non-finite input (defensive)', () => {
+    expect(clampZoom(Number.NaN)).toBe(1);
+    expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(clampZoom(Number.NEGATIVE_INFINITY)).toBe(1);
+  });
+
+  it('formatZoomLabel uses the same clamp as the underlying state', () => {
+    // The readout cannot show a value that the +/- buttons can't reach;
+    // wheel-driven and button-driven zoom share this string formula.
+    expect(formatZoomLabel(1)).toBe('1.00x');
+    expect(formatZoomLabel(2.5)).toBe('2.50x');
+    expect(formatZoomLabel(100)).toBe(`${ZOOM_MAX.toFixed(2)}x`);
+    expect(formatZoomLabel(0)).toBe(`${ZOOM_MIN.toFixed(2)}x`);
   });
 });
 
