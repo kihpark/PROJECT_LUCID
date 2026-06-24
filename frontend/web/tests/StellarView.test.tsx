@@ -138,28 +138,148 @@ describe('StellarView', () => {
     expect(screen.getByTestId('mock-renderer')).toBeInTheDocument();
   });
 
-  it('hover is a no-op (no floating tooltip); click opens the side fact panel', async () => {
-    // stellar-zoom-recover — the floating HoverTooltip was removed
-    // because it duplicated the FocusPanel info while the side panel
-    // was open (the "2중 표시" PO repro). Hover still passes through
-    // to the renderer's onNodeHover prop, but the parent treats it as
-    // a no-op; only click → focus opens the side panel.
+  it('hover renders a floating tooltip; click opens the side fact panel (coexist)', async () => {
+    // feat/stellar-hover-restore-by-type — hover is BACK but is now a
+    // lightweight preview that branches on fact_type. The side panel
+    // stays the click surface; both can render at once (peek + read).
     render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
-    // Bind the callbacks must have been passed.
     expect(typeof lastRendererProps.current.onNodeHover).toBe('function');
     expect(typeof lastRendererProps.current.onNodeClick).toBe('function');
 
-    // Simulate hover by clicking the mock "hover" button → no tooltip,
-    // no side panel.
-    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    // Default state — no tooltip, no side panel.
     expect(screen.queryByTestId('stellar-hover-tooltip')).not.toBeInTheDocument();
     expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
 
-    // Simulate click → side panel opens.
+    // Hover fake-1 (action by default) → tooltip up.
+    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    const tip = await screen.findByTestId('stellar-hover-tooltip');
+    expect(tip).toBeInTheDocument();
+    expect(tip.getAttribute('data-fact-type')).toBe('action');
+
+    // Click → side panel opens, tooltip still allowed to stay (coexist).
     fireEvent.click(screen.getByTestId('mock-fire-click'));
     await waitFor(() => expect(screen.getByTestId('stellar-fact-drawer')).toBeInTheDocument());
-    // Still no floating tooltip even while a node is focused.
-    expect(screen.queryByTestId('stellar-hover-tooltip')).not.toBeInTheDocument();
+    expect(screen.getByTestId('stellar-hover-tooltip')).toBeInTheDocument();
+  });
+
+  it('hover tooltip — ACTION fact: subject → predicate(KO) → object', () => {
+    function actionBuilder(): StellarGraphData {
+      return {
+        nodes: [
+          {
+            id: 'a-1',
+            label: '한국은행 · 환율 변동성',
+            cluster: 0,
+            weight: 3,
+            x: 0,
+            y: 0,
+            z: 0,
+            subject: '한국은행',
+            predicate: 'is_examining',
+            object: '환율 변동성',
+            fact_type: 'action',
+          },
+        ],
+        links: [],
+        clusters: ['금융'],
+      };
+    }
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={actionBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    const tip = screen.getByTestId('stellar-hover-tooltip');
+    expect(tip.getAttribute('data-fact-type')).toBe('action');
+    expect(screen.getByTestId('stellar-hover-tooltip-head').textContent).toBe('한국은행');
+    // predicate 'is_examining' maps to '검토 중인 것은' via predicateLabel.
+    expect(screen.getByTestId('stellar-hover-tooltip-mid').textContent).toContain('→');
+    expect(screen.getByTestId('stellar-hover-tooltip-mid').textContent).toContain('검토 중인 것은');
+    expect(screen.getByTestId('stellar-hover-tooltip-body').textContent).toBe('환율 변동성');
+    // Action has no footer (only measurement uses it).
+    expect(screen.queryByTestId('stellar-hover-tooltip-foot')).not.toBeInTheDocument();
+  });
+
+  it('hover tooltip — CLAIM fact: speaker [speech_act]: content', () => {
+    function claimBuilder(): StellarGraphData {
+      return {
+        nodes: [
+          {
+            id: 'c-1',
+            label: '한국은행 발언',
+            cluster: 0,
+            weight: 1,
+            x: 0,
+            y: 0,
+            z: 0,
+            subject: '한국은행',
+            predicate: 'states',
+            object: '환율 변동성 상승 가능성',
+            fact_type: 'claim',
+            speaker_label: '한국은행',
+            speech_act: '발표했다',
+            content_claim: '환율 변동성 상승 가능성',
+          },
+        ],
+        links: [],
+        clusters: ['금융'],
+      };
+    }
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={claimBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    const tip = screen.getByTestId('stellar-hover-tooltip');
+    expect(tip.getAttribute('data-fact-type')).toBe('claim');
+    // Speaker on the head, bracketed speech_act on the mid, content on the body.
+    expect(screen.getByTestId('stellar-hover-tooltip-head').textContent).toBe('한국은행');
+    expect(screen.getByTestId('stellar-hover-tooltip-mid').textContent).toBe('[발표했다]');
+    expect(screen.getByTestId('stellar-hover-tooltip-body').textContent).toBe(
+      '환율 변동성 상승 가능성',
+    );
+    expect(screen.queryByTestId('stellar-hover-tooltip-foot')).not.toBeInTheDocument();
+  });
+
+  it('hover tooltip — MEASUREMENT fact: metric = value unit (as_of footer)', () => {
+    function measurementBuilder(): StellarGraphData {
+      return {
+        nodes: [
+          {
+            id: 'm-1',
+            label: 'MAU = 8억',
+            cluster: 0,
+            weight: 1,
+            x: 0,
+            y: 0,
+            z: 0,
+            subject: 'Meta',
+            predicate: 'has_metric',
+            object: '8억 명',
+            fact_type: 'measurement',
+            metric: 'MAU',
+            measurement_value: 800_000_000,
+            measurement_unit: '명',
+            as_of: '2026-03',
+          },
+        ],
+        links: [],
+        clusters: ['빅테크'],
+      };
+    }
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={measurementBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    const tip = screen.getByTestId('stellar-hover-tooltip');
+    expect(tip.getAttribute('data-fact-type')).toBe('measurement');
+    expect(screen.getByTestId('stellar-hover-tooltip-head').textContent).toBe('MAU');
+    expect(screen.getByTestId('stellar-hover-tooltip-mid').textContent).toBe('=');
+    expect(screen.getByTestId('stellar-hover-tooltip-body').textContent).toBe('800000000 명');
+    // Measurement IS the only shape with a footer (as_of).
+    expect(screen.getByTestId('stellar-hover-tooltip-foot').textContent).toBe('2026-03');
+  });
+
+  it('hover tooltip + side panel can coexist (hover = peek, click = read)', async () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    await waitFor(() => expect(screen.getByTestId('stellar-fact-drawer')).toBeInTheDocument());
+    // Hover ALSO emits a tooltip while the side panel is open.
+    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    expect(screen.getByTestId('stellar-hover-tooltip')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-fact-drawer')).toBeInTheDocument();
   });
 
   // B-62-v1 — focus mode tests.
