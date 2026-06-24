@@ -319,6 +319,18 @@ export interface FactDetailHeader {
   retracted_at?: string | null;
   retracted_by?: string | null;
   edit_history?: unknown[];
+  // fact-display-unification — mirror RecallFact's fact_type layer
+  // fields so the Recall detail modal can render the same badge +
+  // strip that the list card does. Legacy docs leave these undefined
+  // and the shared FactTypeBadge / FactTypeStrip early-return null.
+  fact_type?: 'action' | 'claim' | 'measurement' | null;
+  speaker_label?: string | null;
+  speech_act?: string | null;
+  content_claim?: string | null;
+  metric?: string | null;
+  measurement_value?: number | null;
+  measurement_unit?: string | null;
+  as_of?: string | null;
 }
 
 export interface FactDetailEntity {

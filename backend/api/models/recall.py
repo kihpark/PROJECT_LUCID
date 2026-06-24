@@ -213,7 +213,17 @@ class RecallFacets(LucidBaseModel):
 # ---------------------------------------------------------------------------
 
 class FactDetailHeader(LucidBaseModel):
-    """The fact's own row, rendered with labels already resolved."""
+    """The fact's own row, rendered with labels already resolved.
+
+    fact-display-unification — fact_type / claim-layer / measurement-
+    layer fields are mirrored here so the Recall detail modal can render
+    the same [CLAIM]/[MEASUREMENT] badge + speaker/speech_act/content
+    strip (or metric/value/unit/as_of strip) that Decide and the Recall
+    list already do. Without this, the modal would silently render a
+    measurement fact as a plain SPO arrow row — the (d) divergence PO
+    escalated. All fields are Optional with None defaults so legacy
+    docs that pre-date the layer fields don't crash the response.
+    """
 
     fact_uid: str
     claim: str
@@ -227,6 +237,15 @@ class FactDetailHeader(LucidBaseModel):
     retracted_at: datetime | None = None
     retracted_by: str | None = None
     edit_history: list[dict] = Field(default_factory=list)
+    # fact-display-unification: layer fields. Mirrors RecallFact above.
+    fact_type: str | None = None
+    speaker_label: str | None = None
+    speech_act: str | None = None
+    content_claim: str | None = None
+    metric: str | None = None
+    measurement_value: float | None = None
+    measurement_unit: str | None = None
+    as_of: str | None = None
 
 
 class FactDetailEntity(LucidBaseModel):

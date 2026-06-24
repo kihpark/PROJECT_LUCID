@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { RecallView } from '@/components/RecallView';
 import type { RecallResponse } from '@/lib/types';
 
@@ -2154,6 +2154,234 @@ describe('RecallView — fact_type summary box + pagination', () => {
     // Claim and measurement rows are filtered out.
     expect(screen.queryByTestId('recall-fact-c-modern')).toBeNull();
     expect(screen.queryByTestId('recall-fact-m-modern')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fact-display-unification — regression guards.
+//
+// PO escalation (2026-06-24): Decide and Recall used to render fact cards
+// via TWO completely separate components, so the same fact looked totally
+// different. This block pins three things:
+//   (a) Recall list card renders the shared [CLAIM] / [MEASUREMENT] badge
+//       AND the per-type strip (speaker / metric) — same surface Decide
+//       has had since v0.2.0 step 1/2.
+//   (b) Legacy facts (fact_type undefined / null) render with NO badge
+//       and NO strip — back-compat guard for the dominant case.
+//   (c) Recall list card and Recall detail modal both render the layer
+//       signal so the same fact is consistent across all three surfaces.
+// ---------------------------------------------------------------------------
+
+describe('RecallView — fact-display-unification (Recall card uses shared badge+strip)', () => {
+  const search = async () => {
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '검색' },
+    });
+    // The "Recall" string appears in multiple places (heading + button);
+    // pin to the submit button specifically.
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('recall-signature')).toBeInTheDocument(),
+    );
+  };
+
+  it('renders [CLAIM] badge + speaker/speech_act/content strip on the recall card', async () => {
+    const response: RecallResponse = {
+      signature: 'sig',
+      total: 1,
+      facts: [
+        {
+          fact_uid: 'fn-claim-r1',
+          claim: '한국은행이 WGBI 추종자금 관련 발언을 했다.',
+          claim_en: null,
+          subject_uid: 'obj-bok',
+          predicate: 'said',
+          object_value: 'wgbi-statement',
+          source_uids: [],
+          validated_at: new Date('2026-06-01T10:00:00Z').toISOString(),
+          validator_id: 'u',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.9,
+          fact_type: 'claim',
+          speaker_label: '한국은행',
+          speech_act: '말했다',
+          content_claim: 'WGBI 추종자금이 들어왔다.',
+        },
+      ],
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response);
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    // Shared badge present on the recall card.
+    expect(screen.getByTestId('fact-claim-badge-fn-claim-r1')).toBeInTheDocument();
+    // Shared strip carries the PO format markers.
+    const strip = screen.getByTestId('fact-claim-strip-fn-claim-r1');
+    const speaker = strip.querySelector('strong');
+    expect(speaker).not.toBeNull();
+    expect(speaker!.textContent).toBe('한국은행');
+    expect(speaker!.className).toMatch(/font-bold/);
+    expect(strip.textContent).toContain('[말했다]:');
+    expect(strip.textContent).toContain('“WGBI 추종자금이 들어왔다.”');
+  });
+
+  it('renders [MEASUREMENT] badge + metric/value/unit/as_of strip on the recall card', async () => {
+    const response: RecallResponse = {
+      signature: 'sig',
+      total: 1,
+      facts: [
+        {
+          fact_uid: 'fn-measure-r1',
+          claim: 'ChatGPT MAU 는 8억 명이다.',
+          claim_en: null,
+          subject_uid: 'obj-cgpt',
+          predicate: 'has_metric',
+          object_value: '800000000',
+          source_uids: [],
+          validated_at: new Date('2026-06-01T10:00:00Z').toISOString(),
+          validator_id: 'u',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.9,
+          fact_type: 'measurement',
+          metric: 'MAU',
+          measurement_value: 800000000,
+          measurement_unit: '명',
+          as_of: '2026-03',
+        },
+      ],
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response);
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    expect(screen.getByTestId('fact-measurement-badge-fn-measure-r1')).toBeInTheDocument();
+    const strip = screen.getByTestId('fact-measurement-strip-fn-measure-r1');
+    expect(strip).toHaveTextContent('MAU');
+    expect(strip).toHaveTextContent('명');
+    expect(strip).toHaveTextContent('2026-03');
+    expect(screen.getByTestId('fact-measurement-prefix-fn-measure-r1')).toHaveTextContent('[MEASUREMENT]');
+  });
+
+  it('legacy facts (fact_type undefined) render with NO badge and NO strip on recall card', async () => {
+    const response: RecallResponse = {
+      signature: 'sig',
+      total: 1,
+      facts: [
+        {
+          fact_uid: 'fn-legacy',
+          claim: '레거시 사실',
+          claim_en: null,
+          subject_uid: 'obj-x',
+          predicate: 'did',
+          object_value: 'y',
+          source_uids: [],
+          validated_at: new Date('2026-06-01T10:00:00Z').toISOString(),
+          validator_id: 'u',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.9,
+          // No fact_type field — legacy case.
+        },
+      ],
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response);
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    // Card renders, but no fact_type signal.
+    expect(screen.getByTestId('recall-fact-fn-legacy')).toBeInTheDocument();
+    expect(screen.queryByTestId('fact-claim-badge-fn-legacy')).toBeNull();
+    expect(screen.queryByTestId('fact-measurement-badge-fn-legacy')).toBeNull();
+    expect(screen.queryByTestId('fact-claim-strip-fn-legacy')).toBeNull();
+    expect(screen.queryByTestId('fact-measurement-strip-fn-legacy')).toBeNull();
+  });
+
+  it('detail modal renders [MEASUREMENT] badge + strip when the fact is a measurement', async () => {
+    // PO (d) — the modal used to render a measurement fact as a plain
+    // SPO arrow row with no badge / no strip. After unification + the
+    // FactDetailHeader wire widening, the modal must carry the same
+    // signal as the list card.
+    const response: RecallResponse = {
+      signature: 'sig',
+      total: 1,
+      facts: [
+        {
+          fact_uid: 'fn-modal-measure',
+          claim: '검색 결과',
+          claim_en: null,
+          subject_uid: 'obj-cgpt',
+          predicate: 'has_metric',
+          object_value: '800000000',
+          source_uids: [],
+          validated_at: new Date('2026-06-01T10:00:00Z').toISOString(),
+          validator_id: 'u',
+          validation_method: 'manual',
+          knowledge_space_id: 'ks-1',
+          negation_flag: false,
+          negation_scope: null,
+          score: 0.9,
+          fact_type: 'measurement',
+          metric: 'MAU',
+          measurement_value: 800000000,
+          measurement_unit: '명',
+          as_of: '2026-03',
+        },
+      ],
+    };
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response);
+    (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fact: {
+        fact_uid: 'fn-modal-measure',
+        claim: 'ChatGPT MAU 는 8억 명이다.',
+        claim_en: null,
+        subject_uid: 'obj-cgpt',
+        subject_label: 'ChatGPT',
+        predicate: 'has_metric',
+        object_value: '800000000',
+        object_label: null,
+        validated_at: new Date('2026-06-01T10:00:00Z').toISOString(),
+        // fact-display-unification — layer fields on the modal wire.
+        fact_type: 'measurement',
+        metric: 'MAU',
+        measurement_value: 800000000,
+        measurement_unit: '명',
+        as_of: '2026-03',
+      },
+      entities: [],
+      sources: [],
+    });
+    render(<RecallView spaceId="ks-1" />);
+    await search();
+
+    // Open the detail modal.
+    fireEvent.click(
+      screen.getByTestId('recall-fact-fn-modal-measure-open-detail'),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('fact-detail-modal')).toBeInTheDocument(),
+    );
+
+    // Modal carries the shared badge AND the shared strip. Both the
+    // card and modal render the same factUid, so scope queries to the
+    // modal subtree to avoid the duplicate-testid match.
+    const modal = screen.getByTestId('fact-detail-modal');
+    expect(
+      within(modal).getByTestId('fact-measurement-badge-fn-modal-measure'),
+    ).toBeInTheDocument();
+    const strip = within(modal).getByTestId(
+      'fact-measurement-strip-fn-modal-measure',
+    );
+    expect(strip).toHaveTextContent('MAU');
+    expect(strip).toHaveTextContent('명');
+    expect(strip).toHaveTextContent('2026-03');
   });
 });
 

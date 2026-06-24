@@ -43,6 +43,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ActionButton } from './ActionButton';
+import { FactTypeBadge, FactTypeStrip } from './FactCard';
 import {
   recall as apiRecall,
   ApiError,
@@ -173,6 +174,13 @@ function RecallFactCard({
         <div className="flex items-center gap-2">
           <MatchKindBadge kind={fact.match_kind} />
           <ContradictionBadge count={contradictionCount} />
+          {/* fact-display-unification — shared FactTypeBadge so Recall
+              renders the [CLAIM]/[MEASUREMENT] signal identically to
+              Decide. Early-returns null for action / legacy facts so the
+              header chrome is unchanged for the dominant case. The
+              MatchKindBadge ("유사도 매치"/"엔티티 연결") is preserved as
+              recall-specific metadata. */}
+          <FactTypeBadge factType={fact.fact_type} factUid={fact.fact_uid} />
         </div>
         <span
           className="font-mono text-xxs text-text-muted"
@@ -215,6 +223,14 @@ function RecallFactCard({
           )}
         </p>
       )}
+      {/* fact-display-unification — shared FactTypeStrip so Recall
+          renders the same speaker/speech_act/content_claim strip (for
+          claim facts) or metric/value/unit/as_of strip (for measurement
+          facts) that Decide does. The strip itself owns the PO claim-
+          format spec (bold speaker, [speech_act]:, "content_claim").
+          Early-returns null for action / legacy facts so the dominant
+          case stays a plain SPO. */}
+      <FactTypeStrip fact={fact} factUid={fact.fact_uid} lang="kr" />
       <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-2 mb-3">
         <div>
           <dt className="opacity-60">subject</dt>
@@ -692,9 +708,16 @@ function FactDetailModal({
               철회된 사실 · {new Date(fact.retracted_at!).toLocaleString()}
             </p>
           )}
-          <p className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-2">
-            Fact 상세
-          </p>
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <p className="text-xxs uppercase tracking-wider text-text-muted font-mono">
+              Fact 상세
+            </p>
+            {/* fact-display-unification (d) — shared FactTypeBadge next
+                to the eyebrow so the modal carries the same [CLAIM] /
+                [MEASUREMENT] signal that the list card does. Legacy
+                facts (action / undefined) early-return null. */}
+            <FactTypeBadge factType={fact.fact_type} factUid={fact.fact_uid} />
+          </div>
           {/* feat/recall-card-original-claim — same pipe-artefact repair
               as the recall card title; the detail hero is the same surface
               from the user's POV. */}
@@ -733,6 +756,18 @@ function FactDetailModal({
               {fact.claim_en}
             </p>
           )}
+          {/* fact-display-unification (d) — shared FactTypeStrip between
+              the claim hero and the 관계 section. For claim facts this
+              renders the PO format (bold speaker, [speech_act]:, "content");
+              for measurement facts it renders the [MEASUREMENT] metric =
+              value unit (as_of) summary. The metric is intentionally NOT
+              folded into the S → P → O arrow row below — the strip is the
+              single place numeric measurement renders, matching how Decide
+              and the Recall list already work. Legacy / action facts early-
+              return null so the modal chrome is unchanged. */}
+          <div className="mt-3">
+            <FactTypeStrip fact={fact} factUid={fact.fact_uid} lang="kr" />
+          </div>
         </header>
 
         {/* S → P → O relationship — read mode renders the chip row;

@@ -1280,6 +1280,19 @@ def _build_fact_detail(
         retracted_at=fact_doc.get("retracted_at"),
         retracted_by=fact_doc.get("retracted_by"),
         edit_history=list(fact_doc.get("edit_history") or []),
+        # fact-display-unification — pass through the fact_type layer
+        # fields the Recall list already exposes via RecallFact so the
+        # detail modal can render the same [CLAIM]/[MEASUREMENT] badge
+        # + per-type strip. Legacy docs leave each field None and the
+        # frontend FactTypeBadge/FactTypeStrip early-return.
+        fact_type=fact_doc.get("fact_type"),
+        speaker_label=fact_doc.get("speaker_label"),
+        speech_act=fact_doc.get("speech_act"),
+        content_claim=fact_doc.get("content_claim"),
+        metric=fact_doc.get("metric"),
+        measurement_value=fact_doc.get("measurement_value"),
+        measurement_unit=fact_doc.get("measurement_unit"),
+        as_of=fact_doc.get("as_of"),
     )
 
     return FactDetailResponse(fact=header, entities=entities, sources=sources)
