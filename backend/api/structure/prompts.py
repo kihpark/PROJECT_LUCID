@@ -23,6 +23,8 @@ NEGATION_TOKENS_KO = (
 
 
 SYSTEM_PROMPT = """\
+# prompt v0.2.0-classification-recovery (force fact_type emission)
+
 You are the Structure stage of Lucid, a validated-knowledge-graph
 system. Your job is to decompose a piece of merged_text (an article
 body, a transcript, a highlighted selection, an image description,
@@ -347,6 +349,27 @@ If the text contains nothing decomposable into AtomicFacts, return:
 
 # Output format — strict JSON
 
+## MANDATORY FIELDS PER FACT (★ v0.2.0):
+
+각 fact 객체는 다음 필드를 **반드시** 포함:
+
+  - "fact_type": "action" | "claim" | "measurement"  ← REQUIRED, 누락 금지
+
+If fact_type == "claim", these ADDITIONAL fields are MANDATORY:
+  - "speaker_label": <발화 주체, 한국어 surface>
+  - "speech_act":    <발화 동사 그대로, e.g. "밝혔다", "주장했다">
+  - "content_claim": <발화 내용 문장>
+  - "stance":        "supportive" | "critical" | "neutral" | "mixed" | "unknown"
+
+If fact_type == "measurement", these ADDITIONAL fields are MANDATORY:
+  - "metric":            <측정 대상, 한정어 포함>
+  - "measurement_value": <number>
+  - "measurement_unit":  <단위 문자열>
+  - "as_of":             <시점 ISO 또는 null>
+
+DO NOT OMIT fact_type. If you cannot decide between claim and measurement,
+default to "action". Omitting fact_type is a parse failure.
+
 Reply with ONE JSON object matching this schema exactly. Do NOT wrap
 it in markdown fences. Do NOT include any prose outside the JSON.
 
@@ -441,12 +464,18 @@ FEW_SHOT_EXAMPLES = [
                  "claim": "Daniel Kahneman published Prospect Theory in 1979.",
                  "subject_uid": "obj-1", "predicate": "published",
                  "object_value": "Prospect Theory", "negation_flag": False,
-                 "negation_scope": None, "tags_suggested": ["1979"]},
+                 "negation_scope": None, "tags_suggested": ["1979"],
+                 "fact_type": "action"},
                 {"uid": "fn-2", "type": "proposition",
                  "claim": "프로스펙트 이론에서 손실 회피 계수는 평균 2.25다.",
                  "subject_uid": "obj-2", "predicate": "평균이다",
                  "object_value": "2.25", "negation_flag": False,
-                 "negation_scope": None, "tags_suggested": []},
+                 "negation_scope": None, "tags_suggested": [],
+                 "fact_type": "measurement",
+                 "metric": "loss aversion coefficient",
+                 "measurement_value": 2.25,
+                 "measurement_unit": None,
+                 "as_of": None},
             ],
             "fact_object_links": [
                 {"fact_uid": "fn-1", "object_uid": "obj-1",
@@ -480,7 +509,8 @@ FEW_SHOT_EXAMPLES = [
                  "subject_uid": "obj-1", "predicate": "적용되지 않는다",
                  "object_value": "군사 분야",
                  "negation_flag": True, "negation_scope": "partial",
-                 "tags_suggested": ["EU", "military"]},
+                 "tags_suggested": ["EU", "military"],
+                 "fact_type": "action"},
             ],
             "fact_object_links": [
                 {"fact_uid": "fn-1", "object_uid": "obj-1",
@@ -506,9 +536,9 @@ FEW_SHOT_EXAMPLES = [
             "failure_reason": "opinion_content",
         },
     },
-    {'input': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '한국은행', 'name_en': 'Bank of Korea', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '기준금리', 'name_en': 'base interest rate', 'properties': {'value': 3.0, 'unit': 'percent', 'as_of': '2024-12'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'subject_uid': 'obj-1', 'predicate': '기준금리였다', 'object_value': '3.0%', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2024-12']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
-    {'input': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다. 반도체 부문이 흑자로 전환했고, 디스플레이는 흑자가 축소되었다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성전자', 'name_en': 'Samsung Electronics', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '영업이익', 'name_en': 'operating profit', 'properties': {'value': 23, 'unit': '조원', 'period': '2023Q4'}}, {'uid': 'obj-3', 'class': 'knowledge', 'name': '반도체 부문', 'name_en': 'semiconductor segment', 'properties': {}}, {'uid': 'obj-4', 'class': 'knowledge', 'name': '디스플레이 부문', 'name_en': 'display segment', 'properties': {}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다.', 'subject_uid': 'obj-1', 'predicate': '기록했다', 'object_value': '23조원', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2023Q4']}, {'uid': 'fn-2', 'type': 'proposition', 'claim': '반도체 부문이 흑자로 전환했다.', 'subject_uid': 'obj-3', 'predicate': '전환했다', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}, {'uid': 'fn-3', 'type': 'proposition', 'claim': '디스플레이는 흑자가 축소되었다.', 'subject_uid': 'obj-4', 'predicate': '축소되었다', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}, {'fact_uid': 'fn-2', 'object_uid': 'obj-3', 'link_type': 'describes_state', 'properties': {}}, {'fact_uid': 'fn-3', 'object_uid': 'obj-4', 'link_type': 'describes_state', 'properties': {}}], 'fact_fact_links': [{'from_uid': 'fn-2', 'to_uid': 'fn-1', 'link_type': 'supports'}, {'from_uid': 'fn-3', 'to_uid': 'fn-1', 'link_type': 'supports'}], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
-    {'input': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성', 'name_en': 'Samsung', 'properties': {'founded_year': 1938, 'country': 'Korea', 'type': 'conglomerate'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'subject_uid': 'obj-1', 'predicate': '설립되었다', 'object_value': '1938년', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '1938', 'conglomerate']}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [{'fact_uid': 'fn-1', 'mention_text': '삼성', 'candidate_object_uids': [], 'scores': []}], 'extraction_status': 'success', 'failure_reason': None}},
+    {'input': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '한국은행', 'name_en': 'Bank of Korea', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '기준금리', 'name_en': 'base interest rate', 'properties': {'value': 3.0, 'unit': 'percent', 'as_of': '2024-12'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '한국은행 기준금리는 2024년 12월 기준 3.0%였다.', 'subject_uid': 'obj-1', 'predicate': '기준금리였다', 'object_value': '3.0%', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2024-12'], 'fact_type': 'measurement', 'metric': '한국은행 기준금리', 'measurement_value': 3.0, 'measurement_unit': '%', 'as_of': '2024-12'}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
+    {'input': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다. 반도체 부문이 흑자로 전환했고, 디스플레이는 흑자가 축소되었다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성전자', 'name_en': 'Samsung Electronics', 'properties': {}}, {'uid': 'obj-2', 'class': 'metric', 'name': '영업이익', 'name_en': 'operating profit', 'properties': {'value': 23, 'unit': '조원', 'period': '2023Q4'}}, {'uid': 'obj-3', 'class': 'knowledge', 'name': '반도체 부문', 'name_en': 'semiconductor segment', 'properties': {}}, {'uid': 'obj-4', 'class': 'knowledge', 'name': '디스플레이 부문', 'name_en': 'display segment', 'properties': {}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성전자는 2023년 4분기에 23조 원의 영업이익을 기록했다.', 'subject_uid': 'obj-1', 'predicate': '기록했다', 'object_value': '23조원', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '2023Q4'], 'fact_type': 'measurement', 'metric': '삼성전자 영업이익', 'measurement_value': 23, 'measurement_unit': '조원', 'as_of': '2023-Q4'}, {'uid': 'fn-2', 'type': 'proposition', 'claim': '반도체 부문이 흑자로 전환했다.', 'subject_uid': 'obj-3', 'predicate': '전환했다', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR'], 'fact_type': 'action'}, {'uid': 'fn-3', 'type': 'proposition', 'claim': '디스플레이는 흑자가 축소되었다.', 'subject_uid': 'obj-4', 'predicate': '축소되었다', 'object_value': '흑자', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR'], 'fact_type': 'action'}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}, {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}}, {'fact_uid': 'fn-2', 'object_uid': 'obj-3', 'link_type': 'describes_state', 'properties': {}}, {'fact_uid': 'fn-3', 'object_uid': 'obj-4', 'link_type': 'describes_state', 'properties': {}}], 'fact_fact_links': [{'from_uid': 'fn-2', 'to_uid': 'fn-1', 'link_type': 'supports'}, {'from_uid': 'fn-3', 'to_uid': 'fn-1', 'link_type': 'supports'}], 'disambiguation_candidates': [], 'extraction_status': 'success', 'failure_reason': None}},
+    {'input': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'output': {'objects': [{'uid': 'obj-1', 'class': 'organization', 'name': '삼성', 'name_en': 'Samsung', 'properties': {'founded_year': 1938, 'country': 'Korea', 'type': 'conglomerate'}}], 'facts': [{'uid': 'fn-1', 'type': 'proposition', 'claim': '삼성은 1938년에 설립된 한국의 대기업 그룹이다.', 'subject_uid': 'obj-1', 'predicate': '설립되었다', 'object_value': '1938년', 'negation_flag': False, 'negation_scope': None, 'tags_suggested': ['KR', '1938', 'conglomerate'], 'fact_type': 'action'}], 'fact_object_links': [{'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}}], 'fact_fact_links': [], 'disambiguation_candidates': [{'fact_uid': 'fn-1', 'mention_text': '삼성', 'candidate_object_uids': [], 'scores': []}], 'extraction_status': 'success', 'failure_reason': None}},
     # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim few-shots.
     # The classifier should learn (a) action default; (b) claim
     # with speaker_label + speech_act + content_claim + stance; (c)
