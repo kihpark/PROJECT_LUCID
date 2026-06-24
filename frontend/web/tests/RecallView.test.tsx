@@ -12,6 +12,8 @@ vi.mock('@/lib/api', () => ({
   detachSource: vi.fn(),
   // feat/fact-detail-modify — surface-field PATCH
   modifyFact: vi.fn(),
+  // feat/recall-search-entity-autocomplete — entity suggestion API
+  searchEntitySuggestions: vi.fn(),
   ApiError: class extends Error {
     status = 0;
     detail: string | undefined;
@@ -2382,6 +2384,102 @@ describe('RecallView — fact-display-unification (Recall card uses shared badge
     expect(strip).toHaveTextContent('MAU');
     expect(strip).toHaveTextContent('명');
     expect(strip).toHaveTextContent('2026-03');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// feat/recall-search-entity-autocomplete — PO dogfood directive 2026-06-24.
+//
+// The Recall search input now surfaces an entity autocomplete dropdown
+// backed by the same /entities/suggest endpoint that FactCard's subject /
+// object chip autocomplete uses. PO's "type 한, see 한국은행, click, get
+// the recall" — picking a suggestion fills the input AND fires Recall
+// immediately. Keyboard support: ↑↓ to move, Enter to pick, Esc to close.
+// ---------------------------------------------------------------------------
+
+describe('RecallView entity autocomplete', () => {
+  beforeEach(() => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockReset();
+  });
+
+  it('does not fetch suggestions when the input is empty (initial mount)', async () => {
+    render(<RecallView spaceId="ks-1" />);
+    // Wait a tick to let any debounce fire — it should not.
+    await new Promise((r) => setTimeout(r, 250));
+    expect(api.searchEntitySuggestions).not.toHaveBeenCalled();
+  });
+
+  it('fetches and renders entity suggestions as the user types', async () => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'obj-bok', primary_label: '한국은행', primary_lang: 'ko', score: 8.2 },
+      { entity_id: 'obj-kr', primary_label: '한국', primary_lang: 'ko', score: 5.1 },
+    ]);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '한' },
+    });
+    await waitFor(() => expect(api.searchEntitySuggestions).toHaveBeenCalled());
+    expect(await screen.findByTestId('recall-entity-suggestions')).toBeInTheDocument();
+    expect(await screen.findByTestId('recall-entity-suggestion-obj-bok')).toHaveTextContent('한국은행');
+  });
+
+  it('clicking a suggestion fills the input and fires Recall with the picked label', async () => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'obj-bok', primary_label: '한국은행', primary_lang: 'ko', score: 8.2 },
+    ]);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValue(RECALL_HIT);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '한' },
+    });
+    const item = await screen.findByTestId('recall-entity-suggestion-obj-bok');
+    fireEvent.mouseDown(item);
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const recallCall = (api.recall as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(recallCall[1]).toBe('한국은행');
+    // Suggestions dropdown closes after pick.
+    await waitFor(() =>
+      expect(screen.queryByTestId('recall-entity-suggestions')).toBeNull(),
+    );
+  });
+
+  it('arrow keys move the active suggestion, Enter picks it', async () => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'obj-a', primary_label: '한국은행', primary_lang: 'ko', score: 8.2 },
+      { entity_id: 'obj-b', primary_label: '한국전력', primary_lang: 'ko', score: 6.0 },
+    ]);
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValue(RECALL_HIT);
+    render(<RecallView spaceId="ks-1" />);
+    const input = screen.getByLabelText('recall query');
+    fireEvent.change(input, { target: { value: '한' } });
+    await screen.findByTestId('recall-entity-suggestions');
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    // Second item should now be active.
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('recall-entity-suggestion-obj-b'),
+      ).toHaveAttribute('data-active', 'true');
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(api.recall).toHaveBeenCalled());
+    const recallCall = (api.recall as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(recallCall[1]).toBe('한국전력');
+  });
+
+  it('Esc closes the suggestions dropdown', async () => {
+    (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'obj-a', primary_label: '한국은행', primary_lang: 'ko', score: 8.2 },
+    ]);
+    render(<RecallView spaceId="ks-1" />);
+    const input = screen.getByLabelText('recall query');
+    fireEvent.change(input, { target: { value: '한' } });
+    await screen.findByTestId('recall-entity-suggestions');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByTestId('recall-entity-suggestions')).toBeNull(),
+    );
   });
 });
 
