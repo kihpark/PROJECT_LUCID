@@ -10,8 +10,11 @@ def test_nine_few_shot_examples_total():
     Action vs Claim split (action / claim-neutral / claim-critical)
     → 9.
     v0.2.0 step 2 (fact-measurement-layer-v1) appends 2 more for the
-    Measurement bucket (MAU + 실업률) → 11 total."""
-    assert len(FEW_SHOT_EXAMPLES) == 11
+    Measurement bucket (MAU + 실업률) → 11.
+    v0.2.0 step 2.5 (feat/measurement-completeness) appends 2 more for
+    rich-metric completeness (노사) + as_of-disambiguation (적용) → 13.
+    """
+    assert len(FEW_SHOT_EXAMPLES) == 13
 
 
 def test_ko_statistic_example_present():

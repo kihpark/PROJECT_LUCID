@@ -1687,6 +1687,57 @@ describe('FactCard — measurement (v0.2.0 step 2)', () => {
     expect(screen.getByTestId('fact-measurement-value-fn-zero')).toHaveTextContent('0');
   });
 
+  // v0.2.0 step 2.5 (feat/measurement-completeness, PO 2026-06-24):
+  // chip + 원문 동반. The measurement strip ([MEASUREMENT] ...) must
+  // coexist with the original claim sentence — never replace it. PO
+  // directive: surface = faithful, structure = metadata on top. The
+  // [MEASUREMENT] prefix establishes the strip as a derived view.
+  it('renders BOTH the original claim AND the measurement strip (chip+claim coexist)', () => {
+    const onChange = vi.fn();
+    render(
+      <FactCard fact={measurementFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    // Original claim sentence must be in the DOM
+    const claimNode = screen.getByTestId('fact-claim-fn-measure-1');
+    expect(claimNode.textContent).toContain('ChatGPT');
+    expect(claimNode.textContent).toContain('8억 명');
+    expect(claimNode.textContent).toContain('2026년 3월');
+    // And the measurement strip is ALSO present, prefixed with [MEASUREMENT]
+    expect(screen.getByTestId('fact-measurement-strip-fn-measure-1')).toBeInTheDocument();
+    expect(screen.getByTestId('fact-measurement-prefix-fn-measure-1')).toHaveTextContent('[MEASUREMENT]');
+  });
+
+  it('renders the PO 노사 case with verbatim claim alongside the [MEASUREMENT] chip', () => {
+    // PO's verbatim live evidence (2026-06-24). The 원문 must be visible
+    // ON THE CARD — chip+strip cannot replace the sentence the user saw
+    // in the source article.
+    const onChange = vi.fn();
+    const nosoFact: FactSummary = {
+      ...baseFact,
+      fact_uid: 'fn-noso',
+      fact_type: 'measurement',
+      claim: '노사 양측의 최초 요구안 차이는 시급 기준 1680원이다.',
+      metric: '노사 양측의 최초 요구안 차이 (시급 기준)',
+      measurement_value: 1680,
+      measurement_unit: '원',
+      as_of: null,
+    };
+    render(
+      <FactCard fact={nosoFact} action="accept" lang="kr" onChange={onChange} />,
+    );
+    // Original claim
+    const claimNode = screen.getByTestId('fact-claim-fn-noso');
+    expect(claimNode.textContent).toContain('노사 양측의');
+    expect(claimNode.textContent).toContain('시급 기준');
+    expect(claimNode.textContent).toContain('1680원');
+    // Chip prefix + rich metric
+    expect(screen.getByTestId('fact-measurement-prefix-fn-noso')).toHaveTextContent('[MEASUREMENT]');
+    const metricNode = screen.getByTestId('fact-measurement-metric-fn-noso');
+    expect(metricNode.textContent).toContain('노사 양측의 최초 요구안 차이');
+    // null as_of must NOT render the (...) wrapper
+    expect(screen.queryByTestId('fact-measurement-asof-fn-noso')).toBeNull();
+  });
+
   it('renders strip with only metric + as_of (no value/unit) when LLM partial', () => {
     // Defensive: if the LLM tags fact_type='measurement' but only
     // emits metric + as_of (unit / value extracted poorly), the strip

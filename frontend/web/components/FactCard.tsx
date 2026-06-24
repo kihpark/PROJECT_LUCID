@@ -535,11 +535,19 @@ export function FactCard({
 
       {/* v0.2.0 step 2 (fact-measurement-layer-v1) — metric / value /
           unit / as_of strip. Only renders for measurement facts.
-          Format example: "MAU = 800,000,000 명 (2026-03)".
+          Format example: "[MEASUREMENT] MAU = 800,000,000 명 (2026-03)".
           Locale formatting (`toLocaleString`) puts thousands separators
           on the value so 8e8 reads as "800,000,000" not "800000000".
           Strict mono-font keeps the value-unit-timepoint alignment
-          stable regardless of UI lang. */}
+          stable regardless of UI lang.
+
+          v0.2.0 step 2.5 (feat/measurement-completeness, PO 2026-06-24):
+          the explicit "[MEASUREMENT]" prefix establishes the strip as a
+          derived chip-style summary, not a replacement for the original
+          claim sentence rendered above (line 499). PO directive:
+          surface = faithful, structure = metadata on top. The claim
+          MUST coexist with the strip; the prefix makes the visual
+          relationship unambiguous. */}
       {!isEditing && fact.fact_type === 'measurement'
         && (
           fact.metric
@@ -553,6 +561,12 @@ export function FactCard({
           className="text-sm text-text-secondary mb-3 pl-7 font-mono"
           lang={lang === 'kr' ? 'ko' : 'en'}
         >
+          <span
+            data-testid={`fact-measurement-prefix-${factUid}`}
+            className="mr-2 opacity-60"
+          >
+            [MEASUREMENT]
+          </span>
           {fact.metric && (
             <span
               data-testid={`fact-measurement-metric-${factUid}`}

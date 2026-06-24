@@ -147,3 +147,110 @@ def check_completeness(
             f"missing tokens: {missing[:5]}"
         ),
     }
+
+
+def _value_as_token(value: float | int | None) -> str:
+    """Render a measurement_value as the token a faithful tokenizer
+    would see in the claim. Integers print as bare ints ("1680"), floats
+    print as their string ("3.4"). The tokenizer drops 1-char tokens so
+    purely-decimal "3.4" survives but "0" would not be matched — that
+    is acceptable because zero values rarely anchor coverage anyway.
+    """
+    if value is None:
+        return ""
+    # Float that is integer-valued → render without .0 so "1680" matches
+    # the claim's "1680원" → "1680" token after particle strip.
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def check_measurement_completeness(
+    claim: str,
+    metric: str | None,
+    measurement_value: float | int | None,
+    measurement_unit: str | None,
+    as_of: str | None,
+    entity_label: str | None = None,
+    *,
+    coverage_threshold: float = 0.7,
+) -> dict[str, object]:
+    """Sibling of `check_completeness` for measurement facts.
+
+    PO directive (2026-06-24, feat/measurement-completeness):
+      "metric 은 한정어를 통째로 포함하세요. 빈약한 토막 금지."
+
+    The measurement quadruple `(entity_label, metric, value, unit, as_of)`
+    must cover the claim's content tokens — same coverage approach the
+    SPO validator uses for action / claim facts. When the LLM drops the
+    主체 ("노사 양측의") or 기준 ("시급 기준") qualifier from `metric`,
+    those tokens go missing from the quad and the coverage falls below
+    threshold → fact flagged for HITL.
+
+    Notes:
+      * Empty claim → vacuously complete (parallel to `check_completeness`).
+      * `entity_label` is the subject/measured-entity surface (subject_label
+        or corrected_subject_label from the processor). Including it lets
+        the validator pass when the article says "삼성전자 매출 70조 원"
+        and metric="매출", because "삼성전자" lives in entity_label.
+      * `measurement_value` is rendered the way it appears in the claim:
+        integer-valued floats print without ".0". "원", "%", "%" etc.
+        live in `measurement_unit`.
+      * `as_of` may legitimately be `None` (the application-time case PO
+        flagged: "2027년 적용 ..." with as_of=null). The quad still passes
+        if other parts of the surface (claim tokens "2027", "적용") line
+        up against entity_label / metric — i.e. correct null as_of with
+        rich metric is the happy path.
+    """
+    if not claim:
+        return {
+            "complete": True,
+            "missing": [],
+            "coverage": 1.0,
+            "reason": "empty_claim",
+        }
+    claim_tokens = _content_tokens(claim)
+    if not claim_tokens:
+        return {
+            "complete": True,
+            "missing": [],
+            "coverage": 1.0,
+            "reason": "no_content_tokens",
+        }
+
+    parts: list[str] = []
+    if metric:
+        parts.append(metric)
+    if measurement_unit:
+        parts.append(measurement_unit)
+    if as_of:
+        parts.append(as_of)
+    if entity_label:
+        parts.append(entity_label)
+    value_token = _value_as_token(measurement_value)
+    if value_token:
+        parts.append(value_token)
+
+    quad_text = " ".join(parts)
+    quad_tokens = _content_tokens(quad_text)
+
+    missing = sorted(t for t in claim_tokens if t not in quad_tokens)
+    coverage = 1.0 - (len(missing) / len(claim_tokens))
+
+    if coverage >= coverage_threshold:
+        return {
+            "complete": True,
+            "missing": missing,
+            "coverage": coverage,
+            "reason": "ok",
+        }
+
+    return {
+        "complete": False,
+        "missing": missing,
+        "coverage": coverage,
+        "reason": (
+            f"measurement coverage {coverage:.2f} < {coverage_threshold:.2f}; "
+            f"missing tokens: {missing[:5]}"
+        ),
+    }
