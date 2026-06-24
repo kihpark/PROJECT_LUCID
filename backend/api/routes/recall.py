@@ -1014,6 +1014,12 @@ def recall(
 
     facets = _facets_for([f.fact_uid for f in facts], str(ks.id))
 
+    # feat/fact-contradiction-detection-v1 (v0.2.0 step 3): bulk-load
+    # contradiction counts for the visible page in a single Postgres
+    # query and project onto each RecallFact. Degrades quietly — if the
+    # query fails, contradiction_count stays 0 and the FE shows no badge.
+    facts = _project_contradiction_counts(facts)
+
     return RecallResponse(
         signature=SIGNATURE_HIT_TEMPLATE.format(n=len(facts)),
         facts=facts,
@@ -1022,6 +1028,38 @@ def recall(
         entity_brief=brief,
         facets=facets,
     )
+
+
+def _project_contradiction_counts(facts: list[RecallFact]) -> list[RecallFact]:
+    """Bulk-load CONTRADICTS edges for the page and project onto each
+    RecallFact. One Postgres query regardless of page size."""
+    if not facts:
+        return facts
+    try:
+        from api.structure.contradiction_detector import (
+            count_contradictions_for_facts,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: contradiction detector import failed: %s", exc)
+        return facts
+
+    session = _new_session()
+    try:
+        counts = count_contradictions_for_facts(
+            session, [f.fact_uid for f in facts],
+        )
+    except Exception as exc:  # noqa: BLE001 — degrade quietly
+        logger.warning("recall: contradiction count lookup failed: %s", exc)
+        return facts
+    finally:
+        session.close()
+
+    if not counts:
+        return facts
+    return [
+        f.model_copy(update={"contradiction_count": counts.get(f.fact_uid, 0)})
+        for f in facts
+    ]
 
 
 # ---------------------------------------------------------------------------

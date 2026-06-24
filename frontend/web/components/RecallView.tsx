@@ -128,12 +128,29 @@ function MatchKindBadge({ kind }: { kind: 'embedding' | 'entity_link' | undefine
   );
 }
 
+// v0.2.0 step 3 (fact-contradiction-detection-v1): subtle amber badge
+// (NOT red — detection-only, no resolution UI yet). Renders only when
+// the server reports a positive contradiction_count on the fact.
+function ContradictionBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      data-testid="recall-badge-contradiction"
+      className="rounded-full bg-amber-100 text-amber-900 border border-amber-400 px-2 py-0.5 text-xxs font-mono"
+      title="이 사실은 같은 KS의 다른 사실과 모순됩니다. 자동 해소는 아직 없습니다."
+    >
+      ⚠ 모순 {count}건
+    </span>
+  );
+}
+
 function RecallFactCard({
   fact, onOpenDetail,
 }: { fact: RecallFact; onOpenDetail?: (factUid: string) => void }) {
   const sourceUrls = fact.source_uids.filter((s) => s.startsWith('http'));
   const subjectDisplay = resolveLabel(fact.subject_uid, fact.subject_label);
   const objectDisplay = resolveLabel(fact.object_value, fact.object_label);
+  const contradictionCount = fact.contradiction_count ?? 0;
   // feat/recall-card-original-claim — PO directive 7.
   // Prefer the original claim verbatim; if `claim` is missing or is the
   // legacy pipe artefact, fall back to a natural S → P → O surface and
@@ -152,7 +169,10 @@ function RecallFactCard({
       className="rounded-lg border border-border-subtle bg-bg-card p-4 mb-3"
     >
       <header className="flex items-center justify-between mb-2">
-        <MatchKindBadge kind={fact.match_kind} />
+        <div className="flex items-center gap-2">
+          <MatchKindBadge kind={fact.match_kind} />
+          <ContradictionBadge count={contradictionCount} />
+        </div>
         <span
           className="font-mono text-xxs text-text-muted"
           title="kNN cosine score"
