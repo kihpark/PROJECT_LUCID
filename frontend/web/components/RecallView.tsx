@@ -41,7 +41,7 @@
  *     no behaviour change was made to the existing panels.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActionButton } from './ActionButton';
 import { FactTypeBadge, FactTypeStrip } from './FactCard';
 import {
@@ -52,11 +52,13 @@ import {
   modifyFact as apiModifyFact,
   restoreFact as apiRestoreFact,
   retractFact as apiRetractFact,
+  searchEntitySuggestions,
 } from '@/lib/api';
 import { predicateLabel } from '@/lib/predicateLabels';
 import type {
   EntityBrief,
   EntityFacetItem,
+  EntitySuggestion,
   FactDetailResponse,
   FactTypeFacets,
   ModifyFactRequest,
@@ -1729,6 +1731,22 @@ function persistMode(mode: RecallMode): void {
   }
 }
 
+// feat/recall-search-entity-autocomplete — same 200ms debounce shape as
+// FactCard.useDebounce but renamed to avoid a future merge collision if
+// either file moves the hook into a shared module. Body intentionally
+// identical: setTimeout / clearTimeout, no console.debug since this is
+// a search-input path (high-frequency) and we don't want devtools noise.
+function useRecallDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setDebounced(value);
+    }, delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
 export function RecallView({ spaceId }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
@@ -1752,6 +1770,22 @@ export function RecallView({ spaceId }: Props) {
   // renders the first `displayLimit` facts of `visibleFacts`; "더 보기"
   // bumps it by PAGE_SIZE. Resets on each new query + on filter flip.
   const [displayLimit, setDisplayLimit] = useState<number>(PAGE_SIZE);
+
+  // feat/recall-search-entity-autocomplete — PO dogfood directive 2026-06-24:
+  // "Recall에서 사용자가 타이핑 할때 엔티티 자동 완성하는 기능 원래 있지 않았나?"
+  // The dropdown surfaces entity suggestions from the same ES-backed
+  // /entities/suggest endpoint that FactCard's subject/object chip
+  // autocomplete uses. Clicking a suggestion fills the input AND
+  // triggers Recall immediately — that's the whole point: "type 한, see
+  // 한국은행, click, get the recall". Keyboard support: ↑↓ to move,
+  // Enter to pick (falls through to form submit if no item highlighted),
+  // Esc to close.
+  const [suggestions, setSuggestions] = useState<EntitySuggestion[]>([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState<number>(-1);
+  const [userTyped, setUserTyped] = useState(false);
+  const debouncedQuery = useRecallDebounce(query, 200);
+  const suggestionsContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const stored = loadStoredMode();
@@ -1837,6 +1871,39 @@ export function RecallView({ spaceId }: Props) {
     setDisplayLimit(PAGE_SIZE);
   }, [factTypeFilter, controls.keyword2, controls.claimOnly, controls.measurementOnly, controls.matchKinds.entity_link]);
 
+  // Fetch suggestions whenever the debounced query changes. Guards:
+  //   · only fire on user-typed input (not the initial mount or a click-
+  //     applied suggestion which sets the query programmatically);
+  //   · skip when query is empty;
+  //   · skip when query length is 0 (we keep length>=1 for Korean — a
+  //     single hangul block can be a meaningful prefix);
+  //   · cancel via a flag so a slow response from an old keystroke
+  //     doesn't overwrite the newer one.
+  useEffect(() => {
+    if (!userTyped) return;
+    const q = debouncedQuery.trim();
+    if (!q) {
+      setSuggestions([]);
+      setSuggestionsOpen(false);
+      setActiveSuggestionIdx(-1);
+      return;
+    }
+    let cancelled = false;
+    searchEntitySuggestions(q, spaceId, 8)
+      .then((items) => {
+        if (cancelled) return;
+        setSuggestions(items);
+        setSuggestionsOpen(items.length > 0);
+        setActiveSuggestionIdx(-1);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSuggestions([]);
+        setSuggestionsOpen(false);
+      });
+    return () => { cancelled = true; };
+  }, [debouncedQuery, spaceId, userTyped]);
+
   const onToggleFactType = (kind: FactTypeKey) => {
     setFactTypeFilter((prev) => (prev === kind ? null : kind));
   };
@@ -1905,6 +1972,45 @@ export function RecallView({ spaceId }: Props) {
     setFactTypeFilter(null);
     setDisplayLimit(PAGE_SIZE);
     await runRecall(q, []);
+  };
+
+  // feat/recall-search-entity-autocomplete — pick a suggestion: fill
+  // the input AND fire recall against the picked label immediately.
+  // The userTyped flag is reset so the suggestion-fetch effect doesn't
+  // refire on the programmatic setQuery and reopen the dropdown.
+  const onPickSuggestion = async (s: EntitySuggestion) => {
+    const picked = s.primary_label;
+    setQuery(picked);
+    setSuggestions([]);
+    setSuggestionsOpen(false);
+    setActiveSuggestionIdx(-1);
+    setUserTyped(false);  // suppress the next fetch (programmatic set)
+    setSubmittedQuery(picked);
+    setActiveEntities([]);
+    setFactTypeFilter(null);
+    setDisplayLimit(PAGE_SIZE);
+    await runRecall(picked, []);
+  };
+
+  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!suggestionsOpen || suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveSuggestionIdx((idx) => (idx + 1) % suggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveSuggestionIdx((idx) => (idx <= 0 ? suggestions.length - 1 : idx - 1));
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setSuggestionsOpen(false);
+      setActiveSuggestionIdx(-1);
+    } else if (e.key === 'Enter' && activeSuggestionIdx >= 0) {
+      e.preventDefault();
+      void onPickSuggestion(suggestions[activeSuggestionIdx]);
+    }
+    // Enter with no active idx falls through to the form's onSubmit
+    // (normal recall search of the literal query text). That's the
+    // existing behaviour; don't preventDefault here.
   };
 
   const onToggleEntity = (uid: string) => {
@@ -2066,14 +2172,74 @@ export function RecallView({ spaceId }: Props) {
       </header>
 
       <form onSubmit={onSubmit} className="flex gap-2 mb-4">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="질문을 입력하세요 (Ko/En)"
-          className="flex-1 rounded-md border border-border-subtle bg-bg-card p-2 text-sm focus:outline-none focus:border-accent-cool"
-          aria-label="recall query"
-        />
+        <div className="relative flex-1" ref={suggestionsContainerRef}>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setUserTyped(true);
+            }}
+            onKeyDown={onSearchKeyDown}
+            onFocus={() => {
+              if (suggestions.length > 0) setSuggestionsOpen(true);
+            }}
+            onBlur={() => {
+              // Delay so a click on a suggestion item registers before the
+              // dropdown unmounts (mousedown on the li would otherwise be
+              // cancelled by the input losing focus).
+              setTimeout(() => setSuggestionsOpen(false), 120);
+            }}
+            placeholder="질문을 입력하세요 (Ko/En)"
+            className="w-full rounded-md border border-border-subtle bg-bg-card p-2 text-sm focus:outline-none focus:border-accent-cool"
+            aria-label="recall query"
+            aria-autocomplete="list"
+            aria-expanded={suggestionsOpen}
+            aria-controls="recall-entity-suggestions"
+            autoComplete="off"
+          />
+          {suggestionsOpen && suggestions.length > 0 && (
+            <ul
+              id="recall-entity-suggestions"
+              role="listbox"
+              data-testid="recall-entity-suggestions"
+              className="absolute z-30 mt-1 w-full max-h-72 overflow-y-auto rounded-md border border-border-subtle bg-bg-elevated shadow-lg"
+            >
+              {suggestions.map((s, idx) => {
+                const active = idx === activeSuggestionIdx;
+                return (
+                  <li
+                    key={s.entity_id}
+                    role="option"
+                    aria-selected={active}
+                    data-testid={`recall-entity-suggestion-${s.entity_id}`}
+                    data-active={active ? 'true' : 'false'}
+                    onMouseDown={(e) => {
+                      // mousedown (not click) so the input's onBlur doesn't
+                      // close the dropdown before the pick fires.
+                      e.preventDefault();
+                      void onPickSuggestion(s);
+                    }}
+                    onMouseEnter={() => setActiveSuggestionIdx(idx)}
+                    className={[
+                      'flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer',
+                      active
+                        ? 'bg-accent-cool/15 text-accent-cool'
+                        : 'hover:bg-bg-card/60 text-text-primary',
+                    ].join(' ')}
+                  >
+                    <span className="truncate" lang={s.primary_lang || undefined}>
+                      {s.primary_label}
+                    </span>
+                    <span className="font-mono text-xxs text-text-muted opacity-70 shrink-0">
+                      {s.primary_lang || '?'}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
         <ActionButton type="submit" variant="primary" disabled={busy || !query.trim()}>
           {busy ? '검색 중…' : 'Recall'}
         </ActionButton>
