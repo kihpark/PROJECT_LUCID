@@ -302,11 +302,19 @@ def _hit_to_fact(hit: dict[str, Any]) -> RecallFact | None:
             # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim.
             # `fact_type` defaults to None on legacy docs; FactCard
             # treats null as 'action' (no badge, no claim strip).
+            #
+            # v0.2.0 step 2 (fact-measurement-layer-v1): measurement
+            # bucket adds 4 more null-safe fields (metric / value /
+            # unit / as_of). Null on action / claim / legacy docs.
             fact_type=source.get("fact_type"),
             speaker_label=source.get("speaker_label"),
             speech_act=source.get("speech_act"),
             content_claim=source.get("content_claim"),
             stance=source.get("stance"),
+            metric=source.get("metric"),
+            measurement_value=source.get("measurement_value"),
+            measurement_unit=source.get("measurement_unit"),
+            as_of=source.get("as_of"),
         )
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning("recall: malformed fact source dropped: %s", exc)
@@ -755,13 +763,14 @@ def _facets_for(
         for b in predicates_buckets if b.get("key")
     ]
 
-    # v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim bucket
-    # counts. Bucket keys outside {'action', 'claim'} are ignored —
-    # a defensive guard against any future legacy values landing in
-    # the index from out-of-band tooling.
+    # v0.2.0 step 1/2 — Action / Claim / Measurement bucket counts.
+    # Bucket keys outside {'action', 'claim', 'measurement'} are
+    # ignored — defensive guard against any future legacy values
+    # landing in the index from out-of-band tooling.
     fact_type_buckets = (aggs.get("fact_types") or {}).get("buckets", [])
     ft_action = 0
     ft_claim = 0
+    ft_measurement = 0
     for b in fact_type_buckets:
         key = b.get("key")
         doc_count = int(b.get("doc_count") or 0)
@@ -769,7 +778,11 @@ def _facets_for(
             ft_action += doc_count
         elif key == "claim":
             ft_claim += doc_count
-    fact_types = FactTypeFacets(action=ft_action, claim=ft_claim)
+        elif key == "measurement":
+            ft_measurement += doc_count
+    fact_types = FactTypeFacets(
+        action=ft_action, claim=ft_claim, measurement=ft_measurement,
+    )
 
     if not counts:
         return RecallFacets(predicates=predicates, fact_types=fact_types)

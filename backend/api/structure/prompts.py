@@ -171,11 +171,11 @@ Run these IN ORDER on the input text:
               NOT   "predicate":"raised_funding"           # English on Korean
               NOT   "object_value":"75 billion USD"        # translation
 
-  Step 2c. RULE — fact 유형 분류 (Action vs Claim — v0.2.0 step 1):
+  Step 2c. RULE — fact 유형 분류 (Action / Claim / Measurement — v0.2.0 step 2):
 
-          각 fact 가 다음 둘 중 어디에 속하는지 분류하세요. fact_type 필드.
+          각 fact 가 다음 셋 중 어디에 속하는지 분류하세요. fact_type 필드.
 
-            - action: 사건/행위 — "X가 Y를 했다"
+            - action: 사건/행위 — "X가 Y를 했다", "X가 발표했다"
             - claim:  발화/주장/관측 — "X가 ~라고 말했다",
                                        "X가 ~할 것이라 전망했다"
 
@@ -189,12 +189,51 @@ Run these IN ORDER on the input text:
                 - content_claim: 발화 내용 (한국어 문장)
                 - stance:        supportive | critical | neutral | mixed | unknown
 
+            - measurement: 시점에 매인 수치값 —
+                "X 의 metric 은 시점에 value unit 이다/이었다"
+
+              핵심: as_of(시점). 같은 metric 의 여러 시점 → 시계열.
+              조건: numeric value + unit + (가능시) as_of 시점 명시.
+
+              예: "ChatGPT 의 MAU 는 2026년 3월 8억 명이다"
+                  → fact_type='measurement', metric='MAU',
+                    measurement_value=800000000, measurement_unit='명',
+                    as_of='2026-03'
+              예: "삼성전자가 2026년 1분기에 매출 70조 원을 기록했다"
+                  → fact_type='measurement', metric='매출',
+                    measurement_value=70, measurement_unit='조 원',
+                    as_of='2026-Q1'
+              예: "2026년 6월 미국 실업률은 3.4%였다"
+                  → fact_type='measurement', metric='실업률',
+                    measurement_value=3.4, measurement_unit='%',
+                    as_of='2026-06'
+
+              fact_type='measurement' 이면 추가 필드:
+                - metric:            측정 대상 (한국어 자연어 — "MAU",
+                                     "매출", "실업률", "사용자 수")
+                - measurement_value: 숫자 (float; 단위는 따로)
+                - measurement_unit:  단위 (자연어 — "명", "조 원", "%",
+                                     "달러")
+                - as_of:             시점 (ISO 권장 — "2026", "2026-03",
+                                     "2026-Q1", "2026-03-23")
+                - entity (subject_uid 활용): 측정 대상 엔티티
+
+              metric / measurement_unit / as_of 는 강제 enum 없음 —
+              원문 표기 그대로 자연어 OK.
+
           분류 가이드:
             - 동사 '발표했다', '추가했다', '올렸다', '발사했다' = action
             - 동사 '밝혔다', '주장했다', '말했다', '전망했다',
                   '예측했다', '논평했다' = claim
             - "X가 [Y는 ...]고 말했다" = claim (content 분명)
-            - 한 문장에서 둘 다 나오면 별도 fact 두 개
+            - 동사 '이다/있다/기록했다/달성했다' + 숫자 + 단위 = measurement
+            - 시점 (분기/년/월/일) 명시 + 측정값 = measurement 핵심
+            - "10곳을 올렸다" 같은 행위 + 숫자 = action (object 안 수량)
+            - "발표했다" + 수치 (publisher action) = action
+              (발표 행위 자체가 핵심, 수치는 발표 내용)
+            - 수치이지만 시점 없음 + entity 의 상태 = measurement 약함
+              (action 으로 fallback OK)
+            - 한 문장에서 둘 이상 나오면 별도 fact 두 개 이상
 
   Step 3. Decompose every assertion into one or more AtomicFact
           candidates (proposition or procedure). Each fact must be a
@@ -313,6 +352,17 @@ it in markdown fences. Do NOT include any prose outside the JSON.
   //   "content_claim": "디지털자산기본법 제정에 속도를 낼 것",
   //   "stance": "neutral"   // supportive | critical | neutral | mixed | unknown
   // speech_act is open natural-language — DO NOT force into an enum.
+  //
+  // v0.2.0 step 2 — when fact_type == "measurement", emit these extra
+  // fields (omit them entirely for action / claim facts):
+  //   "fact_type": "measurement",
+  //   "metric": "MAU",
+  //   "measurement_value": 800000000,
+  //   "measurement_unit": "명",
+  //   "as_of": "2026-03"
+  // metric / measurement_unit / as_of are open natural-language strings —
+  // DO NOT force into enums. as_of accepts year / year-month / quarter /
+  // date granularity ("2026" / "2026-03" / "2026-Q1" / "2026-03-23").
   "fact_object_links": [
     {
       "fact_uid": "fn-1",
@@ -504,6 +554,69 @@ FEW_SHOT_EXAMPLES = [
             'fact_object_links': [
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'addresses', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # v0.2.0 step 2 (fact-measurement-layer-v1): measurement few-shots.
+    # The classifier should learn (a) numeric value + unit + as_of timepoint =
+    # fact_type='measurement'; (b) metric / measurement_unit / as_of are open
+    # Korean strings — no enum at extraction time. The measurement object is
+    # ALSO recorded in the objects array (class='metric') so it can be linked
+    # via asserts_property — same pattern as the existing
+    # behavioral-economics + samsung few-shots above.
+    {
+        'input': 'ChatGPT 의 MAU 는 2026년 3월 기준 8억 명이다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'service', 'name': 'ChatGPT', 'name_en': 'ChatGPT', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'metric', 'name': 'MAU', 'name_en': 'monthly active users', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': 'ChatGPT 의 MAU 는 2026년 3월 기준 8억 명이다.',
+                 'subject_uid': 'obj-1', 'predicate': 'MAU 이다',
+                 'object_value': '8억 명',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR', '2026-03', 'MAU'],
+                 'fact_type': 'measurement',
+                 'metric': 'MAU',
+                 'measurement_value': 800000000,
+                 'measurement_unit': '명',
+                 'as_of': '2026-03'},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    {
+        'input': '2026년 6월 미국 실업률은 3.4%였다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'place', 'name': '미국', 'name_en': 'United States', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'metric', 'name': '실업률', 'name_en': 'unemployment rate', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '2026년 6월 미국 실업률은 3.4%였다.',
+                 'subject_uid': 'obj-1', 'predicate': '실업률이었다',
+                 'object_value': '3.4%',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR', '2026-06', '실업률'],
+                 'fact_type': 'measurement',
+                 'metric': '실업률',
+                 'measurement_value': 3.4,
+                 'measurement_unit': '%',
+                 'as_of': '2026-06'},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}},
             ],
             'fact_fact_links': [], 'disambiguation_candidates': [],
             'extraction_status': 'success', 'failure_reason': None,

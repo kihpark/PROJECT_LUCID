@@ -1050,6 +1050,10 @@ interface SearchControlsState {
   // v0.2.0 step 1 (fact-claim-layer-v1) — display-only filter that
   // hides action rows so the user can drill into "who said what" only.
   claimOnly: boolean;
+  // v0.2.0 step 2 (fact-measurement-layer-v1) — display-only filter
+  // that hides non-measurement rows so the user can drill into the
+  // verified time-series moat (numeric values pinned to a timepoint).
+  measurementOnly: boolean;
 }
 
 const DEFAULT_CONTROLS: SearchControlsState = {
@@ -1059,6 +1063,7 @@ const DEFAULT_CONTROLS: SearchControlsState = {
   matchKinds: { embedding: true, entity_link: true },
   keyword2: '',
   claimOnly: false,
+  measurementOnly: false,
 };
 
 // B-50-fix (PO A direction): `matchKinds` is no longer a server param.
@@ -1219,6 +1224,31 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
             onChange={(e) => onChange({ ...state, claimOnly: e.target.checked })}
           />
           <span>💬 화자 인용만 (claim)</span>
+        </label>
+      </div>
+
+      {/* v0.2.0 step 2 (fact-measurement-layer-v1) — 수치 (measurement)
+          filter. Same client-side display-only contract as claimOnly.
+          Toggling does NOT re-query the server; it filters the rendered
+          list down to fact_type='measurement' rows so the user can browse
+          the verified time-series moat (metric / value / unit / as_of)
+          without the action / claim noise. */}
+      <div className="mb-4">
+        <h3 className="text-xs font-medium mb-1">수치</h3>
+        <p className="text-xxs text-text-muted font-mono mb-1">
+          결과 표시 필터 (서버 재검색 없음)
+        </p>
+        <label
+          data-testid="control-measurement-only"
+          className="flex items-center gap-2 text-xs py-0.5"
+        >
+          <input
+            type="checkbox"
+            checked={state.measurementOnly}
+            data-testid="control-measurement-only-checkbox"
+            onChange={(e) => onChange({ ...state, measurementOnly: e.target.checked })}
+          />
+          <span>📊 수치만 (measurement)</span>
         </label>
       </div>
 
@@ -1488,12 +1518,21 @@ export function RecallView({ spaceId }: Props) {
     if (controls.claimOnly) {
       out = out.filter((f) => f.fact_type === 'claim');
     }
+    // v0.2.0 step 2 (fact-measurement-layer-v1) — hide non-measurement
+    // rows when the 수치만 chip is on. claimOnly + measurementOnly
+    // together is intentionally permissive (intersection empty unless
+    // a fact carries both tags — vanishingly rare); the UX is "either
+    // chip filters to its own bucket".
+    if (controls.measurementOnly) {
+      out = out.filter((f) => f.fact_type === 'measurement');
+    }
     return out;
   }, [
     sortedFacts,
     controls.keyword2,
     controls.matchKinds.entity_link,
     controls.claimOnly,
+    controls.measurementOnly,
   ]);
 
   // Build the "active filter chips" view: walk the current facets to

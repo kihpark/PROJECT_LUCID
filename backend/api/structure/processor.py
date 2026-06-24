@@ -555,6 +555,15 @@ def _serialize_struct_fact(
     d.setdefault("speech_act", d.get("speech_act"))
     d.setdefault("content_claim", d.get("content_claim"))
     d.setdefault("stance", d.get("stance"))
+    # v0.2.0 step 2 (fact-measurement-layer-v1): measurement-only
+    # fields. Same null-safe pattern as the claim-only block above
+    # — non-measurement docs emit None for all four, and the FactCard
+    # branches on `fact_type=='measurement'` before reading them.
+    # measurement_value is float (or None); ES `double` carries it.
+    d.setdefault("metric", d.get("metric"))
+    d.setdefault("measurement_value", d.get("measurement_value"))
+    d.setdefault("measurement_unit", d.get("measurement_unit"))
+    d.setdefault("as_of", d.get("as_of"))
     # feat/spo-decide-payload-wire (PO 2026-06-23): propagate the
     # corrected canonical surface from `match_per_object` so the
     # Decide UI sees the brand-canonical / claim-recovered form (not

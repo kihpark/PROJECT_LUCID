@@ -8,8 +8,10 @@ def test_nine_few_shot_examples_total():
     """PR-3-1 shipped 3, PR-3-2 appended 3 → 6.
     v0.2.0 step 1 (fact-claim-layer-v1) appends 3 more for the
     Action vs Claim split (action / claim-neutral / claim-critical)
-    → 9 total."""
-    assert len(FEW_SHOT_EXAMPLES) == 9
+    → 9.
+    v0.2.0 step 2 (fact-measurement-layer-v1) appends 2 more for the
+    Measurement bucket (MAU + 실업률) → 11 total."""
+    assert len(FEW_SHOT_EXAMPLES) == 11
 
 
 def test_ko_statistic_example_present():

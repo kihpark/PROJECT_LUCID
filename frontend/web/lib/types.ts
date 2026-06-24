@@ -24,12 +24,18 @@ export interface FactSummary {
   tags_suggested?: string[];
   // v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split. Null
   // / undefined on legacy facts — FactCard treats absence as 'action'.
-  fact_type?: 'action' | 'claim' | null;
+  // v0.2.0 step 2 (fact-measurement-layer-v1): 3rd bucket adds metric /
+  // value / unit / as_of for numeric facts pinned to a timepoint.
+  fact_type?: 'action' | 'claim' | 'measurement' | null;
   speaker_uid?: string | null;
   speaker_label?: string | null;
   speech_act?: string | null;
   content_claim?: string | null;
   stance?: string | null;
+  metric?: string | null;
+  measurement_value?: number | null;
+  measurement_unit?: string | null;
+  as_of?: string | null;
 }
 
 export interface ObjectSummary {
@@ -203,12 +209,18 @@ export interface RecallFact {
   predicate_label?: string | null;
   // v0.2.0 step 1 (fact-claim-layer-v1): Action vs Claim split. Null
   // on legacy facts; the FactCard treats absence as 'action'.
-  fact_type?: 'action' | 'claim' | null;
+  // v0.2.0 step 2 (fact-measurement-layer-v1): 3rd bucket adds metric /
+  // value / unit / as_of for numeric facts pinned to a timepoint.
+  fact_type?: 'action' | 'claim' | 'measurement' | null;
   speaker_uid?: string | null;
   speaker_label?: string | null;
   speech_act?: string | null;
   content_claim?: string | null;
   stance?: string | null;
+  metric?: string | null;
+  measurement_value?: number | null;
+  measurement_unit?: string | null;
+  as_of?: string | null;
 }
 
 export interface EntityFactRef {
@@ -254,6 +266,10 @@ export interface PredicateFacetItem {
 export interface FactTypeFacets {
   action: number;
   claim: number;
+  // v0.2.0 step 2 (fact-measurement-layer-v1) — numeric facts tied to
+  // a timepoint. Optional so the response shape can land on a frontend
+  // build that pre-dates the measurement layer without crashing.
+  measurement?: number;
 }
 
 export interface RecallFacets {
