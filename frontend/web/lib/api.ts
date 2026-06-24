@@ -12,6 +12,7 @@ import type {
   GraphNote,
   HomeBrief,
   KnowledgeSpacePublic,
+  LedgerResponse,
   LoginRequest,
   LoginResponse,
   ModifyFactRequest,
@@ -260,6 +261,36 @@ export function listSpaceFacts(
   params.set('limit', String(limit));
   return request<FactsList>(
     `/api/spaces/${spaceId}/facts?${params.toString()}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// feat/ledger-view — LEDGER (제3의 뷰).
+//
+// Chronological list of recently validated facts. Paged with
+// limit (default 20, max 100) + offset; optional fact_type chip.
+// The "load more" pattern: caller supplies offset=facts.length and
+// appends the returned page to the existing list.
+// ---------------------------------------------------------------------------
+
+export interface LedgerOptions {
+  limit?: number;
+  offset?: number;
+  factType?: 'action' | 'claim' | 'measurement' | null;
+}
+
+export function fetchLedger(
+  spaceId: string,
+  options: LedgerOptions = {},
+): Promise<LedgerResponse> {
+  const params = new URLSearchParams();
+  params.set('limit', String(options.limit ?? 20));
+  params.set('offset', String(options.offset ?? 0));
+  if (options.factType) {
+    params.set('fact_type', options.factType);
+  }
+  return request<LedgerResponse>(
+    `/api/spaces/${spaceId}/ledger?${params.toString()}`,
   );
 }
 
