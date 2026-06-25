@@ -110,18 +110,57 @@ function persistSource(source: StellarSource): void {
 }
 
 // ---------------------------------------------------------------------------
-// feat/hearth-oracle-merge — cluster-focus query param helper.
+// feat/hearth-oracle-merge + fix/stellar-cluster-focus-real — cluster-focus
+// query param resolver.
 //
-// HomePage's "살펴보기 →" link routes to /stellar?cluster=<entity_uid> or
-// /stellar?cluster=most_active. We resolve the param to a focus node:
+// HomePage 살펴보기 link routes to /stellar?cluster=<entity_uid> or
+// /stellar?cluster=most_active. PO repro (2026-06-24) on real mode:
 //
-//   - If the param matches a node's id / subject / object / label → that node.
-//   - If the param is "most_active" (or no match) → fall back to the cluster
-//     with the highest aggregate degree, returning that cluster's hottest
-//     node (max degree). This gives the user a meaningful 1-hop ring to
-//     explore even when the home brief's entity_uid doesn't line up with
-//     synthetic data ids (which is the common case in dogfood mode).
+//   URL: /stellar?cluster=8e68baf5-...  (entity_uid for 모스 탄, deg 12)
+//   Outcome: 엉뚱한 노드 선택 — the highest-degree fact in the WHOLE
+//   graph was picked instead of a fact tied to this entity.
+//
+// Root cause: the real adapter creates one node per FACT, so
+// node.id === fact_uid. The cluster param carries the SUBJECT entity_uid
+// — no node has that uid as its id, ever. The previous resolver matched by
+// id then by substring on the human-readable label; both miss entity_uid
+// in real mode (entity_uid is a UUID, never a substring of any rendered
+// label). Fall-through landed on the most-active fallback — globally
+// hottest cluster, NOT the requested entity. PO called this 엉뚱.
+//
+// Fix: a layered resolver that tries the entity-anchor paths FIRST, then
+// id, then human-readable label, then most-active fallback. For each
+// path we pick the HIGHEST-DEGREE matching node as the anchor — so the
+// camera lands on the spine fact of the entity instead of a stray leaf.
+// Verbose console.debug at every branch so PO can trace flow in DevTools
+// without source modifications.
+//
+// Resolution order (first match wins; match = >=1 candidate node):
+//   1. clusterParam === node.subject_uid   (entity-anchor, subject side)
+//   2. clusterParam === node.object_uid    (entity-anchor, object side)
+//   3. clusterParam === node.id            (exact fact_uid)
+//   4. node.id endsWith / contains clusterParam (truncated uid forms)
+//   5. clusterParam (lower) matches subject/object/label substring
+//   6. most-active fallback (highest summed-degree cluster)
 // ---------------------------------------------------------------------------
+
+/** Internal helper — pick the highest-degree node out of a candidate list.
+ *  When ties occur (same degree), the first wins (stable, depends on the
+ *  graph data ordering). Returns null on empty list. */
+function pickHighestDegree(candidates: StellarNode[]): StellarNode | null {
+  if (candidates.length === 0) return null;
+  let best: StellarNode = candidates[0]!;
+  let bestDeg = best.degree ?? 0;
+  for (let i = 1; i < candidates.length; i += 1) {
+    const c = candidates[i]!;
+    const d = c.degree ?? 0;
+    if (d > bestDeg) {
+      best = c;
+      bestDeg = d;
+    }
+  }
+  return best;
+}
 
 export function pickClusterFocusNode(
   data: StellarGraphData,
@@ -132,9 +171,49 @@ export function pickClusterFocusNode(
     return null;
   }
 
-  // Exact id match — cheapest path, used when the home brief's entity_uid
-  // actually exists in the graph.
   if (clusterParam && clusterParam !== 'most_active') {
+    // Sample of node ids for DevTools breadcrumb — helps PO eyeball the
+    // node.id shape vs the clusterParam shape (UUID? prefix? truncated?).
+    const idSample = data.nodes.slice(0, 5).map((n) => n.id);
+    console.debug('[stellar] pickClusterFocusNode: resolving', {
+      clusterParam,
+      totalNodes: data.nodes.length,
+      nodeIdSample: idSample,
+    });
+
+    // Path 1 — entity-anchor on SUBJECT side. The real adapter populates
+    // subject_uid from RecallFact.subject_uid. Matches every fact whose
+    // subject is the requested entity then picks the highest-degree (spine).
+    const bySubjectUid = data.nodes.filter((n) => n.subject_uid === clusterParam);
+    if (bySubjectUid.length > 0) {
+      const pick = pickHighestDegree(bySubjectUid)!;
+      console.debug('[stellar] pickClusterFocusNode: matched by subject_uid', {
+        clusterParam,
+        candidates: bySubjectUid.length,
+        pickedId: pick.id,
+        pickedSubject: pick.subject,
+        pickedDegree: pick.degree ?? null,
+      });
+      return pick;
+    }
+
+    // Path 2 — entity-anchor on OBJECT side. Real adapter populates
+    // object_uid only when the fact object_value is a UUID4 entity ref
+    // (literals leave it null). Same picker: highest-degree wins.
+    const byObjectUid = data.nodes.filter((n) => n.object_uid === clusterParam);
+    if (byObjectUid.length > 0) {
+      const pick = pickHighestDegree(byObjectUid)!;
+      console.debug('[stellar] pickClusterFocusNode: matched by object_uid', {
+        clusterParam,
+        candidates: byObjectUid.length,
+        pickedId: pick.id,
+        pickedDegree: pick.degree ?? null,
+      });
+      return pick;
+    }
+
+    // Path 3 — exact node.id match. Used by the synthetic mode tests
+    // (?cluster=fake-2) and by any caller that happens to know a fact_uid.
     const byId = data.nodes.find((n) => n.id === clusterParam);
     if (byId) {
       console.debug('[stellar] pickClusterFocusNode: matched by id', {
@@ -143,8 +222,25 @@ export function pickClusterFocusNode(
       });
       return byId;
     }
-    // Label / subject / object substring match — useful when the param
-    // carries a human-readable entity name.
+
+    // Path 4 — id endsWith / contains. Defensive against truncated uid
+    // forms (some surfaces ship a short id like 8e68baf5 instead of
+    // the full UUID; we treat that as a soft prefix match).
+    const byIdPrefix = data.nodes.find(
+      (n) =>
+        typeof n.id === 'string' &&
+        clusterParam.length >= 8 &&
+        (n.id.endsWith(clusterParam) || n.id.includes(clusterParam)),
+    );
+    if (byIdPrefix) {
+      console.debug('[stellar] pickClusterFocusNode: matched by id prefix', {
+        clusterParam,
+        nodeId: byIdPrefix.id,
+      });
+      return byIdPrefix;
+    }
+
+    // Path 5 — label / subject / object substring (human-readable param).
     const q = clusterParam.toLowerCase();
     const byLabel = data.nodes.find((n) =>
       [n.label, n.subject, n.object].join(" ").toLowerCase().includes(q),
@@ -156,11 +252,11 @@ export function pickClusterFocusNode(
       });
       return byLabel;
     }
-    console.debug('[stellar] pickClusterFocusNode: id+label miss, falling back to most_active', {
-      clusterParam,
-    });
+    console.debug(
+      '[stellar] pickClusterFocusNode: all entity / id / label paths missed - falling back to most_active',
+      { clusterParam },
+    );
   }
-
   // Fallback — pick the cluster with the highest summed degree, then the
   // hottest node inside it. This is the "가장 활발한 클러스터" semantic.
   const degreeByCluster = new Map<number, number>();
