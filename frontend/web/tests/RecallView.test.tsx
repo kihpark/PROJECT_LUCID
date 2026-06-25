@@ -2483,3 +2483,118 @@ describe('RecallView entity autocomplete', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// fix/recall-left-panel-filters — left-panel claim/measurement checkbox UX.
+//
+// PO report (2026-06-26): the left-panel "화자 인용만 (claim)" and
+// "수치만 (measurement)" checkboxes appeared broken. Root cause was UX
+// silent-fail: when the post-filter list became empty, the generic
+// '표시할 결과가 없습니다.' message gave no signal that a checkbox was
+// responsible. These tests pin the contract:
+//   (1) claimOnly checkbox filters the list to fact_type='claim'.
+//   (2) measurementOnly checkbox filters the list to fact_type='measurement'.
+//   (3) When claimOnly is on but no claim facts exist, the empty message
+//       names the checkbox so the PO knows the filter is the cause.
+// ---------------------------------------------------------------------------
+
+describe('RecallView — left-panel claim/measurement filters (fix/recall-left-panel-filters)', () => {
+  function buildMixed(opts: {
+    actions: number;
+    claims: number;
+    measurements: number;
+  }): RecallResponse {
+    const facts: import('@/lib/types').RecallFact[] = [];
+    for (let i = 0; i < opts.actions; i++) {
+      facts.push(makeFact(`a-${i}`, 'action', 0.9 - i * 0.001));
+    }
+    for (let i = 0; i < opts.claims; i++) {
+      facts.push(makeFact(`c-${i}`, 'claim', 0.85 - i * 0.001));
+    }
+    for (let i = 0; i < opts.measurements; i++) {
+      facts.push(makeFact(`m-${i}`, 'measurement', 0.8 - i * 0.001));
+    }
+    const total = opts.actions + opts.claims + opts.measurements;
+    return {
+      signature: `As far as I know — 그래프에 ${total}개 검증 사실이 있습니다`,
+      total,
+      facts,
+      facets: {
+        entities: {
+          organization: [{ uid: 'obj-sem', name: '삼성전기', count: total }],
+          person: [],
+          place: [],
+          other: [],
+        },
+        predicates: [{ name: 'reported', count: total }],
+        fact_types: {
+          action: opts.actions,
+          claim: opts.claims,
+          measurement: opts.measurements,
+        },
+      },
+    };
+  }
+
+  async function bootstrap(response: RecallResponse) {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response);
+    render(<RecallView spaceId="ks-1" />);
+    // Left-panel checkboxes live in the power rail.
+    switchToPowerMode();
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: '삼성전기' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await screen.findByTestId('recall-fact-type-summary');
+  }
+
+  it('toggling 화자 인용만 (claim) filters visible cards to claim only', async () => {
+    await bootstrap(buildMixed({ actions: 2, claims: 2, measurements: 1 }));
+
+    // Sanity: all three layers are visible before the checkbox flip.
+    expect(screen.getByTestId('recall-fact-a-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-c-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-m-0')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('control-claim-only-checkbox'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('recall-fact-a-0')).toBeNull();
+    });
+    expect(screen.queryByTestId('recall-fact-m-0')).toBeNull();
+    expect(screen.getByTestId('recall-fact-c-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-c-1')).toBeInTheDocument();
+  });
+
+  it('toggling 수치만 (measurement) filters visible cards to measurement only', async () => {
+    await bootstrap(buildMixed({ actions: 2, claims: 1, measurements: 2 }));
+
+    expect(screen.getByTestId('recall-fact-a-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-c-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-m-0')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('control-measurement-only-checkbox'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('recall-fact-a-0')).toBeNull();
+    });
+    expect(screen.queryByTestId('recall-fact-c-0')).toBeNull();
+    expect(screen.getByTestId('recall-fact-m-0')).toBeInTheDocument();
+    expect(screen.getByTestId('recall-fact-m-1')).toBeInTheDocument();
+  });
+
+  it('claim-only with no claim facts surfaces a checkbox-aware empty message', async () => {
+    // Seed action+measurement only; flipping claim-only must produce 0
+    // visible facts and the empty-state message must name the filter.
+    await bootstrap(buildMixed({ actions: 3, claims: 0, measurements: 2 }));
+
+    fireEvent.click(screen.getByTestId('control-claim-only-checkbox'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('recall-keyword-empty')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('recall-keyword-empty').textContent).toContain(
+      '화자 인용 (claim) 층위의 결과가 없습니다',
+    );
+  });
+});
+
