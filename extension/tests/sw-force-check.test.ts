@@ -1,12 +1,20 @@
 /**
  * fix/popup-polling-status-recover — SW handler regression for PO #2.
+ * fix/sourcestatus-validated-enum — 500 fallback removed; 200 path now
+ *   carries the real `validated` terminal state; 5xx propagates as error.
  *
  * Covers:
- *   1. fetchServerJobStatus (lib/api.ts) status-mapping contract,
- *      including the synthetic `validated` shape for the 500-on-enum
- *      gap path.
+ *   1. fetchServerJobStatus (lib/api.ts) status-mapping contract:
+ *      - 200 with `validated` -> ServerJobStatus parsed verbatim.
+ *      - 200 with `structured` -> ServerJobStatus parsed verbatim.
+ *      - 401 -> throws not_authenticated.
+ *      - >=500 -> throws (regression guard for the removed synthetic
+ *        `validated` workaround).
  *   2. The SW `force_check_status` handler status mapping by driving
- *      the registered chrome.runtime.onMessage listener.
+ *      the registered chrome.runtime.onMessage listener:
+ *      - server status `validated` -> tracker `completed`.
+ *      - server status `structured` -> tracker `completed`.
+ *      - server 5xx -> tracker row stays inflight (no mutation).
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -119,7 +127,32 @@ describe("fetchServerJobStatus -- server-truth status fetch", () => {
     expect(r).toEqual({ status: "structured", error_message: null });
   });
 
-  it("returns synthetic validated status on HTTP 500 (SourceStatus enum gap workaround)", async () => {
+  it("parses 200 with validated status verbatim (SourceStatus enum gap fixed)", async () => {
+    stubAuthCookies();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          job_id: "abc",
+          knowledge_space_id: "ks-1",
+          source_url: "https://e.com/x",
+          source_type: "web_article",
+          status: "validated",
+          captured_at: "2026-06-24T08:00:00Z",
+          captured_from: "chrome_ext",
+          error_message: null,
+          created_at: "2026-06-24T08:00:00Z",
+          updated_at: "2026-06-24T08:00:00Z",
+        }),
+      }),
+    );
+    const r = await fetchServerJobStatus("abc");
+    expect(r).toEqual({ status: "validated", error_message: null });
+  });
+
+  it("throws on HTTP 500 (regression guard — synthetic validated fallback removed)", async () => {
     stubAuthCookies();
     vi.stubGlobal(
       "fetch",
@@ -129,9 +162,11 @@ describe("fetchServerJobStatus -- server-truth status fetch", () => {
         json: async () => ({ detail: "Internal Server Error" }),
       }),
     );
-    const r = await fetchServerJobStatus("abc");
-    expect(r.status).toBe("validated");
-    expect(r.error_message).toBeNull();
+    // Used to return { status: 'validated', error_message: null }. The
+    // workaround is gone: a real 5xx must now bubble so the SW handler
+    // keeps the tracker row inflight instead of silently marking it
+    // completed during a backend outage.
+    await expect(fetchServerJobStatus("abc")).rejects.toThrow();
   });
 
   it("throws not_authenticated on 401 (no silent terminal mark)", async () => {
@@ -251,6 +286,93 @@ describe("SW force_check_status handler -- tracker mutation contract", () => {
     const j = jobs.find((x) => x.job_id === "j2");
     expect(j?.status).toBe("failed");
     expect(j?.error_message).toBe("404 from upstream");
+  });
+
+  it("validated (200 path) -> flips tracker row to completed (NOT via 500 fallback)", async () => {
+    stubAuthCookies();
+    installMemStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          job_id: "j-validated",
+          knowledge_space_id: "ks-1",
+          source_url: "https://e.com/v",
+          source_type: "web_article",
+          status: "validated",
+          captured_at: "2026-06-24T08:00:00Z",
+          captured_from: "chrome_ext",
+          error_message: null,
+          created_at: "2026-06-24T08:00:00Z",
+          updated_at: "2026-06-24T08:00:00Z",
+        }),
+      }),
+    );
+
+    await clearAllJobs();
+    await addJob({
+      job_id: "j-validated",
+      source_url: "https://e.com/v",
+      status: "analyzing",
+    });
+
+    const listener = await importSw();
+    let response: unknown = undefined;
+    listener(
+      { type: "force_check_status", job_id: "j-validated" },
+      {},
+      (r) => { response = r; },
+    );
+
+    await waitFor(() => response !== undefined);
+    expect(response).toMatchObject({
+      ok: true,
+      server_status: "validated",
+      tracker_status: "completed",
+    });
+    const jobs = await getJobs();
+    const j = jobs.find((x) => x.job_id === "j-validated");
+    expect(j?.status).toBe("completed");
+  });
+
+  it("5xx -> { ok: false, error } and tracker row stays inflight (regression guard)", async () => {
+    stubAuthCookies();
+    installMemStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ detail: "Service Unavailable" }),
+      }),
+    );
+
+    await clearAllJobs();
+    await addJob({
+      job_id: "j-5xx",
+      source_url: "https://e.com/5xx",
+      status: "analyzing",
+    });
+
+    const listener = await importSw();
+    let response: { ok: boolean; error?: string } | undefined = undefined;
+    listener(
+      { type: "force_check_status", job_id: "j-5xx" },
+      {},
+      (r) => { response = r as { ok: boolean; error?: string }; },
+    );
+
+    await waitFor(() => response !== undefined);
+    const resp = response as unknown as { ok: boolean; error?: string };
+    expect(resp.ok).toBe(false);
+    expect(resp.error).toMatch(/HTTP 503|Service Unavailable/);
+    // Crucially: tracker row stays 'analyzing'. The old synthetic-
+    // validated workaround would have flipped this to 'completed'.
+    const jobs = await getJobs();
+    const j = jobs.find((x) => x.job_id === "j-5xx");
+    expect(j?.status).toBe("analyzing");
   });
 
   it("network failure -> { ok: false, error } and tracker row stays inflight", async () => {

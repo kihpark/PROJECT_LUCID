@@ -34,7 +34,16 @@ from api.models.source import SourceType
 
 class SourceStatus(StrEnum):
     """SourceJob lifecycle states. Sprint 2C added the extract-side states;
-    Sprint 3 PR-3-2 adds the structure-side states."""
+    Sprint 3 PR-3-2 adds the structure-side states; fix/decide-status-transition
+    (alembic 0018) added the terminal 'validated' state.
+
+    The 'validated' value MUST be kept in lock-step with:
+      - backend/api/storage/postgres/orm.py SourceJobORM CHECK constraint
+      - backend/api/storage/postgres/migrations/versions/0018_source_status_validated.py
+      - extension/src/background/service-worker.ts force_check_status mapping
+    Missing it here triggers a 500 at GET /api/jobs/{validated_id} because
+    JobStatusResponse fails enum coercion of a status the DB happily stored.
+    """
 
     PENDING_EXTRACT = "pending_extract"
     EXTRACTING = "extracting"
@@ -43,6 +52,7 @@ class SourceStatus(StrEnum):
     STRUCTURING = "structuring"
     STRUCTURED = "structured"
     STRUCTURE_FAILED = "structure_failed"
+    VALIDATED = "validated"
 
 
 CapturedFrom = Literal["chrome_ext", "pwa_share", "api"]

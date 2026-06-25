@@ -476,15 +476,20 @@ chrome.runtime.onMessage.addListener(
     // This handler is the explicit escape hatch. The popup fires it on
     // every open (DOMContentLoaded) for every inflight row AND on each
     // ↻ click. The SW queries /api/jobs/{job_id} via
-    // fetchServerJobStatus — which returns a synthetic
-    // `validated` status on the SourceStatus-enum 500 path so a
-    // server-validated row unsticks without waiting on a backend
-    // deploy (see fetchServerJobStatus jsdoc).
+    // fetchServerJobStatus — which now returns the real server status
+    // (including the terminal `validated` value, formally part of the
+    // SourceStatus enum as of fix/sourcestatus-validated-enum) on the
+    // 200 path and throws on any failure.
     //
     // Status mapping (server -> tracker):
     //   structured / validated -> completed (decision pending OR done)
     //   extract_failed / structure_failed -> failed (carries error_message)
     //   pending_extract / extracting / extracted / structuring -> keep inflight
+    //
+    // 5xx no longer synthesises a `validated` status — see the
+    // fetchServerJobStatus jsdoc for the rationale. A transient backend
+    // outage now keeps the tracker row inflight (no mutation) instead
+    // of falsely advancing it to completed.
     //
     // Auth/network failures are reported back to the popup without
     // mutating storage so a temporary outage cannot ghost-resolve a
