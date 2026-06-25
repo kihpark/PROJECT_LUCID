@@ -462,27 +462,45 @@ button.link {
   font-style: italic;
 }
 
-/* feat/popup-cleanup-discard-sync (PO #1) — per-card dismiss × */
+/* fix/popup-dismiss-clickable — × was rendered (18×18, padding 0,
+ * transparent bg) but its actual hit area was effectively invisible
+ * to the user AND too small to land a click in MV3's brief popup
+ * window. Bump to a real 24×24 affordance with a faint border so the
+ * PO can see *and* hit it, and make pointer-events explicit so no
+ * upstream rule (modal overlay, disabled state on the row) can swallow
+ * the click. */
 .tracker-dismiss-btn {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  margin-left: 4px;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-size: 14px;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  margin-left: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 16px;
   line-height: 1;
   cursor: pointer;
+  pointer-events: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: background 80ms ease, color 80ms ease, transform 80ms ease;
 }
 
 .tracker-dismiss-btn:hover {
-  background: transparent;
-  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.tracker-dismiss-btn:active {
+  transform: scale(0.95);
+}
+
+.tracker-dismiss-btn:focus-visible {
+  outline: 2px solid var(--accent-cool, #3fe0c6);
+  outline-offset: 1px;
 }
 
 .review-refresh-btn {

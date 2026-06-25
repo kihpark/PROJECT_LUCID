@@ -207,18 +207,29 @@ function renderJobCard(job: TrackedJob): HTMLElement {
   dismiss.textContent = "×";
   dismiss.setAttribute("aria-label", "카드 닫기");
   dismiss.title = "이 항목을 목록에서 닫기 (서버에 영향 없음)";
-  dismiss.addEventListener("click", (ev) => {
+  dismiss.addEventListener("click", async (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    // Optimistically remove from DOM so the user sees instant
-    // feedback even if the SW round-trip lags. The storage
-    // onChanged listener will re-render naturally; we don't await
-    // the response.
+    // fix/popup-dismiss-clickable — PO reported the × didn't react.
+    // Root cause was the CSS hit-area (18×18 transparent), but
+    // defensively also: (a) give immediate visual feedback before
+    // the SW round-trip, (b) await the SW response so storage.onChanged
+    // → re-render lands before the optimistic remove (MV3 popups can
+    // close mid-flight), and (c) emit console.debug breadcrumbs so
+    // the PO can open the popup DevTools (right-click popup → Inspect)
+    // and see exactly where any future failure lives.
+    console.debug("[popup] dismiss click", job.job_id);
+    card.style.opacity = "0.5";
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: "dismiss_job",
+        job_id: job.job_id,
+      });
+      console.debug("[popup] dismiss SW response", res);
+    } catch (err) {
+      console.warn("[popup] dismiss SW failed", err);
+    }
     card.remove();
-    void chrome.runtime.sendMessage({
-      type: "dismiss_job",
-      job_id: job.job_id,
-    });
     void refreshTrackerOnly();
   });
   top.appendChild(dismiss);
