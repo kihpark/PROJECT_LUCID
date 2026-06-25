@@ -305,5 +305,44 @@ export async function setSettings(
   return next;
 }
 
+/**
+ * feat/state-sync-unification — heartbeat-aware status label.
+ *
+ * PO #4: "5분째 저장 중 stuck — 실제는 분석 완료." The tracker has the
+ * truthful row (it's flipped by the SW's `announce_terminal`), but if
+ * the SW never received that ping (host tab closed / network flap),
+ * the row stays "saving" / "analyzing" forever. This helper escalates
+ * the rendered label after a stale-threshold so the user knows to go
+ * check the pending queue manually.
+ *
+ * Thresholds — sized so a normal capture (LLM extract ~30s) never
+ * fires the warning, but a genuinely stuck row does:
+ *   - saving > 60s   → "저장 중… (확인 필요)"
+ *   - analyzing > 5min → "분석 중… (지연)"
+ * Terminal states (completed / failed) never escalate.
+ */
+export const SAVING_STALE_MS = 60 * 1000;
+export const ANALYZING_STALE_MS = 5 * 60 * 1000;
+
+export function statusLabel(
+  status: TrackedJobStatus,
+  ageMs: number,
+): string {
+  if (status === 'saving') {
+    return ageMs > SAVING_STALE_MS ? '저장 중… (확인 필요)' : '저장 중…';
+  }
+  if (status === 'analyzing') {
+    return ageMs > ANALYZING_STALE_MS ? '분석 중… (지연)' : '분석 중…';
+  }
+  if (status === 'completed') return '완료';
+  if (status === 'failed') return '실패';
+  return status;
+}
+
 // Exposed for tests — they need to assert against the exact storage key.
-export const __test__ = { JOBS_KEY, SETTINGS_KEY };
+export const __test__ = {
+  JOBS_KEY,
+  SETTINGS_KEY,
+  SAVING_STALE_MS,
+  ANALYZING_STALE_MS,
+};
