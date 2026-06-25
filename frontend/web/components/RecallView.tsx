@@ -55,6 +55,7 @@ import {
   searchEntitySuggestions,
 } from '@/lib/api';
 import { predicateLabel } from '@/lib/predicateLabels';
+import { notifyStateChanged } from '@/lib/sync';
 import type {
   EntityBrief,
   EntityFacetItem,
@@ -2078,6 +2079,7 @@ export function RecallView({ spaceId }: Props) {
       await apiRetractFact(spaceId, detail.fact.fact_uid);
       await refreshDetail(detail.fact.fact_uid);
       refreshRecall();
+      notifyStateChanged('fact-retracted', { factUid: detail.fact.fact_uid });
     } finally {
       setDetailBusy(false);
     }
@@ -2090,6 +2092,7 @@ export function RecallView({ spaceId }: Props) {
       await apiRestoreFact(spaceId, detail.fact.fact_uid);
       await refreshDetail(detail.fact.fact_uid);
       refreshRecall();
+      notifyStateChanged('fact-restored', { factUid: detail.fact.fact_uid });
     } finally {
       setDetailBusy(false);
     }
@@ -2125,6 +2128,7 @@ export function RecallView({ spaceId }: Props) {
       );
       setDetail(updated);
       refreshRecall();
+      notifyStateChanged('fact-modified', { factUid: detail.fact.fact_uid });
     } catch (err) {
       const msg =
         err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;

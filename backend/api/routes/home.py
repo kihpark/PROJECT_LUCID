@@ -132,9 +132,24 @@ def _week_range_filter(now: datetime) -> dict[str, Any]:
     return {"range": {"validated_at": {"gte": since}}}
 
 
-def _safe_count(index: str, filters: list[dict[str, Any]]) -> int:
-    """Run an ES count with `bool.filter` — return 0 on any error."""
-    body = {"query": {"bool": {"filter": filters}}}
+def _safe_count(
+    index: str,
+    filters: list[dict[str, Any]],
+    *,
+    must_not: list[dict[str, Any]] | None = None,
+) -> int:
+    """Run an ES count with `bool.filter` (+ optional `must_not`) —
+    return 0 on any error.
+
+    feat/state-sync-unification: `must_not` lets callers pin the
+    retracted-exclusion clause that LEDGER already enforces so the
+    brief counters and the LEDGER list never disagree on what
+    "validated this week" means.
+    """
+    bool_clause: dict[str, Any] = {"filter": filters}
+    if must_not:
+        bool_clause["must_not"] = must_not
+    body = {"query": {"bool": bool_clause}}
     try:
         client = get_client()
         resp = client.count(index=index, body=body)
@@ -144,8 +159,23 @@ def _safe_count(index: str, filters: list[dict[str, Any]]) -> int:
         return 0
 
 
+def _retracted_must_not() -> list[dict[str, Any]]:
+    """feat/state-sync-unification: the LEDGER endpoint's hard
+    contract — soft-deleted (retracted) facts never surface — is now
+    the brief's contract too. Returns the `must_not` clause list that
+    excludes any doc with `retracted_at` populated.
+    """
+    return [{"exists": {"field": "retracted_at"}}]
+
+
 def _facts_count(ks_id: str) -> int:
-    return _safe_count(LUCID_FACTS, _ks_manual_filters(ks_id))
+    # feat/state-sync-unification: align with LEDGER — retracted facts
+    # do not count toward the "validated facts" total either.
+    return _safe_count(
+        LUCID_FACTS,
+        _ks_manual_filters(ks_id),
+        must_not=_retracted_must_not(),
+    )
 
 
 def _entities_count(ks_id: str) -> int:
@@ -157,8 +187,17 @@ def _sources_count(ks_id: str) -> int:
 
 
 def _this_week_count(ks_id: str, now: datetime) -> int:
+    """feat/state-sync-unification: brief.this_week_validated must
+    match LEDGER's "first 7 days" slice exactly. That means:
+      - manual + this KS  (already enforced)
+      - validated_at within [now - 7d, now]
+      - retracted_at NOT exists  (LEDGER drops these; we did too only
+        implicitly via the sort — now it's explicit and contractual)
+    """
     filters = _ks_manual_filters(ks_id) + [_week_range_filter(now)]
-    return _safe_count(LUCID_FACTS, filters)
+    return _safe_count(
+        LUCID_FACTS, filters, must_not=_retracted_must_not(),
+    )
 
 
 def _decide_ready_jobs(
@@ -276,6 +315,9 @@ def _recent_validated(
         "query": {
             "bool": {
                 "filter": _ks_manual_filters(ks_id) + [_week_range_filter(now)],
+                # feat/state-sync-unification: align with LEDGER —
+                # retracted facts never appear in the recent list.
+                "must_not": [{"exists": {"field": "retracted_at"}}],
             },
         },
     }
@@ -328,6 +370,9 @@ def _top_cluster(ks_id: str, now: datetime) -> HomeBriefTopCluster:
         "query": {
             "bool": {
                 "filter": _ks_manual_filters(ks_id) + [_week_range_filter(now)],
+                # feat/state-sync-unification: align with LEDGER —
+                # retracted facts never count toward the top cluster.
+                "must_not": [{"exists": {"field": "retracted_at"}}],
             },
         },
         "aggs": {

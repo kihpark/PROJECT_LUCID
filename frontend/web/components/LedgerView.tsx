@@ -25,6 +25,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FactTypeBadge, FactTypeStrip } from './FactCard';
 import { fetchLedger as apiFetchLedger } from '@/lib/api';
+import { useStateChange } from '@/lib/sync';
 import { predicateLabel } from '@/lib/predicateLabels';
 import type { LedgerItem } from '@/lib/types';
 
@@ -318,6 +319,15 @@ export function LedgerView({ spaceId }: Props) {
   useEffect(() => {
     void load(filter);
   }, [filter, load]);
+
+  useStateChange(
+    useCallback(
+      () => {
+        void load(filter);
+      },
+      [load, filter],
+    ),
+  );
 
   const onFilterChange = (next: FactTypeKey | null) => {
     setFilter(next);

@@ -10,6 +10,7 @@ import {
   discardJob as apiDiscardJob,
   submitDecisions,
 } from '@/lib/api';
+import { notifyStateChanged } from '@/lib/sync';
 import type {
   DecideResponse,
   FactAction,
@@ -150,6 +151,7 @@ export function DecideOverlay({
     try {
       const r = await apiDiscardJob(spaceId, jobId);
       setResult(r);
+      notifyStateChanged('decision-submitted', { jobId, discarded: true });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -204,6 +206,9 @@ export function DecideOverlay({
       }
       const r = await submitDecisions(spaceId, jobId, payload);
       setResult(r);
+      // feat/state-sync-unification — broadcast so AppShell badge,
+      // HomePage brief, LEDGER all refetch from backend truth.
+      notifyStateChanged('decision-submitted', { jobId });
     } catch (e) {
       setError((e as Error).message);
     } finally {

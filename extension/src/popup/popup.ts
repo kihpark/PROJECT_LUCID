@@ -163,6 +163,19 @@ const STATUS_LABEL: Record<TrackedJobStatus, string> = {
   failed: "실패",
 };
 
+function computeStatusLabel(
+  status: TrackedJobStatus,
+  ageMs: number,
+): string {
+  if (status === "saving") {
+    return ageMs > 60_000 ? "저장 중… (확인 필요)" : "저장 중…";
+  }
+  if (status === "analyzing") {
+    return ageMs > 5 * 60_000 ? "분석 중… (지연)" : "분석 중…";
+  }
+  return STATUS_LABEL[status];
+}
+
 async function fetchTrackerState(): Promise<{
   jobs: TrackedJob[];
   settings: TrackerSettings;
@@ -225,12 +238,17 @@ function renderTrackerJobs(
 
     const pill = document.createElement("span");
     pill.className = `tracker-status ${job.status}`;
-    pill.textContent =
-      job.status === "analyzing"
-        ? "분석 중…"
-        : job.status === "saving"
-          ? "저장 중…"
-          : STATUS_LABEL[job.status];
+    // feat/state-sync-unification — derive label from elapsed time so
+    // a stuck job surfaces a heartbeat warning instead of pretending
+    // everything is fine. Mirrors background/job-tracker statusLabel().
+    const ageMs = Date.now() - job.created_at;
+    pill.textContent = computeStatusLabel(job.status, ageMs);
+    if (
+      (job.status === "saving" && ageMs > 60_000)
+      || (job.status === "analyzing" && ageMs > 5 * 60_000)
+    ) {
+      pill.classList.add("tracker-status-stale");
+    }
     top.appendChild(pill);
 
     card.appendChild(top);
