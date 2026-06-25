@@ -284,7 +284,6 @@ function ActiveRecallInput({
           opacity: isInFlight ? 0.4 : 1,
           cursor: isInFlight ? 'not-allowed' : 'pointer',
           fontSize: 17,
-          cursor: 'pointer',
           fontWeight: 600,
         }}
       >
