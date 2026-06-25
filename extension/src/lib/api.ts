@@ -133,32 +133,34 @@ export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
  * popup's force-refresh flow.
  *
  * Why a parallel function instead of using `getJobStatus`?
- * The /api/jobs/{job_id} response is parsed by FastAPI through the
- * Pydantic `JobStatusResponse` which validates `status` against the
- * `SourceStatus` StrEnum (see backend/api/models/source_job.py). The
- * enum is *missing* the terminal `validated` value (only present in the
- * DB CheckConstraint + ORM). When a job has been validated server-side,
- * the route raises a 500 — the very PO bug we are recovering from.
- * Until the backend enum is widened (out of scope here per the
- * implementation plan), the extension must treat that
- * 500-with-internal-error path as evidence-of-terminality, not as
- * "still inflight".
+ * The SW handler only needs the (status, error_message) pair and an
+ * explicit failure contract that distinguishes 401/403/404 (each implies
+ * a different popup UX) from 5xx (treat as transient — keep the row
+ * inflight, do NOT optimistically mark terminal). `getJobStatus` flattens
+ * everything to `HTTP <n>` which is the wrong default for this caller.
  *
  * Contract:
- *   - 200 -> returns { status, error_message } verbatim.
+ *   - 200 -> returns { status, error_message } verbatim. Status values
+ *     are the full SourceStatus enum, including the terminal `validated`
+ *     state added in fix/sourcestatus-validated-enum (alembic 0018 +
+ *     backend SourceStatus StrEnum).
  *   - 401 -> throws `not_authenticated` so the SW surfaces the auth
  *     issue instead of optimistically marking done.
  *   - 403 -> throws `forbidden`.
  *   - 404 -> throws `job_not_found` so the SW can dismiss the local
  *     row (the server has no record).
- *   - 500 (or any other >=500) -> returns a synthetic
- *     `{ status: 'validated', error_message: null }` shape so the
- *     caller treats the job as terminal-completed. This is the
- *     workaround for the enum gap.
+ *   - >=500 -> throws `HTTP <status>` so the SW handler keeps the
+ *     tracker row inflight (no mutation) and the popup logs the warning.
+ *     The previous synthetic `{ status: 'validated' }` fallback was a
+ *     workaround for a SourceStatus enum gap that has since been fixed
+ *     at the source; removing it eliminates the false-positive risk
+ *     where a genuine backend outage would silently mark a still-
+ *     processing job as terminal-completed.
  *
- * The synthetic shape only carries `status` + `error_message` because
- * the SW handler only reads those fields. We intentionally do not
- * fabricate the rest of JobStatusResponse.
+ * Note: an earlier revision returned a synthetic `validated` shape on
+ * >=500. That path is removed deliberately. With the SourceStatus enum
+ * now carrying `validated` the 200 branch handles real terminal state;
+ * any remaining 5xx is a genuine outage and must NOT be papered over.
  */
 export interface ServerJobStatus {
   status: string;
@@ -185,14 +187,10 @@ export async function fetchServerJobStatus(jobId: string): Promise<ServerJobStat
   if (resp.status === 401) throw new Error('not_authenticated');
   if (resp.status === 403) throw new Error('forbidden');
   if (resp.status === 404) throw new Error('job_not_found');
-  // >=500 -- almost certainly the SourceStatus enum gap for 'validated'.
-  // Returning a synthetic terminal-completed status lets the popup
-  // unstick the row without waiting on a backend deploy.
-  if (resp.status >= 500) {
-    return { status: 'validated', error_message: null };
-  }
-  // 4xx other than 401/403/404 -- propagate so we don't silently mark
-  // a still-inflight row terminal.
+  // Any other status (4xx other than 401/403/404, or 5xx outage) —
+  // propagate as a real error so the SW handler keeps the tracker row
+  // inflight. Marking a job terminal on transient 5xx is exactly the
+  // false-positive we are now closing out.
   let detail = `HTTP ${resp.status}`;
   try {
     const body = await resp.json();

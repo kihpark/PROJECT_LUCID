@@ -21,8 +21,10 @@ from api.storage.postgres.compression import (
 )
 
 
-def test_source_status_has_seven_sprint_3_values():
-    """Sprint 2C shipped 4 extract values; Sprint 3 PR-3-2 added 3 structure values."""
+def test_source_status_has_eight_post_0018_values():
+    """Sprint 2C shipped 4 extract values; Sprint 3 PR-3-2 added 3 structure
+    values; fix/decide-status-transition (alembic 0018) added the terminal
+    'validated' state; fix/sourcestatus-validated-enum closes the StrEnum gap."""
     assert set(SourceStatus) == {
         SourceStatus.PENDING_EXTRACT,
         SourceStatus.EXTRACTING,
@@ -31,6 +33,7 @@ def test_source_status_has_seven_sprint_3_values():
         SourceStatus.STRUCTURING,
         SourceStatus.STRUCTURED,
         SourceStatus.STRUCTURE_FAILED,
+        SourceStatus.VALIDATED,
     }
 
 
