@@ -163,17 +163,27 @@ function BrandLine() {
  */
 function ActiveRecallInput({
   spaceId,
+  sphereState,
   onSphereState,
   assistantRef,
 }: {
   spaceId: string;
+  sphereState: SphereState;
   onSphereState: (state: SphereState) => void;
   assistantRef: React.RefObject<AssistantQueryHandle | null>;
 }) {
   const [value, setValue] = useState('');
+  // fix(home-input-disable): PO reported that submitting while a query
+  // is in flight just queues a second duplicate request. We treat the
+  // sphere's "thinking" state as the in-flight signal and lock the
+  // form: button + input disabled, Enter no-ops. State flips back to
+  // "speaking" / "idle" the moment the assistant returns, re-enabling
+  // the next question.
+  const isInFlight = sphereState === 'thinking';
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isInFlight) return;  // hard guard
     const q = value.trim();
     if (!q) return;
     if (!spaceId) {
@@ -237,7 +247,8 @@ function ActiveRecallInput({
         onChange={handleChange}
         onFocus={handleFocus}
         onBlur={handleBlur}
-        placeholder="무엇이든 물어보세요. 검증된 것만 답합니다."
+        disabled={isInFlight}
+        placeholder={isInFlight ? "검증된 지식에서 답을 찾는 중..." : "무엇이든 물어보세요. 검증된 것만 답합니다."}
         style={{
           width: '100%',
           height: 60,
@@ -250,12 +261,15 @@ function ActiveRecallInput({
           backdropFilter: 'blur(8px)',
           outline: 'none',
           boxSizing: 'border-box',
+          opacity: isInFlight ? 0.6 : 1,
+          cursor: isInFlight ? 'not-allowed' : 'text',
         }}
       />
       <button
         data-testid="home-recall-submit"
         type="submit"
         aria-label="질문 전송"
+        disabled={isInFlight}
         style={{
           position: 'absolute',
           right: 11,
@@ -267,6 +281,8 @@ function ActiveRecallInput({
           background: ACCENT,
           color: '#06201c',
           border: 'none',
+          opacity: isInFlight ? 0.4 : 1,
+          cursor: isInFlight ? 'not-allowed' : 'pointer',
           fontSize: 17,
           cursor: 'pointer',
           fontWeight: 600,
@@ -662,11 +678,13 @@ function Sep() {
 function HomePopulated({
   brief,
   spaceId,
+  sphereState,
   onSphereState,
   assistantRef,
 }: {
   brief: HomeBrief;
   spaceId: string;
+  sphereState: SphereState;
   onSphereState: (state: SphereState) => void;
   assistantRef: React.RefObject<AssistantQueryHandle | null>;
 }) {
@@ -682,6 +700,7 @@ function HomePopulated({
     >
       <ActiveRecallInput
         spaceId={spaceId}
+        sphereState={sphereState}
         onSphereState={onSphereState}
         assistantRef={assistantRef}
       />
@@ -1049,7 +1068,7 @@ export function HomePage({ userName = '박기흥' }: { userName?: string }) {
 
   return (
     <HomeShellCommon sphereState={sphereState} userName={greetingName}>
-      {renderArm(view, brief, me, spaceId, handleSphereState, assistantRef)}
+      {renderArm(view, brief, me, spaceId, sphereState, handleSphereState, assistantRef)}
       {/* Keep TEXT_LABEL referenced so the design-token contract is
           visible without an unused-var warning. */}
       <span
@@ -1066,6 +1085,7 @@ function renderArm(
   brief: HomeBrief | null,
   me: MeResponse | null,
   spaceId: string,
+  sphereState: SphereState,
   onSphereState: (s: SphereState) => void,
   assistantRef: React.RefObject<AssistantQueryHandle | null>,
 ) {
@@ -1075,6 +1095,7 @@ function renderArm(
         <HomePopulated
           brief={brief as HomeBrief}
           spaceId={spaceId}
+          sphereState={sphereState}
           onSphereState={onSphereState}
           assistantRef={assistantRef}
         />
