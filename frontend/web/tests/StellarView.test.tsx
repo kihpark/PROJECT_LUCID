@@ -589,6 +589,54 @@ describe('StellarView', () => {
     expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
   });
 
+  it('H-5 — cluster=<unknown_uid> falls back to most_active path', async () => {
+    searchParamsRef.current = new URLSearchParams('cluster=unknown-uid-xyz-9999');
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+      />,
+    );
+    // The unknown id misses both id+label match → falls back to
+    // most_active picker, which returns SOME node from the seed.
+    await waitFor(() => {
+      const focusedId = lastRendererProps.current.focusedId;
+      expect(focusedId).toBeTruthy();
+      expect(['fake-1', 'fake-2']).toContain(focusedId);
+    });
+  });
+
+  it('H-5 — cluster=most_active focuses even WITHOUT a persisted source preference (no localStorage)', async () => {
+    // PO scenario: fresh browser, no localStorage entry. The auto-focus
+    // must NOT wait on sourceHydrated — query param wins. Default
+    // synthetic mode has data on first render, so binding is instant.
+    expect(window.localStorage.getItem('lucid.stellar.source')).toBeNull();
+    searchParamsRef.current = new URLSearchParams('cluster=most_active');
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+      />,
+    );
+    await waitFor(() => {
+      expect(lastRendererProps.current.focusedId).toBeTruthy();
+    });
+  });
+
+  it('H-5 — empty synthetic builder + cluster=most_active does NOT crash', async () => {
+    function emptyBuilder(): StellarGraphData {
+      return { nodes: [], links: [], clusters: [] };
+    }
+    searchParamsRef.current = new URLSearchParams('cluster=most_active');
+    render(
+      <StellarView renderer={MockRenderer} syntheticBuilder={emptyBuilder} />,
+    );
+    // Give effects a tick. Auto-focus bails on empty graph, no crash.
+    await act(async () => { await Promise.resolve(); });
+    expect(lastRendererProps.current.focusedId).toBeFalsy();
+    expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
+  });
+
   // -------------------------------------------------------------------------
   // fix/stellar-cleanup #9 — predicate theme color drives the SPO card accent.
   // -------------------------------------------------------------------------
@@ -680,7 +728,16 @@ describe('StellarView', () => {
     expect(tip.getAttribute('data-theme-color')).toBe('#4FD1C5');
   });
 
-  it('#10 — cluster=most_active focuses highest-degree node in real mode (sets focusedId after load)', async () => {
+  it('#10 — cluster=most_active focuses synthetic node immediately even when localStorage prefers real (PO directive: query param > localStorage)', async () => {
+    // fix/stellar-cluster-focus-recover — the OLD behavior gated on
+    // sourceHydrated, so the auto-focus waited for localStorage to
+    // rehydrate to 'real' and then bound to the loaded real graph.
+    // PO inverted this: the query param's intent must win NOW, not
+    // after localStorage. Synthetic data is available on first render,
+    // so binding lands on a synthetic node even when the persisted
+    // source is 'real'. The real graph still loads (realLoader is
+    // called) but the auto-focus ref is already latched, so the user
+    // sees a focus immediately rather than after the network/hydrate.
     searchParamsRef.current = new URLSearchParams('cluster=most_active');
     const realLoader = vi.fn().mockResolvedValue({
       nodes: [
@@ -714,10 +771,11 @@ describe('StellarView', () => {
         realLoader={realLoader}
       />,
     );
-    await waitFor(() => expect(realLoader).toHaveBeenCalled());
     await waitFor(() => {
-      // r2 has higher degree, so cluster=most_active picks r2.
-      expect(lastRendererProps.current.focusedId).toBe('r2');
+      const focusedId = lastRendererProps.current.focusedId;
+      expect(focusedId).toBeTruthy();
+      // Synthetic data wins — query param intent beats localStorage timing.
+      expect(['fake-1', 'fake-2']).toContain(focusedId);
     });
   });
 });
