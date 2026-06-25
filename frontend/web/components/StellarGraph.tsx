@@ -884,44 +884,70 @@ export function StellarGraph(props: StellarGraphProps) {
     return () => window.clearInterval(id);
   }, []);
 
-  // B-62-search-legibility + fix/stellar-cleanup #10 — fly camera to
-  // the focused node. Triggers on focus changes from both click AND
-  // the search bar AND the /stellar?cluster= auto-focus. The simulation
-  // may not have placed nodes yet when this fires — real-mode nodes
-  // are seeded at (0,0,0) by the adapter and only get real positions
-  // after d3-force ticks. We poll for up to ~3s until the node has a
-  // non-zero position, then fly. Without this retry the PO repro for
-  // #10 ("HOME 살펴보기 → STELLAR 클러스터 focus 안 됨") never moves
-  // the camera even though focusedId is correctly set.
+  // B-62-search-legibility + fix/stellar-cleanup #10 + fix/stellar-cluster-focus-recover —
+  // fly camera to the focused node.
+  //
+  // Triggers on focus changes from both click AND the search bar AND
+  // the /stellar?cluster= auto-focus. The d3-force simulation may not
+  // have placed nodes yet when this fires — real-mode nodes are seeded
+  // at (0,0,0) by the adapter and only get real positions after several
+  // ticks. We poll for up to ~10s until the node has a non-zero
+  // position, then fly. PO repro for stellar-cleanup #10 still failed
+  // because the prior 3s window was too short for larger real graphs
+  // during initial scene mount; the bump to 10s + breadcrumbs lets the
+  // camera always land AND lets PO trace the path in DevTools.
   useEffect(() => {
     if (!focusedId) return;
     let cancelled = false;
     let attempts = 0;
-    const MAX_ATTEMPTS = 30; // ~3s at 100ms interval
+    const MAX_ATTEMPTS = 100; // ~10s at 100ms interval (was 30 = 3s)
 
     function tryFly(): void {
       if (cancelled) return;
       const node = data.nodes.find((n) => n.id === focusedId) as
         | (StellarNode & { x?: number; y?: number; z?: number })
         | undefined;
-      if (!node) return;
+      if (!node) {
+        console.warn('[stellar] fly-to: focused node not in data', { focusedId });
+        return;
+      }
       const x = node.x ?? 0;
       const y = node.y ?? 0;
       const z = node.z ?? 0;
       if (x === 0 && y === 0 && z === 0) {
         attempts += 1;
         if (attempts < MAX_ATTEMPTS) {
+          if (attempts === 1 || attempts % 20 === 0) {
+            console.debug('[stellar] fly-to: waiting for d3-force placement', {
+              focusedId,
+              attempts,
+              MAX_ATTEMPTS,
+            });
+          }
           setTimeout(tryFly, 100);
+        } else {
+          console.warn('[stellar] fly-to: gave up waiting for placement', {
+            focusedId,
+            attempts,
+          });
         }
         return;
       }
       const handle = fgRef.current;
-      if (!handle?.cameraPosition) return;
+      if (!handle?.cameraPosition) {
+        console.warn('[stellar] fly-to: no cameraPosition handle', { focusedId });
+        return;
+      }
       // Pull back along the node's outward direction so the focal node
       // sits in the centre of the view with its 1-hop neighbours visible.
       const len = Math.sqrt(x * x + y * y + z * z) || 1;
       const dollyOut = 90;
       const k = (len + dollyOut) / len;
+      console.debug('[stellar] fly-to: flying', {
+        focusedId,
+        attempts,
+        nodePos: { x, y, z },
+      });
       handle.cameraPosition(
         { x: x * k, y: y * k, z: z * k },
         { x, y, z },

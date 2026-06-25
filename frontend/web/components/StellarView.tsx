@@ -127,20 +127,38 @@ export function pickClusterFocusNode(
   data: StellarGraphData,
   clusterParam: string,
 ): StellarNode | null {
-  if (data.nodes.length === 0) return null;
+  if (data.nodes.length === 0) {
+    console.warn('[stellar] pickClusterFocusNode: empty graph', { clusterParam });
+    return null;
+  }
 
   // Exact id match — cheapest path, used when the home brief's entity_uid
   // actually exists in the graph.
   if (clusterParam && clusterParam !== 'most_active') {
     const byId = data.nodes.find((n) => n.id === clusterParam);
-    if (byId) return byId;
+    if (byId) {
+      console.debug('[stellar] pickClusterFocusNode: matched by id', {
+        clusterParam,
+        nodeId: byId.id,
+      });
+      return byId;
+    }
     // Label / subject / object substring match — useful when the param
     // carries a human-readable entity name.
     const q = clusterParam.toLowerCase();
     const byLabel = data.nodes.find((n) =>
       [n.label, n.subject, n.object].join(" ").toLowerCase().includes(q),
     );
-    if (byLabel) return byLabel;
+    if (byLabel) {
+      console.debug('[stellar] pickClusterFocusNode: matched by label', {
+        clusterParam,
+        nodeId: byLabel.id,
+      });
+      return byLabel;
+    }
+    console.debug('[stellar] pickClusterFocusNode: id+label miss, falling back to most_active', {
+      clusterParam,
+    });
   }
 
   // Fallback — pick the cluster with the highest summed degree, then the
@@ -1149,32 +1167,77 @@ export function StellarView(props: StellarViewProps = {}) {
     [],
   );
 
-  // feat/hearth-oracle-merge — auto-focus from /stellar?cluster=<value>.
-  // The query param flows from HomePage's "살펴보기 →" link. We resolve
-  // it once, after the active data has loaded, and only if the user is
-  // not already focused on something (so manual exploration wins over
-  // the URL hint).
+  // feat/hearth-oracle-merge + fix/stellar-cluster-focus-recover —
+  // auto-focus from /stellar?cluster=<value>.
+  //
+  // The query param flows from HomePage's "살펴보기 →" link. PO directive:
+  // **query param > localStorage preference**. If the user explicitly
+  // navigated with `?cluster=`, that intent wins over whatever the
+  // persisted source-toggle says — we don't gate on sourceHydrated for
+  // synthetic mode (which is the default and always has nodes available).
+  //
+  // For real mode we still wait for the lazy load to settle (otherwise
+  // we'd pick a node from the empty fallback graph and re-fire later).
+  // But we no longer wait on `sourceHydrated` itself: synthetic data is
+  // built in `useMemo`, available on first render, so binding immediately
+  // gives the user the focus they asked for at the URL.
+  //
+  // Detailed console.debug breadcrumbs help PO trace flow in DevTools.
   const searchParams = useSearchParams();
   const clusterParam = searchParams?.get('cluster') ?? null;
   const clusterAutoFocusedRef = useRef(false);
   useEffect(() => {
     if (!clusterParam) return;
     if (clusterAutoFocusedRef.current) return;
-    // fix/stellar-cleanup #10 — wait for the localStorage rehydrate
-    // effect to land before binding to a node. Otherwise the auto-focus
-    // would lock onto synthetic data in the brief window before the
-    // persisted 'real' source kicks in, and the user would land focused
-    // on the wrong graph.
-    if (!sourceHydrated) return;
-    if (activeData.nodes.length === 0) return;
-    // For real mode we wait for the lazy load to settle before binding
-    // the focus — otherwise we'd focus on the empty fallback graph.
-    if (source === 'real' && realLoading) return;
+
+    // Real mode: wait for the lazy load to settle (focus the loaded graph,
+    // not the empty placeholder). Synthetic mode is sync — no wait.
+    if (source === 'real' && realLoading) {
+      console.debug('[stellar] cluster focus: waiting for real load', {
+        clusterParam,
+        source,
+        realLoading,
+      });
+      return;
+    }
+
+    if (activeData.nodes.length === 0) {
+      console.debug('[stellar] cluster focus: no nodes yet', {
+        clusterParam,
+        source,
+        nodes: 0,
+      });
+      return;
+    }
+
     const node = pickClusterFocusNode(activeData, clusterParam);
-    if (!node) return;
+    if (!node) {
+      console.warn('[stellar] cluster focus: pickClusterFocusNode returned null', {
+        clusterParam,
+        nodes: activeData.nodes.length,
+      });
+      return;
+    }
+
     clusterAutoFocusedRef.current = true;
+    console.debug('[stellar] cluster focus: binding', {
+      clusterParam,
+      pickedId: node.id,
+      pickedSubject: node.subject,
+      pickedCluster: node.cluster,
+      pickedDegree: node.degree ?? null,
+      source,
+      sourceHydrated,
+    });
     handleClick(node);
-  }, [clusterParam, activeData, source, realLoading, handleClick, sourceHydrated]);
+  }, [
+    clusterParam,
+    activeData,
+    source,
+    realLoading,
+    handleClick,
+    sourceHydrated,
+  ]);
 
   // B-62-focus-select-actions — relation-row click: set selected only.
   // The camera eases lookAt in StellarGraph; nothing else moves.
