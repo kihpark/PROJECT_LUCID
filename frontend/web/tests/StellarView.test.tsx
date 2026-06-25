@@ -18,7 +18,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => searchParamsRef.current,
 }));
 
-import { StellarView } from '@/components/StellarView';
+import { StellarView, predicateThemeColor } from '@/components/StellarView';
 import type { StellarGraphData, StellarNode } from '@/lib/syntheticGraph';
 
 // Capture the props the renderer is asked to display so tests can assert
@@ -587,5 +587,137 @@ describe('StellarView', () => {
     await act(async () => { await Promise.resolve(); });
     expect(lastRendererProps.current.focusedId).toBeFalsy();
     expect(screen.queryByTestId('stellar-fact-drawer')).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // fix/stellar-cleanup #9 — predicate theme color drives the SPO card accent.
+  // -------------------------------------------------------------------------
+
+  describe('predicateThemeColor', () => {
+    it('returns teal for concord predicates', () => {
+      expect(predicateThemeColor('is_consistent_with')).toBe('#4FD1C5');
+      expect(predicateThemeColor('supports')).toBe('#4FD1C5');
+      expect(predicateThemeColor('confirms')).toBe('#4FD1C5');
+    });
+
+    it('returns soft red for discord predicates', () => {
+      expect(predicateThemeColor('contradicts')).toBe('#f06a78');
+      expect(predicateThemeColor('refutes')).toBe('#f06a78');
+      expect(predicateThemeColor('disputes')).toBe('#f06a78');
+    });
+
+    it('returns amber for causal predicates', () => {
+      expect(predicateThemeColor('causes')).toBe('#f5b95c');
+      expect(predicateThemeColor('triggers')).toBe('#f5b95c');
+    });
+
+    it('returns cyan for informational predicates', () => {
+      expect(predicateThemeColor('elaborates')).toBe('#39d3ec');
+      expect(predicateThemeColor('is_examining')).toBe('#39d3ec');
+      expect(predicateThemeColor('states')).toBe('#39d3ec');
+    });
+
+    it('returns muted neutral for unknown predicates', () => {
+      expect(predicateThemeColor('weird_predicate_xyz')).toBe('#9db0b5');
+      expect(predicateThemeColor(null)).toBe('#9db0b5');
+      expect(predicateThemeColor('')).toBe('#9db0b5');
+    });
+  });
+
+  it('#9 — hover SPO card carries a theme color matched to predicate', () => {
+    function discordBuilder(): StellarGraphData {
+      return {
+        nodes: [
+          {
+            id: 'd-1',
+            label: '한국은행 · 미국 연준',
+            cluster: 0,
+            weight: 2,
+            x: 0,
+            y: 0,
+            z: 0,
+            subject: '한국은행',
+            predicate: 'contradicts',
+            object: '미국 연준',
+            fact_type: 'action',
+          },
+        ],
+        links: [],
+        clusters: ['금융'],
+      };
+    }
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={discordBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    const tip = screen.getByTestId('stellar-hover-tooltip');
+    expect(tip.getAttribute('data-theme-color')).toBe('#f06a78');
+  });
+
+  it('#9 — concord predicate gets the teal accent', () => {
+    function concordBuilder(): StellarGraphData {
+      return {
+        nodes: [
+          {
+            id: 'k-1',
+            label: '제임스 한센 · +1.5℃ 시나리오',
+            cluster: 0,
+            weight: 2,
+            x: 0,
+            y: 0,
+            z: 0,
+            subject: '제임스 한센',
+            predicate: 'is_consistent_with',
+            object: '+1.5℃ 시나리오',
+            fact_type: 'action',
+          },
+        ],
+        links: [],
+        clusters: ['기후'],
+      };
+    }
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={concordBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    const tip = screen.getByTestId('stellar-hover-tooltip');
+    expect(tip.getAttribute('data-theme-color')).toBe('#4FD1C5');
+  });
+
+  it('#10 — cluster=most_active focuses highest-degree node in real mode (sets focusedId after load)', async () => {
+    searchParamsRef.current = new URLSearchParams('cluster=most_active');
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [
+        {
+          id: 'r1',
+          label: 'A · X',
+          cluster: 0,
+          weight: 1,
+          degree: 1,
+          x: 0, y: 0, z: 0,
+          subject: 'A', predicate: 'supports', object: 'X',
+        },
+        {
+          id: 'r2',
+          label: 'B · Y',
+          cluster: 1,
+          weight: 5,
+          degree: 5,
+          x: 0, y: 0, z: 0,
+          subject: 'B', predicate: 'supports', object: 'Y',
+        },
+      ],
+      links: [],
+      clusters: ['c0', 'c1'],
+    } satisfies StellarGraphData);
+    window.localStorage.setItem('lucid.stellar.source', 'real');
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    await waitFor(() => expect(realLoader).toHaveBeenCalled());
+    await waitFor(() => {
+      // r2 has higher degree, so cluster=most_active picks r2.
+      expect(lastRendererProps.current.focusedId).toBe('r2');
+    });
   });
 });
