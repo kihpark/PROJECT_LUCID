@@ -103,6 +103,13 @@ function pushFactAsNode(acc: NodeAccumulator, fact: RecallFact, clusterHint: num
     measurement_value: fact.measurement_value ?? null,
     measurement_unit: fact.measurement_unit ?? null,
     as_of: fact.as_of ?? null,
+    // fix/stellar-cluster-focus-real — entity-anchor pass-through.
+    // pickClusterFocusNode reads these to bind /stellar?cluster=<entity_uid>
+    // to ANY fact whose subject (or object) is that entity. Without these,
+    // node.id = fact_uid never matches the entity_uid param and the
+    // cluster-focus path silently falls back to most_active.
+    subject_uid: fact.subject_uid ?? null,
+    object_uid: fact.object_value && UUID4_RE.test(fact.object_value) ? fact.object_value : null,
   });
 }
 
@@ -210,6 +217,11 @@ export async function loadRealStellarGraph(
         subject: r.subject_label ?? '주체',
         predicate: 'is_recent',
         object: r.claim,
+        // fix/stellar-cluster-focus-real — same entity-anchor pass-through
+        // on the recent_validated overlay path. Brief carries subject_uid
+        // when available; null otherwise (older brief rows pre-OPL).
+        subject_uid: (r as { subject_uid?: string | null }).subject_uid ?? null,
+        object_uid: null,
       });
       if (acc.byId.size >= maxNodes) break;
     }

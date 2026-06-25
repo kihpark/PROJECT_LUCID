@@ -103,6 +103,23 @@ export interface StellarNode {
   measurement_unit?: string | null;
   /** measurement — timepoint the measurement is pinned to. */
   as_of?: string | null;
+  // fix/stellar-cluster-focus-real — entity-anchor pass-through.
+  //
+  // The cluster query param (/stellar?cluster=<entity_uid>) carries the
+  // subjects entity_uid (e.g. 8e68baf5… for "모스 탄"). The real
+  // adapter creates one node per FACT (node.id = fact_uid) — many facts
+  // can share the same subject_uid, so the param will NEVER match
+  // node.id. We carry the underlying entity uids through so
+  // pickClusterFocusNode can match node.subject_uid === clusterParam
+  // (the primary entity-anchor path) and node.object_uid === clusterParam
+  // (fallback when the entity appears as object). Synthetic nodes leave
+  // both undefined — the match path simply falls through to label / most-
+  // active, identical to today.
+  /** Entity uid of the fact subject (real mode); null on literal subjects. */
+  subject_uid?: string | null;
+  /** Entity uid of the fact object (real mode); null when the object is a
+   *  literal (number / date / Korean string) rather than an entity ref. */
+  object_uid?: string | null;
 }
 
 export interface StellarLink {

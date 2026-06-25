@@ -1168,9 +1168,17 @@ export function StellarGraph(props: StellarGraphProps) {
       //                                                 highlighted
       //   highlighted  → lifted                       — base palette
       //   distant      → mixToDim                     — dim
-      if (focusedId === node.id) return blendToWhite(lifted, 0.4);
+      // fix/stellar-cluster-focus-real - tier deltas bumped so the
+      // cluster-focus auto-focused node reads as a bright peak even
+      // when the user has not interacted yet. PO repro on the third
+      // pass: with deltas 0.4 / 0.22 the focused node looked nearly
+      // identical to its 1-hop ring under heavy bloom, so the visual
+      // payoff of /stellar?cluster=... never registered.
+      //   focused      -> blendToWhite(lifted, 0.60) (was 0.40)
+      //   selected     -> blendToWhite(lifted, 0.40) (was 0.22)
+      if (focusedId === node.id) return blendToWhite(lifted, 0.6);
       if (selectedId !== null && selectedId === node.id) {
-        return blendToWhite(lifted, 0.22);
+        return blendToWhite(lifted, 0.4);
       }
       if (neighborSet.has(node.id)) return lifted;
       return mixToDim(lifted, 0.18);
@@ -1210,9 +1218,14 @@ export function StellarGraph(props: StellarGraphProps) {
       //   focused 1.6 > selected 1.4 > highlighted 1.25 > distant 1.0
       // Selected sits clearly above highlighted on the geometry channel
       // too, matching the colour-tier shift in nodeColor.
+      // fix/stellar-cluster-focus-real - size scale bumped together
+      // with the colour tier deltas. The focused node now reads as
+      // a clearly larger disc (2.0 vs neighbour 1.25), which combines
+      // with the brighter blendToWhite to make /stellar?cluster=...
+      // visibly land on its target even at the cold camera distance.
       let scale = 1;
-      if (focusedId === node.id) scale = 1.6;
-      else if (selectedId !== null && selectedId === node.id) scale = 1.4;
+      if (focusedId === node.id) scale = 2.0;
+      else if (selectedId !== null && selectedId === node.id) scale = 1.6;
       else if (focusedId !== null && neighborSet.has(node.id)) scale = 1.25;
       return base * scale;
     },

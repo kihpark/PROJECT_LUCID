@@ -18,7 +18,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => searchParamsRef.current,
 }));
 
-import { StellarView, predicateThemeColor } from '@/components/StellarView';
+import { StellarView, predicateThemeColor, pickClusterFocusNode } from '@/components/StellarView';
 import type { StellarGraphData, StellarNode } from '@/lib/syntheticGraph';
 
 // Capture the props the renderer is asked to display so tests can assert
@@ -776,6 +776,147 @@ describe('StellarView', () => {
       expect(focusedId).toBeTruthy();
       // Synthetic data wins — query param intent beats localStorage timing.
       expect(['fake-1', 'fake-2']).toContain(focusedId);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // fix/stellar-cluster-focus-real - entity-anchor + tier delta cases.
+  // -------------------------------------------------------------------------
+
+  describe('pickClusterFocusNode (entity-anchor paths)', () => {
+    function makeData(nodes: Array<Partial<StellarNode> & { id: string }>): StellarGraphData {
+      return {
+        nodes: nodes.map((n) => ({
+          label: n.label ?? n.id,
+          cluster: n.cluster ?? 0,
+          weight: n.weight ?? 1,
+          x: 0, y: 0, z: 0,
+          subject: n.subject ?? 's',
+          predicate: n.predicate ?? 'supports',
+          object: n.object ?? 'o',
+          ...n,
+        })) as StellarNode[],
+        links: [],
+        clusters: ['c'],
+      };
+    }
+
+    it('Path 1: subject_uid match returns the highest-degree candidate', () => {
+      const data = makeData([
+        { id: 'fact-low', subject_uid: '8e68baf5', degree: 1 },
+        { id: 'fact-spine', subject_uid: '8e68baf5', degree: 12 },
+        { id: 'fact-mid', subject_uid: '8e68baf5', degree: 5 },
+        { id: 'other', subject_uid: 'aaaaaa', degree: 99 },
+      ]);
+      const picked = pickClusterFocusNode(data, '8e68baf5');
+      expect(picked?.id).toBe('fact-spine');
+    });
+
+    it('Path 2: object_uid match when entity appears as object', () => {
+      const data = makeData([
+        { id: 'fact-a', object_uid: '8e68baf5', degree: 3 },
+        { id: 'fact-b', object_uid: '8e68baf5', degree: 7 },
+        { id: 'other', subject_uid: 'cccc', degree: 100 },
+      ]);
+      const picked = pickClusterFocusNode(data, '8e68baf5');
+      expect(picked?.id).toBe('fact-b');
+    });
+
+    it('Path 3: exact node.id still works (synthetic-mode path)', () => {
+      const data = makeData([
+        { id: 'fake-2', degree: 1 },
+        { id: 'fake-1', degree: 9 },
+      ]);
+      const picked = pickClusterFocusNode(data, 'fake-2');
+      expect(picked?.id).toBe('fake-2');
+    });
+
+    it('Path 4: truncated uid prefix matches the full id', () => {
+      const data = makeData([
+        { id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', degree: 1 },
+        { id: 'ffffffff-0000-1111-2222-333333333333', degree: 1 },
+      ]);
+      const picked = pickClusterFocusNode(data, 'aaaaaaaa');
+      expect(picked?.id).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    });
+
+    it('subject_uid path beats id/label/fallback even when other node has higher degree', () => {
+      const data = makeData([
+        { id: 'spine', subject_uid: '8e68baf5', degree: 2 },
+        { id: 'unrelated-huge', subject_uid: 'zzzz', degree: 50 },
+      ]);
+      const picked = pickClusterFocusNode(data, '8e68baf5');
+      // The most-active fallback would have picked unrelated-huge.
+      expect(picked?.id).toBe('spine');
+    });
+
+    it('miss on all paths falls back to most-active picker', () => {
+      const data = makeData([
+        { id: 'a', cluster: 0, degree: 1 },
+        { id: 'b', cluster: 1, degree: 8 },
+        { id: 'c', cluster: 1, degree: 4 },
+      ]);
+      const picked = pickClusterFocusNode(data, 'no-such-anything');
+      expect(picked?.id).toBe('b');
+    });
+  });
+
+  it('fix/stellar-cluster-focus-real - ?cluster=<entity_uid> focuses an anchored fact (real mode)', async () => {
+    const ENTITY = '8e68baf5-97b1-4833-9604-a6b5dd99ec7b';
+    searchParamsRef.current = new URLSearchParams(`cluster=${ENTITY}`);
+    // Empty synthetic so the auto-focus does not latch on synthetic data
+    // before real loads. The effect bails on empty graph, re-runs after
+    // real arrives, and the subject_uid path picks the spine fact.
+    function emptySyntheticBuilder(): StellarGraphData {
+      return { nodes: [], links: [], clusters: [] };
+    }
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [
+        {
+          id: 'fact-spine',
+          label: 'spine',
+          cluster: 0,
+          weight: 1,
+          degree: 12,
+          x: 0, y: 0, z: 0,
+          subject: '모스 탄', predicate: 'states', object: 'X',
+          subject_uid: ENTITY,
+        },
+        {
+          id: 'fact-low',
+          label: 'low',
+          cluster: 0,
+          weight: 1,
+          degree: 1,
+          x: 0, y: 0, z: 0,
+          subject: '모스 탄', predicate: 'states', object: 'Y',
+          subject_uid: ENTITY,
+        },
+        {
+          id: 'unrelated-hot',
+          label: 'unrelated',
+          cluster: 1,
+          weight: 1,
+          degree: 99,
+          x: 0, y: 0, z: 0,
+          subject: '다른 사람', predicate: 'states', object: 'Z',
+          subject_uid: 'other-uid',
+        },
+      ],
+      links: [],
+      clusters: ['c0', 'c1'],
+    } satisfies StellarGraphData);
+    window.localStorage.setItem('lucid.stellar.source', 'real');
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={emptySyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    // Subject_uid match - spine fact (deg 12), NOT unrelated-hot (deg 99).
+    await waitFor(() => {
+      expect(lastRendererProps.current.focusedId).toBe('fact-spine');
     });
   });
 });
