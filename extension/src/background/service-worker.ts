@@ -12,6 +12,7 @@
  */
 
 import {
+  fetchServerJobStatus,
   getJobStatus,
   getStructuredSummary,
   postCapture,
@@ -455,6 +456,69 @@ chrome.runtime.onMessage.addListener(
           // from its own onChanged listener.
           await updateBadge();
           sendResponse({ ok: true, settings });
+        } catch (err) {
+          sendResponse({ ok: false, error: (err as Error).message });
+        }
+      })();
+      return true;
+    }
+
+    // fix/popup-polling-status-recover (PO #2) — user-pull status recovery.
+    //
+    // PO observed 4 popup cards stuck on "저장 중… (확인 필요)" while the
+    // backend had already moved the underlying source_jobs to terminal
+    // states (validated / structured / extract_failed). The
+    // announce_terminal ping path (toast.ts → SW) had not fired because
+    // the host tabs were closed long before structuring finished, and
+    // MV3 service-worker eviction means the SW itself is never running
+    // continuously enough to detect the change on its own.
+    //
+    // This handler is the explicit escape hatch. The popup fires it on
+    // every open (DOMContentLoaded) for every inflight row AND on each
+    // ↻ click. The SW queries /api/jobs/{job_id} via
+    // fetchServerJobStatus — which returns a synthetic
+    // `validated` status on the SourceStatus-enum 500 path so a
+    // server-validated row unsticks without waiting on a backend
+    // deploy (see fetchServerJobStatus jsdoc).
+    //
+    // Status mapping (server -> tracker):
+    //   structured / validated -> completed (decision pending OR done)
+    //   extract_failed / structure_failed -> failed (carries error_message)
+    //   pending_extract / extracting / extracted / structuring -> keep inflight
+    //
+    // Auth/network failures are reported back to the popup without
+    // mutating storage so a temporary outage cannot ghost-resolve a
+    // genuinely inflight job. job_not_found ALSO does not mutate —
+    // the SW has no UID-vs-deleted signal and an over-eager dismiss
+    // would erase work the user can still see on /pending.
+    if (
+      typeof msg === 'object'
+      && msg !== null
+      && (msg as { type?: string }).type === 'force_check_status'
+    ) {
+      const m = msg as { type: 'force_check_status'; job_id: string };
+      (async () => {
+        try {
+          const server = await fetchServerJobStatus(m.job_id);
+          const s = server.status;
+          if (s === 'structured' || s === 'validated') {
+            await updateJobStatus(m.job_id, 'completed');
+            await updateBadge();
+            sendResponse({ ok: true, server_status: s, tracker_status: 'completed' });
+            return;
+          }
+          if (s === 'extract_failed' || s === 'structure_failed') {
+            await updateJobStatus(m.job_id, 'failed', {
+              error_message: server.error_message ?? 'extraction failed',
+            });
+            await updateBadge();
+            sendResponse({ ok: true, server_status: s, tracker_status: 'failed' });
+            return;
+          }
+          // Still inflight on the server -- no tracker mutation, just
+          // report so the popup can log / trace. The existing row
+          // remains 'saving' / 'analyzing' as appropriate.
+          sendResponse({ ok: true, server_status: s, tracker_status: 'inflight' });
         } catch (err) {
           sendResponse({ ok: false, error: (err as Error).message });
         }

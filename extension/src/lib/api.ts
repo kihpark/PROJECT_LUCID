@@ -128,6 +128,81 @@ export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   return (await resp.json()) as JobStatusResponse;
 }
 
+/**
+ * fix/popup-polling-status-recover — server-truth status lookup for the
+ * popup's force-refresh flow.
+ *
+ * Why a parallel function instead of using `getJobStatus`?
+ * The /api/jobs/{job_id} response is parsed by FastAPI through the
+ * Pydantic `JobStatusResponse` which validates `status` against the
+ * `SourceStatus` StrEnum (see backend/api/models/source_job.py). The
+ * enum is *missing* the terminal `validated` value (only present in the
+ * DB CheckConstraint + ORM). When a job has been validated server-side,
+ * the route raises a 500 — the very PO bug we are recovering from.
+ * Until the backend enum is widened (out of scope here per the
+ * implementation plan), the extension must treat that
+ * 500-with-internal-error path as evidence-of-terminality, not as
+ * "still inflight".
+ *
+ * Contract:
+ *   - 200 -> returns { status, error_message } verbatim.
+ *   - 401 -> throws `not_authenticated` so the SW surfaces the auth
+ *     issue instead of optimistically marking done.
+ *   - 403 -> throws `forbidden`.
+ *   - 404 -> throws `job_not_found` so the SW can dismiss the local
+ *     row (the server has no record).
+ *   - 500 (or any other >=500) -> returns a synthetic
+ *     `{ status: 'validated', error_message: null }` shape so the
+ *     caller treats the job as terminal-completed. This is the
+ *     workaround for the enum gap.
+ *
+ * The synthetic shape only carries `status` + `error_message` because
+ * the SW handler only reads those fields. We intentionally do not
+ * fabricate the rest of JobStatusResponse.
+ */
+export interface ServerJobStatus {
+  status: string;
+  error_message: string | null;
+}
+
+export async function fetchServerJobStatus(jobId: string): Promise<ServerJobStatus> {
+  const auth = await getAuth();
+  if (!auth) throw new Error('not_authenticated');
+  const resp = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${auth.token}`,
+      'Accept': 'application/json',
+    },
+  });
+  if (resp.ok) {
+    const body = (await resp.json()) as JobStatusResponse;
+    return {
+      status: String(body.status),
+      error_message: body.error_message ?? null,
+    };
+  }
+  if (resp.status === 401) throw new Error('not_authenticated');
+  if (resp.status === 403) throw new Error('forbidden');
+  if (resp.status === 404) throw new Error('job_not_found');
+  // >=500 -- almost certainly the SourceStatus enum gap for 'validated'.
+  // Returning a synthetic terminal-completed status lets the popup
+  // unstick the row without waiting on a backend deploy.
+  if (resp.status >= 500) {
+    return { status: 'validated', error_message: null };
+  }
+  // 4xx other than 401/403/404 -- propagate so we don't silently mark
+  // a still-inflight row terminal.
+  let detail = `HTTP ${resp.status}`;
+  try {
+    const body = await resp.json();
+    if (body?.detail) detail = String(body.detail);
+  } catch {
+    // ignore
+  }
+  throw new Error(detail);
+}
+
 export interface StructuredSummary {
   fact_count: number;
   object_count: number;

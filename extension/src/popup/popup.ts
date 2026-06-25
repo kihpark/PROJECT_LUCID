@@ -422,10 +422,50 @@ async function loadBriefSnapshot(): Promise<{
   return cachedBrief;
 }
 
+/**
+ * fix/popup-polling-status-recover — pull-side recovery for stuck rows.
+ *
+ * The SW's `force_check_status` handler queries /api/jobs/{job_id} and
+ * flips the tracker row to its terminal state. We fan out one message
+ * per inflight job so the popup unsticks even when MV3 SW eviction
+ * killed the in-process polling and the host tab was closed before
+ * announce_terminal could fire.
+ *
+ * Triggers:
+ *   - boot (renderLoggedIn → forceCheckInflightJobs) so the very first
+ *     popup open after a restart already shows server-truthful pills.
+ *   - every ↻ refresh so the user can pull manually when an auto-check
+ *     missed a slow job.
+ *
+ * Failures are swallowed per-job: a single 401 must not block the
+ * other rows. The SW handler is the gate that decides whether
+ * storage is mutated — the popup only fans out + lets the storage
+ * onChanged listener re-render.
+ */
+async function forceCheckInflightJobs(jobs: TrackedJob[]): Promise<void> {
+  const inflight = jobs.filter(
+    (j) => j.status === "saving" || j.status === "analyzing",
+  );
+  if (inflight.length === 0) return;
+  await Promise.all(
+    inflight.map(async (job) => {
+      try {
+        await chrome.runtime.sendMessage({
+          type: "force_check_status",
+          job_id: job.job_id,
+        });
+      } catch (err) {
+        console.warn("[popup] force_check_status failed", job.job_id, err);
+      }
+    }),
+  );
+}
+
 let refreshing = false;
 async function refreshAll(): Promise<void> {
   if (refreshing) return;
   refreshing = true;
+  let trackerSnapshot: TrackedJob[] = [];
   try {
     const reviewSection = document.getElementById("review-pane");
     const settingsSection = document.getElementById("tracker-settings");
@@ -436,6 +476,7 @@ async function refreshAll(): Promise<void> {
       loadBriefSnapshot(),
       fetchTrackerState(),
     ]);
+    trackerSnapshot = tracker.jobs;
     renderReviewPane(reviewSection, {
       pendingCount: briefSnap.pendingCount,
       briefFailed: briefSnap.briefFailed,
@@ -446,6 +487,12 @@ async function refreshAll(): Promise<void> {
   } finally {
     refreshing = false;
   }
+  // fix/popup-polling-status-recover — force per-job server status
+  // checks AFTER `refreshing` is released so the storage-onChanged
+  // listener in installStorageListener can re-render without the
+  // re-entry guard rejecting it. Fire-and-forget: the SW writes back
+  // through chrome.storage.local and the listener picks it up.
+  void forceCheckInflightJobs(trackerSnapshot);
 }
 
 async function refreshTrackerOnly(): Promise<void> {
