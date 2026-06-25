@@ -13,6 +13,7 @@ import {
   addJob,
   clearAllJobs,
   clearCompleted,
+  dismissJob,
   getJobs,
   getSettings,
   JOBS_MAX_ENTRIES,
@@ -264,5 +265,55 @@ describe('job-tracker — clearAllJobs', () => {
     });
     await clearAllJobs();
     expect(state[JOBS_KEY]).toEqual([]);
+  });
+});
+
+describe('job-tracker — dismissJob (feat/popup-cleanup-discard-sync)', () => {
+  it('removes a single row regardless of status', async () => {
+    const state = fakeStorage({
+      [JOBS_KEY]: [
+        makeJob('keep', 'saving', 2000),
+        makeJob('drop', 'saving', 1000),
+      ],
+    });
+    await dismissJob('drop');
+    const stored = state[JOBS_KEY] as TrackedJob[];
+    expect(stored.length).toBe(1);
+    expect(stored[0].job_id).toBe('keep');
+  });
+
+  it('removes a completed row too (covers cleanup of stale completed)', async () => {
+    const state = fakeStorage({
+      [JOBS_KEY]: [
+        makeJob('completed-row', 'completed', 1000, { completed_at: 2000 }),
+      ],
+    });
+    await dismissJob('completed-row');
+    const stored = state[JOBS_KEY] as TrackedJob[];
+    expect(stored).toEqual([]);
+  });
+
+  it('is a no-op when the id is unknown (no write)', async () => {
+    chrome.storage.local.set.mockClear();
+    fakeStorage({
+      [JOBS_KEY]: [makeJob('alive', 'analyzing', 1000)],
+    });
+    chrome.storage.local.set.mockClear();
+    await dismissJob('does-not-exist');
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it('does not touch other rows', async () => {
+    const state = fakeStorage({
+      [JOBS_KEY]: [
+        makeJob('a', 'saving', 3000),
+        makeJob('b', 'analyzing', 2000),
+        makeJob('c', 'completed', 1000, { completed_at: 1500 }),
+      ],
+    });
+    await dismissJob('b');
+    const stored = state[JOBS_KEY] as TrackedJob[];
+    const ids = stored.map((j) => j.job_id).sort();
+    expect(ids).toEqual(['a', 'c']);
   });
 });

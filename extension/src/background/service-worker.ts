@@ -30,6 +30,7 @@ import {
 import {
   addJob,
   clearCompleted,
+  dismissJob,
   getJobs,
   getSettings,
   setSettings,
@@ -390,6 +391,31 @@ chrome.runtime.onMessage.addListener(
       (async () => {
         try {
           await clearCompleted();
+          await updateBadge();
+          sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false, error: (err as Error).message });
+        }
+      })();
+      return true;
+    }
+
+    // feat/popup-cleanup-discard-sync (PO #1) — user-driven single-row
+    // dismiss. Mirrors clear_completed but targets one job_id; safe for
+    // any status (saving / analyzing / completed / failed). Pure
+    // storage cleanup; never contacts the backend, never mutates the
+    // brief. The popup card list and the brief-derived header count
+    // are separate sources of truth — this handler only touches the
+    // former.
+    if (
+      typeof msg === 'object'
+      && msg !== null
+      && (msg as { type?: string }).type === 'dismiss_job'
+    ) {
+      const m = msg as { type: 'dismiss_job'; job_id: string };
+      (async () => {
+        try {
+          await dismissJob(m.job_id);
           await updateBadge();
           sendResponse({ ok: true });
         } catch (err) {
