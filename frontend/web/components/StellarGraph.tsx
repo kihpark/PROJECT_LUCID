@@ -318,6 +318,13 @@ interface ForceGraphRefHandle {
     autoRotateSpeed?: number;
     enableDamping?: boolean;
     dampingFactor?: number;
+    // stellar-zoom-recover — wheel-zoom knobs on OrbitControls. Three's
+    // OrbitControls exposes these as plain mutable props; we narrow only
+    // what we actually touch on line ~691.
+    enableZoom?: boolean;
+    zoomSpeed?: number;
+    minDistance?: number;
+    maxDistance?: number;
   };
   // B-62-fix2 — added for bloom-accumulation defeat. We need the renderer
   // to wipe UnrealBloomPass's ping-pong targets every frame.
