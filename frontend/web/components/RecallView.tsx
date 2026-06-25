@@ -1223,7 +1223,12 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
             type="checkbox"
             checked={state.claimOnly}
             data-testid="control-claim-only-checkbox"
-            onChange={(e) => onChange({ ...state, claimOnly: e.target.checked })}
+            onChange={(e) => {
+              if (typeof console !== 'undefined') {
+                console.debug('[recall] claimOnly toggle', e.target.checked);
+              }
+              onChange({ ...state, claimOnly: e.target.checked });
+            }}
           />
           <span>💬 화자 인용만 (claim)</span>
         </label>
@@ -1248,7 +1253,12 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
             type="checkbox"
             checked={state.measurementOnly}
             data-testid="control-measurement-only-checkbox"
-            onChange={(e) => onChange({ ...state, measurementOnly: e.target.checked })}
+            onChange={(e) => {
+              if (typeof console !== 'undefined') {
+                console.debug('[recall] measurementOnly toggle', e.target.checked);
+              }
+              onChange({ ...state, measurementOnly: e.target.checked });
+            }}
           />
           <span>📊 수치만 (measurement)</span>
         </label>
@@ -1659,6 +1669,12 @@ function RecallPowerBody({
                   {controls.keyword2.trim() && sortedFacts.length !== visibleFacts.length
                     ? ` · 키워드 "${controls.keyword2.trim()}" 로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
                     : ''}
+                  {controls.claimOnly && sortedFacts.length !== visibleFacts.length
+                    ? ` · 화자 인용만 (claim) 으로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
+                    : ''}
+                  {controls.measurementOnly && sortedFacts.length !== visibleFacts.length
+                    ? ` · 수치만 (measurement) 으로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
+                    : ''}
                 </p>
                 {visibleFacts.length === 0 ? (
                   <p
@@ -1667,6 +1683,10 @@ function RecallPowerBody({
                   >
                     {controls.keyword2.trim()
                       ? `키워드 「${controls.keyword2.trim()}」 와 일치하는 결과가 없습니다.`
+                      : controls.claimOnly
+                      ? '화자 인용 (claim) 층위의 결과가 없습니다. 좌측 패널의 체크박스를 해제하면 모든 층위가 표시됩니다.'
+                      : controls.measurementOnly
+                      ? '수치 (measurement) 층위의 결과가 없습니다. 좌측 패널의 체크박스를 해제하면 모든 층위가 표시됩니다.'
                       : factTypeFilter
                       ? `${FACT_TYPE_LABELS[factTypeFilter]} 층위의 결과가 없습니다.`
                       : '표시할 결과가 없습니다.'}
