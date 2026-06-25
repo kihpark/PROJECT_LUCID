@@ -82,8 +82,8 @@ async function flushTwice(): Promise<void> {
   await new Promise((r) => setTimeout(r, 0));
 }
 
-describe('Quick Lucid popup — brief block', () => {
-  it('renders pending count + first 3 recent entries when /api/home/brief returns data', async () => {
+describe('Quick Lucid popup — review pane header (brief-derived count)', () => {
+  it('renders the pending count from /api/home/brief inside the unified review header — and does NOT render fact-level recent_validated entries (#2 fact-level hide regression)', async () => {
     stubLoggedIn();
     stubFetchOk({
       totals: { facts: 12, entities: 8, sources: 4, this_week_validated: 3 },
@@ -101,51 +101,52 @@ describe('Quick Lucid popup — brief block', () => {
           subject_label: 'Tim Cook',
           validated_at: '2026-06-19T00:30:00Z',
         },
-        {
-          fact_uid: 'f3',
-          claim: 'CMU is located in Pittsburgh, Pennsylvania',
-          subject_label: 'CMU',
-          validated_at: '2026-06-19T00:00:00Z',
-        },
-        {
-          fact_uid: 'f4',
-          claim: 'beyond limit row',
-          subject_label: 'extra',
-          validated_at: '2026-06-18T23:00:00Z',
-        },
       ],
       top_cluster: null,
       is_empty: false,
     });
+    chrome.runtime.sendMessage.mockImplementation((msg: { type?: string }) => {
+      if (msg?.type === 'list_jobs') return Promise.resolve({ ok: true, jobs: [] });
+      if (msg?.type === 'get_settings') return Promise.resolve({ ok: true, settings: { trackingEnabled: true } });
+      return Promise.resolve({ ok: false });
+    });
 
     await import('@/popup/popup.ts');
+    await flushTwice();
     await flushTwice();
 
     const pending = document.querySelector('.brief-pending');
     expect(pending?.textContent).toBe('7');
 
-    const items = document.querySelectorAll('.brief-recent li');
-    expect(items.length).toBe(3);
-    expect(items[0]?.querySelector('.subject')?.textContent).toBe('GPT-4');
-    expect(items[0]?.querySelector('.claim')?.textContent).toMatch(/GPT-4 is a transformer/);
-    expect(items[1]?.querySelector('.subject')?.textContent).toBe('Tim Cook');
-    expect(items[2]?.querySelector('.subject')?.textContent).toBe('CMU');
+    // feat/quick-lucid-popup-redesign — recent_validated facts are
+    // intentionally hidden: the unified pane stays at the job /
+    // pending-count altitude, the user resolves details on /pending.
+    expect(document.querySelectorAll('.brief-recent li').length).toBe(0);
+    expect(document.querySelector('.brief-recent')).toBeNull();
 
     expect(document.getElementById('capture-btn')).not.toBeNull();
     expect(document.getElementById('ask-btn')).not.toBeNull();
     expect(document.getElementById('home-btn')).not.toBeNull();
   });
 
-  it('renders the muted fallback when /api/home/brief rejects — other 3 capabilities remain operational', async () => {
+  it('renders a graceful "검토 대기 ›" link when /api/home/brief rejects — capture / ask / home stay operational', async () => {
     stubLoggedIn();
     stubFetchReject(new Error('CORS blocked'));
+    chrome.runtime.sendMessage.mockImplementation((msg: { type?: string }) => {
+      if (msg?.type === 'list_jobs') return Promise.resolve({ ok: true, jobs: [] });
+      if (msg?.type === 'get_settings') return Promise.resolve({ ok: true, settings: { trackingEnabled: true } });
+      return Promise.resolve({ ok: false });
+    });
 
     await import('@/popup/popup.ts');
     await flushTwice();
+    await flushTwice();
 
-    const fallback = document.querySelector('.brief-fallback');
-    expect(fallback?.textContent).toBe('오늘의 brief 를 불러올 수 없습니다');
-    expect(document.querySelectorAll('.brief-recent li').length).toBe(0);
+    const link = document.querySelector('.review-pending-link');
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toMatch(/검토 대기/);
+    // Brief failed → number-less fallback variant; no count span.
+    expect(document.querySelector('.brief-pending')).toBeNull();
 
     const captureBtn = document.getElementById('capture-btn') as HTMLButtonElement;
     const askBtn = document.getElementById('ask-btn') as HTMLButtonElement;

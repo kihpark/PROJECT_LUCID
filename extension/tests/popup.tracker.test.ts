@@ -123,7 +123,7 @@ async function flushManyTimes(): Promise<void> {
 }
 
 describe('popup tracker — empty state', () => {
-  it('renders the "이번 세션" heading + empty message when no jobs are tracked', async () => {
+  it('renders the unified review pane with the empty message when no jobs are tracked', async () => {
     stubLoggedIn();
     stubFetchReject();
     stubSendMessage({ jobs: [] });
@@ -131,13 +131,14 @@ describe('popup tracker — empty state', () => {
     await import('@/popup/popup.ts');
     await flushManyTimes();
 
-    const tracker = document.getElementById('tracker');
-    expect(tracker).not.toBeNull();
-    expect(tracker?.querySelector('.tracker-heading-label')?.textContent).toBe(
-      '이번 세션',
-    );
-    expect(tracker?.querySelector('.tracker-empty')).not.toBeNull();
-    expect(tracker?.querySelectorAll('.tracker-job').length).toBe(0);
+    const pane = document.getElementById('review-pane');
+    expect(pane).not.toBeNull();
+    // feat/quick-lucid-popup-redesign — the per-session "이번 세션"
+    // heading is gone; the header now carries the /pending link only.
+    expect(pane?.querySelector('.tracker-heading-label')).toBeNull();
+    expect(pane?.querySelector('.review-pending-link')).not.toBeNull();
+    expect(pane?.querySelector('.tracker-empty')).not.toBeNull();
+    expect(pane?.querySelectorAll('.tracker-job').length).toBe(0);
   });
 });
 
@@ -314,8 +315,8 @@ describe('popup tracker — toggle off', () => {
   });
 });
 
-describe('popup tracker — counts surfaced in heading', () => {
-  it('summarizes inflight/ready/failed in the heading meta', async () => {
+describe('popup tracker — mixed status job cards (counts now expressed by per-card pills)', () => {
+  it('renders one card per tracked job with its status pill — heading meta string is gone with the redesign', async () => {
     stubLoggedIn();
     stubFetchReject();
     stubSendMessage({
@@ -346,8 +347,15 @@ describe('popup tracker — counts surfaced in heading', () => {
     await import('@/popup/popup.ts');
     await flushManyTimes();
 
-    const meta = document.querySelector('.tracker-heading-meta');
-    expect(meta?.textContent).toMatch(/진행 1/);
-    expect(meta?.textContent).toMatch(/완료 2/);
+    // The unified pane: one card per job, status pill carries the
+    // per-row label — no separate summary string in the header.
+    expect(document.querySelectorAll('.tracker-job').length).toBe(3);
+    expect(document.querySelector('.tracker-heading-meta')).toBeNull();
+
+    const pills = Array.from(
+      document.querySelectorAll('.tracker-status'),
+    ).map((p) => (p as HTMLElement).className);
+    expect(pills.filter((c) => /analyzing/.test(c)).length).toBe(1);
+    expect(pills.filter((c) => /completed/.test(c)).length).toBe(2);
   });
 });
