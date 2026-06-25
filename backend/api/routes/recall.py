@@ -1821,11 +1821,16 @@ def list_ledger(
     body: dict[str, Any] = {
         "from": offset,
         "size": limit,
-        # Tie-break on _id so the order is stable when multiple facts
-        # share an exact validated_at (e.g. an accept-all batch).
+        # Tie-break on fact_uid (keyword) so the order is stable when
+        # multiple facts share an exact validated_at (e.g. an accept-all
+        # batch). _id fielddata access is disabled in ES 8+
+        # (indices.id_field_data.enabled=false), which silently broke
+        # the previous sort and made every ledger call fall through to
+        # the fail-soft empty path. fact_uid is keyword-indexed so it
+        # sorts without fielddata.
         "sort": [
             {"validated_at": {"order": "desc"}},
-            {"_id": {"order": "desc"}},
+            {"fact_uid": {"order": "desc"}},
         ],
         "query": {
             "bool": {
