@@ -13,6 +13,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BOUNDARY_FRACTION,
+  STARFIELD_RADIUS,
+  clampNodeToBoundary,
+  clampNodesToBoundary,
+  computeBoundaryRadius,
   computeCenterStrength,
   computeChargeStrength,
   computeInitialCameraDistance,
@@ -130,5 +135,80 @@ describe('computeInitialCameraDistance', () => {
     // Extreme sizes saturate at the 900 ceiling — the camera doesn't run
     // off into the starfield.
     expect(computeInitialCameraDistance(100000)).toBe(900);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fix/stellar-cleanup #8 — boundary force helpers.
+// ---------------------------------------------------------------------------
+
+describe('computeBoundaryRadius', () => {
+  it('defaults to 70% of the starfield radius', () => {
+    expect(computeBoundaryRadius()).toBe(STARFIELD_RADIUS * BOUNDARY_FRACTION);
+  });
+
+  it('respects custom starfield radius', () => {
+    expect(computeBoundaryRadius(1000)).toBe(700);
+    expect(computeBoundaryRadius(2000)).toBe(1400);
+  });
+
+  it('never returns zero or negative for non-positive input', () => {
+    expect(computeBoundaryRadius(0)).toBeGreaterThan(0);
+    expect(computeBoundaryRadius(-100)).toBeGreaterThan(0);
+  });
+});
+
+describe('clampNodeToBoundary', () => {
+  it('leaves nodes inside the boundary untouched', () => {
+    const node = { x: 100, y: 200, z: -50 };
+    expect(clampNodeToBoundary(node, 1000)).toBe(false);
+    expect(node.x).toBe(100);
+    expect(node.y).toBe(200);
+    expect(node.z).toBe(-50);
+  });
+
+  it('pulls nodes past the boundary back to the boundary surface', () => {
+    const node = { x: 6000, y: 0, z: 0 };
+    expect(clampNodeToBoundary(node, 1000)).toBe(true);
+    expect(node.x).toBe(1000);
+    expect(node.y).toBe(0);
+    expect(node.z).toBe(0);
+  });
+
+  it('preserves direction when clamping (proportional scale)', () => {
+    const node = { x: 600, y: 800, z: 0 }; // distance 1000
+    clampNodeToBoundary(node, 500); // should halve
+    expect(Math.round(node.x as number)).toBe(300);
+    expect(Math.round(node.y as number)).toBe(400);
+  });
+
+  it('treats missing axes as zero', () => {
+    const node: { x?: number; y?: number; z?: number } = {};
+    expect(clampNodeToBoundary(node, 1000)).toBe(false);
+  });
+});
+
+describe('clampNodesToBoundary — boundary force payload', () => {
+  it('keeps every node within the starfield boundary', () => {
+    const maxDist = computeBoundaryRadius();
+    const nodes = [
+      { x: 0, y: 0, z: 0 },
+      { x: 100, y: 200, z: 300 },
+      { x: 9000, y: 0, z: 0 },         // way past boundary
+      { x: 5000, y: 5000, z: 5000 },   // ~8660 distance, past boundary
+    ];
+    clampNodesToBoundary(nodes, maxDist);
+    for (const n of nodes) {
+      const dist = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      expect(dist).toBeLessThanOrEqual(maxDist + 1e-6);
+    }
+  });
+
+  it('all clamped nodes sit comfortably inside the visible starfield', () => {
+    // PO acceptance: nodes must read as INSIDE the cosmic backdrop.
+    // 0.7 × STARFIELD_RADIUS = 3150, which is well under 4500 (where stars sit).
+    const maxDist = computeBoundaryRadius();
+    expect(maxDist).toBeLessThan(STARFIELD_RADIUS);
+    expect(maxDist / STARFIELD_RADIUS).toBeLessThanOrEqual(0.7);
   });
 });

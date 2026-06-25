@@ -158,6 +158,68 @@ export function computeInitialCameraDistance(totalNodes: number): number {
   return Math.round(Math.max(130, Math.min(900, 30 + 18 * Math.sqrt(n))));
 }
 
+// ---------------------------------------------------------------------------
+// fix/stellar-cleanup #8 — starfield boundary force.
+//
+// PO repro: at extreme zoom-out (0.02×) the 130-node real graph spilled past
+// the starfield sphere — nodes drifted outside the "우주" backdrop because
+// the d3-force layout has no upper bound on how far it can push nodes.
+//
+// Fix: an inner "soft cage" radius proportional to the starfield. Any node
+// that drifts past this radius is pulled back to the boundary at the end of
+// every simulation tick. The starfield itself sits at 4500 units; we cap
+// node positions at 70% of that so nodes are always visibly inside the
+// cosmic backdrop, never spilling past it even at max zoom-out.
+// ---------------------------------------------------------------------------
+
+/** Universe sphere radius (starfield). Exported so the boundary radius
+ *  helper and tests stay in sync with `attachStarfield`'s placement. */
+export const STARFIELD_RADIUS = 4500;
+
+/** Fraction of the starfield radius beyond which nodes get clamped back.
+ *  0.7 means nodes are kept inside the inner 70% of the universe sphere —
+ *  comfortably away from the stars themselves. */
+export const BOUNDARY_FRACTION = 0.7;
+
+/** Maximum distance from the scene origin any node is allowed to reach.
+ *  Pure function so the test suite can pin the policy without rendering. */
+export function computeBoundaryRadius(starfieldRadius: number = STARFIELD_RADIUS): number {
+  return Math.max(1, starfieldRadius) * BOUNDARY_FRACTION;
+}
+
+/** Clamp a single node's position back inside the boundary sphere.
+ *  Mutates the node in place — d3-force calls this once per tick per node
+ *  via `clampNodesToBoundary`. Returns true if the node was clamped (used
+ *  by tests to assert behaviour without inspecting numeric drift). */
+export function clampNodeToBoundary(
+  node: { x?: number; y?: number; z?: number },
+  maxDist: number,
+): boolean {
+  const x = node.x ?? 0;
+  const y = node.y ?? 0;
+  const z = node.z ?? 0;
+  const distSq = x * x + y * y + z * z;
+  const maxSq = maxDist * maxDist;
+  if (distSq <= maxSq) return false;
+  const dist = Math.sqrt(distSq);
+  const factor = maxDist / dist;
+  node.x = x * factor;
+  node.y = y * factor;
+  node.z = z * factor;
+  return true;
+}
+
+/** Apply the boundary clamp to every node in the array — used as the body
+ *  of a custom d3-force registered against the ForceGraph3D simulation. */
+export function clampNodesToBoundary(
+  nodes: Array<{ x?: number; y?: number; z?: number }>,
+  maxDist: number,
+): void {
+  for (const node of nodes) {
+    clampNodeToBoundary(node, maxDist);
+  }
+}
+
 export interface StellarGraphProps {
   /** Graph payload. Updating swaps the canvas data; the camera is preserved. */
   data: StellarGraphData;
@@ -424,6 +486,9 @@ export function StellarGraph(props: StellarGraphProps) {
   // handleEngineReady depend on `data` (which would defeat the single-shot
   // guard and reset the camera on every data update).
   const nodeCountRef = useRef(data.nodes.length);
+  // fix/stellar-cleanup #8 — live node-array ref so the boundary force
+  // sees position updates after data swaps without re-running handleEngineReady.
+  const nodesRef = useRef(data.nodes);
   // Derive the dist once per data swap and stash in the ref. The
   // handleEngineReady single-shot guard means this only affects the
   // camera at first mount; subsequent toggles/refetches update the
@@ -432,6 +497,7 @@ export function StellarGraph(props: StellarGraphProps) {
     // feat/stellar-camera-focus — floor lowered 180 → 130 (small graphs
     // sit closer now that they huddle inward; see computeInitialCameraDistance).
     nodeCountRef.current = data.nodes.length;
+    nodesRef.current = data.nodes;
     initialDistRef.current = computeInitialCameraDistance(data.nodes.length);
   }, [data]);
   // B-62-fix-zoom-reset — single-shot guard for handleEngineReady. PO
@@ -657,6 +723,24 @@ export function StellarGraph(props: StellarGraphProps) {
       inst.d3Force?.('center')?.strength?.(centerStrength);
     }
 
+    // fix/stellar-cleanup #8 — boundary force keeps nodes inside the
+    // starfield. Custom d3-force: on each tick we clamp any node that
+    // has drifted past `computeBoundaryRadius()` back to the boundary.
+    // This is load-bearing at extreme zoom-out — without it, the real
+    // graph's clusters spill outside the 4500-unit starfield sphere
+    // and read as "lost in space" rather than "inside the universe".
+    // We read from `nodesRef` so data swaps (synthetic ↔ real) keep
+    // the force pointing at the live node array without re-running
+    // the single-shot handleEngineReady.
+    type D3ForceRegister = (name: string, force?: (alpha: number) => void) => unknown;
+    const registerForce = (inst as unknown as { d3Force?: D3ForceRegister }).d3Force;
+    if (typeof registerForce === 'function') {
+      const maxDist = computeBoundaryRadius();
+      registerForce.call(inst, 'boundary', () => {
+        clampNodesToBoundary(nodesRef.current, maxDist);
+      });
+    }
+
     // B-62-search-legibility — pull-back uses data-aware initial dist
     // so a 65-node real graph doesn't open as dust at z=900.
     handle.cameraPosition?.(
@@ -800,35 +884,55 @@ export function StellarGraph(props: StellarGraphProps) {
     return () => window.clearInterval(id);
   }, []);
 
-  // B-62-search-legibility — fly camera to the focused node. Triggers
-  // on focus changes from both click AND the new search bar. The
-  // simulation may not have settled when this fires, in which case
-  // node.x/y/z default to 0; we guard against the all-zero case so
-  // the camera stays put rather than teleporting to the origin.
+  // B-62-search-legibility + fix/stellar-cleanup #10 — fly camera to
+  // the focused node. Triggers on focus changes from both click AND
+  // the search bar AND the /stellar?cluster= auto-focus. The simulation
+  // may not have placed nodes yet when this fires — real-mode nodes
+  // are seeded at (0,0,0) by the adapter and only get real positions
+  // after d3-force ticks. We poll for up to ~3s until the node has a
+  // non-zero position, then fly. Without this retry the PO repro for
+  // #10 ("HOME 살펴보기 → STELLAR 클러스터 focus 안 됨") never moves
+  // the camera even though focusedId is correctly set.
   useEffect(() => {
     if (!focusedId) return;
-    const node = data.nodes.find((n) => n.id === focusedId) as
-      | (StellarNode & { x?: number; y?: number; z?: number })
-      | undefined;
-    if (!node) return;
-    const x = node.x ?? 0;
-    const y = node.y ?? 0;
-    const z = node.z ?? 0;
-    if (x === 0 && y === 0 && z === 0) return;
-    const handle = fgRef.current;
-    if (!handle?.cameraPosition) return;
-    // Pull back along the node's outward direction so the focal node
-    // sits in the centre of the view with its 1-hop neighbours visible.
-    // Use a distance scaled to the data so small graphs don't dolly too
-    // far. 1.2× node-radius from origin gives a tight but workable frame.
-    const len = Math.sqrt(x * x + y * y + z * z) || 1;
-    const dollyOut = 90;
-    const k = (len + dollyOut) / len;
-    handle.cameraPosition(
-      { x: x * k, y: y * k, z: z * k },
-      { x, y, z },
-      900,
-    );
+    let cancelled = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 30; // ~3s at 100ms interval
+
+    function tryFly(): void {
+      if (cancelled) return;
+      const node = data.nodes.find((n) => n.id === focusedId) as
+        | (StellarNode & { x?: number; y?: number; z?: number })
+        | undefined;
+      if (!node) return;
+      const x = node.x ?? 0;
+      const y = node.y ?? 0;
+      const z = node.z ?? 0;
+      if (x === 0 && y === 0 && z === 0) {
+        attempts += 1;
+        if (attempts < MAX_ATTEMPTS) {
+          setTimeout(tryFly, 100);
+        }
+        return;
+      }
+      const handle = fgRef.current;
+      if (!handle?.cameraPosition) return;
+      // Pull back along the node's outward direction so the focal node
+      // sits in the centre of the view with its 1-hop neighbours visible.
+      const len = Math.sqrt(x * x + y * y + z * z) || 1;
+      const dollyOut = 90;
+      const k = (len + dollyOut) / len;
+      handle.cameraPosition(
+        { x: x * k, y: y * k, z: z * k },
+        { x, y, z },
+        900,
+      );
+    }
+
+    tryFly();
+    return () => {
+      cancelled = true;
+    };
   }, [focusedId, data]);
 
   // B-62-focus-select-actions — selected node gets a *gentle* lookAt
@@ -1087,9 +1191,13 @@ export function StellarGraph(props: StellarGraphProps) {
   // HoverTooltip reacts to onNodeHover events.
   const handleHoverInternal = onNodeHover ?? undefined;
 
-  // Tooltip text — react-force-graph reads `nodeLabel` to render the default
-  // hover hint. Our parent component overlays a richer tooltip on top.
-  const labelOf = useCallback((node: StellarNode): string => node.label, []);
+  // fix/stellar-cleanup #9 — the `labelOf` callback (and its `nodeLabel`
+  // prop on ForceGraph3D) used to feed react-force-graph-3d's default
+  // hover hint — the small pill that rendered "subject · object" next
+  // to the node. That pill duplicated the floating HoverTooltip in
+  // StellarView, leaving two overlays on every hover. Both the callback
+  // and the prop are removed; the StellarView tooltip is now the only
+  // hover surface.
 
   // B-62-fix-zoom-reset — stable ref callback. Even with the
   // single-shot guard inside handleEngineReady, an inline arrow as
@@ -1127,7 +1235,11 @@ export function StellarGraph(props: StellarGraphProps) {
           height={size.h}
           backgroundColor="#06080b"
           nodeId="id"
-          nodeLabel={labelOf}
+          /* fix/stellar-cleanup #9 — `nodeLabel` removed entirely so
+           * react-force-graph-3d does not render its default hover hint
+           * (the tiny "subject · object" pill next to the node). The
+           * single themed SPO card in StellarView (HoverTooltip) is now
+           * the only hover surface. */
           nodeColor={nodeColor}
           nodeVal={nodeSize}
           /* B-62-fix3 — small reductions across the lighting surfaces

@@ -25,6 +25,46 @@ import type { StellarGraphData, StellarNode } from '@/lib/syntheticGraph';
 import { emptyStellarGraph, loadRealStellarGraph } from '@/lib/stellarRealAdapter';
 import { predicateLabel } from '@/lib/predicateLabels';
 
+// ---------------------------------------------------------------------------
+// fix/stellar-cleanup #9 — predicate / fact-type theme color.
+//
+// Hover SPO card segments (subject / predicate / object) are tinted by the
+// relationship semantics. Validation-relevant predicates win a strong
+// accent so the user can read tone at a glance:
+//
+//   • is_consistent_with / supports / confirms      → teal (concord)
+//   • contradicts / refutes / disputes              → soft red (discord)
+//   • elaborates / is_examining / states            → cyan (informational)
+//   • causes / triggers / results_in                → amber (causal)
+//   • everything else                               → muted grey (neutral)
+//
+// Pure function so the StellarView tests can assert the mapping without
+// rendering. Lower-case substring match keeps it resilient to predicate
+// variants like `is_consistent_with_v2` etc.
+// ---------------------------------------------------------------------------
+
+export function predicateThemeColor(predicate: string | null | undefined): string {
+  const p = (predicate ?? '').toLowerCase();
+  if (!p) return '#9db0b5';
+  // Discord first — `contradicts` is the most load-bearing alarm signal.
+  if (p.includes('contradict') || p.includes('refute') || p.includes('dispute') || p.includes('opposes')) {
+    return '#f06a78';
+  }
+  // Concord — supports / confirms / is_consistent_with cluster.
+  if (p.includes('consistent') || p.includes('support') || p.includes('confirm') || p.includes('corroborate')) {
+    return '#4FD1C5';
+  }
+  // Causal — explicit cause / effect language.
+  if (p.includes('cause') || p.includes('trigger') || p.includes('result') || p.includes('lead_to')) {
+    return '#f5b95c';
+  }
+  // Informational / elaborative — explanatory predicates.
+  if (p.includes('elaborate') || p.includes('examin') || p.includes('state') || p.includes('explain') || p.includes('describe')) {
+    return '#39d3ec';
+  }
+  return '#9db0b5';
+}
+
 const ACCENT = '#3fe0c6';
 const PANEL_BG = 'rgba(12,19,22,0.92)';
 const PANEL_BORDER = '#1c272b';
@@ -287,10 +327,16 @@ function HoverTooltip({ state }: { state: HoverState | null }) {
   const { node, x, y } = state;
   const lines = tooltipLinesForNode(node);
   const ft = node.fact_type ?? 'action';
+  // fix/stellar-cleanup #9 — predicate-driven theme color for the
+  // mid/divider segment of the SPO card and the tooltip's left-border
+  // accent. Claim/measurement keep the neutral dim accent (they aren't
+  // relation-typed, so their predicate would be misleading).
+  const themeColor = ft === 'action' ? predicateThemeColor(node.predicate) : '#9db0b5';
   return (
     <div
       data-testid="stellar-hover-tooltip"
       data-fact-type={ft}
+      data-theme-color={themeColor}
       style={{
         position: 'fixed',
         top: y + 14,
@@ -300,6 +346,7 @@ function HoverTooltip({ state }: { state: HoverState | null }) {
         padding: '10px 12px',
         background: PANEL_BG,
         border: `1px solid ${PANEL_BORDER}`,
+        borderLeft: `3px solid ${themeColor}`,
         borderRadius: 10,
         color: TEXT_PRIMARY,
         pointerEvents: 'none',
@@ -316,7 +363,7 @@ function HoverTooltip({ state }: { state: HoverState | null }) {
       </div>
       <div
         data-testid="stellar-hover-tooltip-mid"
-        style={{ color: TEXT_DIM, fontSize: 11, marginTop: 2 }}
+        style={{ color: themeColor, fontSize: 11, marginTop: 2, fontWeight: 600 }}
       >
         {lines.mid}
       </div>
@@ -1002,10 +1049,21 @@ export function StellarView(props: StellarViewProps = {}) {
   const [realLoading, setRealLoading] = useState(false);
   const realLoadedRef = useRef(false);
 
+  // fix/stellar-cleanup #10 — the cluster auto-focus must wait for
+  // localStorage rehydration to complete, otherwise it locks onto the
+  // initial synthetic data (default state) before the persisted 'real'
+  // mode takes effect. Without this gate, opening /stellar?cluster=…
+  // from HOME with a persisted real-mode preference would auto-focus
+  // a synthetic node and never re-bind to the real graph.
+  // Stored as state (not ref) so the auto-focus effect re-runs when
+  // hydration completes — refs alone wouldn't trigger a re-run.
+  const [sourceHydrated, setSourceHydrated] = useState(false);
+
   // Re-hydrate the persisted toggle on mount (no SSR mismatch — useEffect runs client-side only).
   useEffect(() => {
     const persisted = readPersistedSource();
     setSource(persisted);
+    setSourceHydrated(true);
   }, []);
 
   // feat/stellar-hover-restore-by-type — cursor tracking restored.
@@ -1102,6 +1160,12 @@ export function StellarView(props: StellarViewProps = {}) {
   useEffect(() => {
     if (!clusterParam) return;
     if (clusterAutoFocusedRef.current) return;
+    // fix/stellar-cleanup #10 — wait for the localStorage rehydrate
+    // effect to land before binding to a node. Otherwise the auto-focus
+    // would lock onto synthetic data in the brief window before the
+    // persisted 'real' source kicks in, and the user would land focused
+    // on the wrong graph.
+    if (!sourceHydrated) return;
     if (activeData.nodes.length === 0) return;
     // For real mode we wait for the lazy load to settle before binding
     // the focus — otherwise we'd focus on the empty fallback graph.
@@ -1110,7 +1174,7 @@ export function StellarView(props: StellarViewProps = {}) {
     if (!node) return;
     clusterAutoFocusedRef.current = true;
     handleClick(node);
-  }, [clusterParam, activeData, source, realLoading, handleClick]);
+  }, [clusterParam, activeData, source, realLoading, handleClick, sourceHydrated]);
 
   // B-62-focus-select-actions — relation-row click: set selected only.
   // The camera eases lookAt in StellarGraph; nothing else moves.
