@@ -2007,7 +2007,10 @@ export function RecallView({ spaceId }: Props) {
       setActiveSuggestionIdx(-1);
     } else if (e.key === 'Enter' && activeSuggestionIdx >= 0) {
       e.preventDefault();
-      void onPickSuggestion(suggestions[activeSuggestionIdx]);
+      const picked = suggestions[activeSuggestionIdx];
+      if (picked) {
+        void onPickSuggestion(picked);
+      }
     }
     // Enter with no active idx falls through to the form's onSubmit
     // (normal recall search of the literal query text). That's the
