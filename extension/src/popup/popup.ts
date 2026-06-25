@@ -194,6 +194,35 @@ function renderJobCard(job: TrackedJob): HTMLElement {
   }
   top.appendChild(pill);
 
+  // feat/popup-cleanup-discard-sync (PO #1) — user-driven dismiss
+  // button on every card regardless of status. The header count
+  // (검토 대기 N건) is brief-derived; the card list is per-session
+  // tracker. When the two legitimately disagree (e.g. backend
+  // finalized but the SW never received announce_terminal) the user
+  // needs an escape hatch to clear the stuck row without touching
+  // the brief. Subtle × glyph, ARIA-labelled, no server contact.
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "tracker-dismiss-btn";
+  dismiss.textContent = "×";
+  dismiss.setAttribute("aria-label", "카드 닫기");
+  dismiss.title = "이 항목을 목록에서 닫기 (서버에 영향 없음)";
+  dismiss.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    // Optimistically remove from DOM so the user sees instant
+    // feedback even if the SW round-trip lags. The storage
+    // onChanged listener will re-render naturally; we don't await
+    // the response.
+    card.remove();
+    void chrome.runtime.sendMessage({
+      type: "dismiss_job",
+      job_id: job.job_id,
+    });
+    void refreshTrackerOnly();
+  });
+  top.appendChild(dismiss);
+
   card.appendChild(top);
 
   // feat/quick-lucid-popup-redesign — meta strip now carries ONLY the

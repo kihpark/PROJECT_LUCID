@@ -151,6 +151,13 @@ export function DecideOverlay({
     try {
       const r = await apiDiscardJob(spaceId, jobId);
       setResult(r);
+      // feat/popup-cleanup-discard-sync (PO #3): defensive 200ms wait
+      // before the brief refetch fires. The backend commit returned, but
+      // the AppShell badge listens via window event + BroadcastChannel
+      // and re-reads /api/home/brief in response. A tiny delay guarantees
+      // the refetch's transaction reads the committed state on databases
+      // where the read replica lags the writer.
+      await new Promise(r => setTimeout(r, 200));
       notifyStateChanged('decision-submitted', { jobId, discarded: true });
     } catch (e) {
       setError((e as Error).message);

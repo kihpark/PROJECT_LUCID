@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { PendingFilters } from './PendingFilters';
 import { PendingQueueList } from './PendingQueueList';
 import { listPending, discardJob, ApiError } from '@/lib/api';
+import { notifyStateChanged } from '@/lib/sync';
 import type { PendingListFilters, PendingPage } from '@/lib/types';
 
 interface Props {
@@ -44,6 +45,14 @@ export function PendingQueueView({ spaceId }: Props) {
 
   const handleDiscard = useCallback(async (jobId: string) => {
     await discardJob(spaceId, jobId);
+    // feat/popup-cleanup-discard-sync (PO #3): notify AppShell + brief
+    // listeners so the 검증(N) badge refetches. Pre-fix the queue-side
+    // discard only refreshed its own local list (load()), leaving the
+    // brief-derived badge stale at the old value. The 200ms wait is a
+    // defensive guard so the brief refetch reads the committed state
+    // on databases where the read replica may lag the writer.
+    await new Promise(r => setTimeout(r, 200));
+    notifyStateChanged('decision-submitted', { jobId, discarded: true });
     load();
   }, [spaceId, load]);
 

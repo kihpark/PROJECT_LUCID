@@ -288,6 +288,48 @@ export async function clearAllJobs(): Promise<void> {
   await storageSet(JOBS_KEY, []);
 }
 
+/**
+ * feat/popup-cleanup-discard-sync — user-driven single-row dismissal.
+ *
+ * PO bug #1 context: the popup header shows "검토 대기 N건" — sourced
+ * from the Postgres-backed brief (brief.pending_validation) — while
+ * the card list immediately under it is rendered from this very
+ * tracker (chrome.storage.local). They are TWO legitimate sources of
+ * truth: the brief tracks server-confirmed pending validations, the
+ * tracker tracks per-session in-flight + recently-resolved jobs.
+ *
+ * Pre-fix the popup showed "검토 대기 0건" alongside 4 cards stuck on
+ * "저장 중… (확인 필요) · 4시간 전". The backend had already finalized
+ * those jobs, but the SW never received the `announce_terminal` ping
+ * (host tab closed / network flap) so the tracker rows stayed
+ * in-flight forever. By design `getJobs` does NOT prune in-flight
+ * rows by TTL — that policy is intentional, see the comment at the
+ * top of this file (lines 23-29). A stuck-looking row is itself
+ * signal worth surfacing.
+ *
+ * `dismissJob` is the explicit user-driven escape hatch for that
+ * case: the user clicks × on a stuck card and that single row
+ * disappears from storage. It works on any status (saving / analyzing
+ * / completed / failed), is idempotent (no-op when the id is
+ * unknown), and never touches the brief — the count badge is
+ * brief-derived and lives on its own clock.
+ *
+ * Storage-only, no server contact: the dismiss is purely a cosmetic
+ * cleanup of the per-session tracker. Pre-existing handlers
+ * (clearCompleted / clearAllJobs) follow the same contract.
+ */
+export async function dismissJob(job_id: string): Promise<void> {
+  const existing = (await storageGet<TrackedJob[]>(JOBS_KEY)) ?? [];
+  const list = Array.isArray(existing) ? existing : [];
+  const idx = list.findIndex((j) => j.job_id === job_id);
+  // Unknown id → no-op. Skipping the write avoids a useless
+  // chrome.storage.local.set roundtrip + lets tests assert "did not
+  // touch storage" semantics.
+  if (idx < 0) return;
+  const kept = list.filter((j) => j.job_id !== job_id);
+  await storageSet(JOBS_KEY, sortNewestFirst(kept));
+}
+
 export async function getSettings(): Promise<TrackerSettings> {
   const raw = await storageGet<Partial<TrackerSettings>>(SETTINGS_KEY);
   return {

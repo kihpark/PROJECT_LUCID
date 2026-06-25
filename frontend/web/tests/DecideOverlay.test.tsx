@@ -212,3 +212,28 @@ describe('DecideOverlay — decide-ux-fix #2: KR/EN toggle removed', () => {
     expect(screen.getByText('EN claim 2')).toBeInTheDocument();
   });
 });
+
+describe('DecideOverlay — discard race fix (feat/popup-cleanup-discard-sync)', () => {
+  it('fires notifyStateChanged with discarded:true after discardJob resolves', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const events: CustomEvent[] = [];
+    const handler = (e: Event) => events.push(e as CustomEvent);
+    window.addEventListener('lucid:state-changed', handler);
+    try {
+      render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+      fireEvent.click(screen.getByText('이 추출 전체 폐기'));
+      await waitFor(() => expect(api.discardJob).toHaveBeenCalled());
+      // 200ms delay before notify lands — give it time
+      await new Promise((r) => setTimeout(r, 300));
+      const discardEvent = events.find(
+        (e) => (e.detail as { reason?: string })?.reason === 'decision-submitted',
+      );
+      expect(discardEvent).toBeDefined();
+      const payload = (discardEvent!.detail as { payload?: { jobId: string; discarded: boolean } }).payload;
+      expect(payload?.discarded).toBe(true);
+      expect(payload?.jobId).toBe('job-xyz');
+    } finally {
+      window.removeEventListener('lucid:state-changed', handler);
+    }
+  });
+});
