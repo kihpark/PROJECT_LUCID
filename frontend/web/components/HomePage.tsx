@@ -252,16 +252,17 @@ function ActiveRecallInput({
           width: '100%',
           height: 60,
           borderRadius: 16,
-          background: 'rgba(13,20,23,0.72)',
-          border: `1px solid ${INPUT_BORDER}`,
+          background: isInFlight ? 'rgba(13,20,23,0.45)' : 'rgba(13,20,23,0.72)',
+          border: `1px solid ${isInFlight ? '#1a2429' : INPUT_BORDER}`,
           padding: '0 66px 0 46px',
           fontSize: 16,
           color: TEXT_BODY,
           backdropFilter: 'blur(8px)',
           outline: 'none',
           boxSizing: 'border-box',
-          opacity: isInFlight ? 0.6 : 1,
+          opacity: isInFlight ? 0.45 : 1,
           cursor: isInFlight ? 'not-allowed' : 'text',
+          transition: 'opacity 280ms ease, background 280ms ease, border-color 280ms ease',
         }}
       />
       <button
@@ -277,13 +278,14 @@ function ActiveRecallInput({
           width: 38,
           height: 38,
           borderRadius: 11,
-          background: ACCENT,
-          color: '#06201c',
+          background: isInFlight ? '#1d3a36' : ACCENT,
+          color: isInFlight ? '#3a5854' : '#06201c',
           border: 'none',
-          opacity: isInFlight ? 0.4 : 1,
+          opacity: isInFlight ? 0.55 : 1,
           cursor: isInFlight ? 'not-allowed' : 'pointer',
           fontSize: 17,
           fontWeight: 600,
+          transition: 'opacity 280ms ease, background 280ms ease, color 280ms ease',
         }}
       >
         →
