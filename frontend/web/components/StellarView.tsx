@@ -91,12 +91,16 @@ interface FocusRelation {
 }
 
 function readPersistedSource(): StellarSource {
-  if (typeof window === 'undefined') return 'synthetic';
+  // fix/stellar-default-real (2026-06-26): default = 'real' on first
+  // visit. PO 의 살펴보기 흐름이 synthetic 모드로 떨어져 IPCC sample
+  // 노드 만 보였음. localStorage 에 'synthetic' 명시된 경우만 synthetic
+  // (사용자가 toggle 후 의도 보존), 그 외 모두 real.
+  if (typeof window === 'undefined') return 'real';
   try {
     const v = window.localStorage.getItem(LS_KEY);
-    return v === 'real' ? 'real' : 'synthetic';
+    return v === 'synthetic' ? 'synthetic' : 'real';
   } catch {
-    return 'synthetic';
+    return 'real';
   }
 }
 
