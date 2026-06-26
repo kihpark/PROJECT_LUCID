@@ -4,7 +4,11 @@
 
 ```bash
 # Start everything in dev mode (auto-loads docker-compose.override.yml).
-# Bind-mounts the source tree + runs uvicorn --reload + next dev (HMR).
+# Frontend gets bind-mount + Next.js HMR (`pnpm dev`). The backend
+# does NOT — it runs the image's CMD (plain uvicorn, no --reload)
+# in every environment after feat/infra-agent-isolation (2026-06-22)
+# and i1-agent-isolation-hardening (2026-06-26). Backend edits
+# require `docker compose up -d --build backend`.
 docker compose up -d
 
 # Production shape (no override, container CMD only).

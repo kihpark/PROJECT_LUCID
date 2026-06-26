@@ -4,6 +4,21 @@ All notable changes to Lucid will be documented here.
 Format: [Keep a Changelog](https://keepachangelog.com).
 Versioning: pre-alpha 0.y.z — 0.MINOR = dogfood round unit, tag = PO dogfood verification graduation.
 
+## [Unreleased] — i1-agent-isolation-hardening
+
+### Infra
+- **Agent isolation permanence — PR-1 부채 마무리.** `feat/infra-agent-isolation`
+  (c956f5e, 2026-06-22) already removed the backend host bind-mount and
+  `--reload` from `docker-compose.override.yml`. This patch closes the
+  remaining documentation debt: HANDOFF.md no longer claims the dev
+  inner-loop bind-mounts the backend tree (only `web` does), and the
+  Master Roadmap M2 entry `agent-isolation-hardening` is marked
+  complete. Live verification: `lucid-backend-1` `HostConfig.Binds`
+  is null, `Config.Cmd` is `uvicorn api.main:app --host 0.0.0.0
+  --port 8000` (no `--reload`), structural smoke 7/7, and a fresh
+  host-write to `backend/api/main.py` is invisible to the running
+  container (`grep` exit 1).
+
 ## [0.1.0] — 2026-06-23
 
 Anchor before data-model overhaul. CSVS loop (Capture–Structure–Validate–Surface) end-to-end on the single SPO model with Korean-first surface layer and entity classification restored.
@@ -34,6 +49,7 @@ Anchor before data-model overhaul. CSVS loop (Capture–Structure–Validate–S
 - Entity meta-network (CASOS / DNA)
 - kNN embedding restoration (currently dummy, score 0.00)
 - Agent isolation permanence (backend `--reload` removal, bind-mount removal)
+  → see Unreleased / i1-agent-isolation-hardening above; landed post-0.1.0.
 
 ### Migration
 - alembic 0018 (source_status_validated) applied at startup; `ensure_mappings()` reconciles live ES with declared mappings.
