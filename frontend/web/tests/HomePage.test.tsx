@@ -63,7 +63,12 @@ vi.mock('@/lib/api', () => ({
   postAssistantBrief: (...args: unknown[]) => postAssistantBriefMock(...args),
 }));
 
-import { HomePage, greetingFor, selectViewState } from '@/components/HomePage';
+import {
+  HomePage,
+  greetingFor,
+  selectViewState,
+  clusterFocusHref,
+} from '@/components/HomePage';
 import { LUCID_VERSION } from '@/lib/version';
 
 const POPULATED: HomeBrief = {
@@ -547,7 +552,12 @@ describe('HomePage', () => {
     expect(href).toBe('/stellar?cluster=obj-spacex');
   });
 
-  it('H-5 — 살펴보기 → falls back to ?cluster=most_active when entity_uid is missing', () => {
+  it('H-2 — 살펴보기 → falls back to plain /stellar when entity_uid is missing (most_active sentinel removed)', () => {
+    // fix/h2-stellar-cluster-focus-in-real: the `most_active` sentinel
+    // path is intentionally retired. When entity_uid is null we route
+    // to plain `/stellar` and let the user explore the real graph
+    // themselves (STELLAR default = real, so the entity universe loads
+    // immediately).
     const briefNoUid: HomeBrief = {
       ...POPULATED,
       top_cluster: {
@@ -559,7 +569,7 @@ describe('HomePage', () => {
     useHomeBriefMock.mockReturnValue({ brief: briefNoUid, pendingCount: 3 });
     render(<HomePage userName="박기흥" />);
     const cta = screen.getByTestId('home-briefing-cluster-cta');
-    expect(cta).toHaveAttribute('href', '/stellar?cluster=most_active');
+    expect(cta).toHaveAttribute('href', '/stellar');
   });
 
   it('H-1 — empty input submit does not fire the ORACLE engine (no spam on Enter with empty box)', () => {
@@ -602,6 +612,55 @@ describe('greetingFor', () => {
     expect(greetingFor(23)).toBe('좋은 저녁입니다');
     expect(greetingFor(0)).toBe('좋은 저녁입니다');
     expect(greetingFor(4)).toBe('좋은 저녁입니다');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fix/h2-stellar-cluster-focus-in-real (2026-06-26) — clusterFocusHref
+// pure helper.
+//
+// PO 의뢰서 H-2: cluster focus 재도입 (entity_uid → /stellar?cluster=<uid>)
+// 위에 d017a3a 의 most_active fallback 제거 (null cluster → 단순 /stellar).
+// 6-path resolver 가 real 모드에서 subject_uid 매칭으로 spine fact 를 골라
+// focus 한다 — 이 helper 는 그 chain 의 첫 번째 link 만 담당.
+// ---------------------------------------------------------------------------
+
+describe('clusterFocusHref (H-2 cluster focus link)', () => {
+  it('returns /stellar?cluster=<entity_uid> when both entity_uid and linked_count are set', () => {
+    expect(
+      clusterFocusHref({ entity_uid: 'obj-spacex', linked_count: 8 }),
+    ).toBe('/stellar?cluster=obj-spacex');
+  });
+
+  it('URL-encodes the entity_uid (safety for arbitrary uid shapes)', () => {
+    expect(
+      clusterFocusHref({
+        entity_uid: '8e68baf5-97b1-4833-9604-a6b5dd99ec7b',
+        linked_count: 12,
+      }),
+    ).toBe('/stellar?cluster=8e68baf5-97b1-4833-9604-a6b5dd99ec7b');
+  });
+
+  it('falls back to plain /stellar when cluster is null (most_active sentinel removed)', () => {
+    expect(clusterFocusHref(null)).toBe('/stellar');
+  });
+
+  it('falls back to plain /stellar when entity_uid is null', () => {
+    expect(
+      clusterFocusHref({ entity_uid: null, linked_count: 5 }),
+    ).toBe('/stellar');
+  });
+
+  it('falls back to plain /stellar when linked_count is 0 (no actual links)', () => {
+    expect(
+      clusterFocusHref({ entity_uid: 'abc', linked_count: 0 }),
+    ).toBe('/stellar');
+  });
+
+  it('falls back to plain /stellar when both entity_uid is null and linked_count is 0', () => {
+    expect(
+      clusterFocusHref({ entity_uid: null, linked_count: 0 }),
+    ).toBe('/stellar');
   });
 });
 

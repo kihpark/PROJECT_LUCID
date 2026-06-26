@@ -78,15 +78,32 @@ export function selectViewState(brief: HomeBrief | null): HomeViewState {
   return 'populated';
 }
 
-/** fix/stellar-default-real (2026-06-26 PO directive):
- * "살펴보기" 가 cluster focus 를 시도하지 않고 단순히 STELLAR 진입.
- * STELLAR 의 default mode 가 real 이라 entity 데이터가 그대로 보임 —
- * 사용자가 직접 클러스터 탐색. 이전의 ?cluster=<entity_uid> 매칭은
- * synthetic 모드 first-visit 에서 항상 fail 했고, real 진입 후에도
- * 노드 매칭이 entity meta-network 미작성으로 부정확. 단순한 path 가 PO 합의. */
+/** fix/h2-stellar-cluster-focus-in-real (2026-06-26):
+ *
+ * H-2 PO 의뢰서: "특정 노드 focus + 하이라이트" — cluster focus 가
+ * real 모드에서 다시 작동해야 한다. d017a3a 의 simplification (항상
+ * `/stellar` 반환) 위에, entity_uid 가 있고 linked_count > 0 인
+ * 경우에만 `?cluster=<entity_uid>` 를 다시 붙인다.
+ *
+ * 작동 사슬:
+ *   1. HomePage 가 brief.top_cluster.entity_uid 를 href 에 실음
+ *   2. STELLAR mount 시 default real → real adapter 가 fact 노드들
+ *      (subject_uid / object_uid 포함) 로딩
+ *   3. pickClusterFocusNode 의 6-path resolver (3890f11) 가 entity_uid
+ *      를 subject_uid / object_uid 기준으로 매칭 → 가장 spine 한 fact
+ *      노드 (highest degree) 를 focus 로 picked
+ *   4. handleClick → focus + 1-hop highlight 활성화
+ *
+ * fallback (entity_uid null / linked_count 0): 단순히 `/stellar` 진입.
+ * `most_active` sentinel 은 PO 의뢰서에 명시적으로 제외 ("most_active
+ * fallback 제거").
+ */
 export function clusterFocusHref(
-  _cluster: { entity_uid: string | null; linked_count: number } | null,
+  cluster: { entity_uid: string | null; linked_count: number } | null,
 ): string {
+  if (cluster && cluster.entity_uid && cluster.linked_count > 0) {
+    return `/stellar?cluster=${encodeURIComponent(cluster.entity_uid)}`;
+  }
   return '/stellar';
 }
 
