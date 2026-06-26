@@ -271,6 +271,94 @@ def test_naver_mnews_selector_chain_recovers_body():
 
 
 # ---------------------------------------------------------------------------
+# extractor-naver-mnews (PO 2026-06-26): class-based selector fallbacks for
+# rendered-DOM captures where id attributes get stripped
+# ---------------------------------------------------------------------------
+
+def test_naver_selectors_include_mnews_class_fallbacks():
+    """The 2026-06-26 fix added class-based selectors as fallbacks for
+    when the extension's rendered-DOM outerHTML loses id attributes but
+    keeps class lists intact (e.g. some CSP-locked iframes or
+    sanitization paths)."""
+    _, sels = _selectors_for_host("n.news.naver.com")
+    # Class fallback for #dic_area's `article` element
+    assert "article._article_content" in sels
+    # Class fallback for the #newsct_article wrapper
+    assert "div._article_body" in sels
+
+
+def test_naver_mnews_class_selector_recovers_body_without_ids():
+    """When the captured HTML lost id attributes (rendered DOM
+    sanitization) but kept class names, the new class-based selectors
+    must still recover the article body.
+
+    This is the new regression coverage for the PO's failing URL on
+    2026-06-26 — n.news.naver.com/mnews/article/629/0000510915 — when
+    the rendered DOM path strips id="dic_area" / id="newsct_article".
+    """
+    body = _kor_long(30)
+    raw = _html(
+        f"<div class='newsct_article _article_body'>"
+        f"<article class='go_trans _article_content'>{body}</article>"
+        f"</div>"
+    )
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value="",
+    ):
+        result = WebArticleExtractor().extract(
+            raw,
+            {"source_url": "https://n.news.naver.com/mnews/article/629/0000510915"},
+        )
+    strat = result.extracted_metadata["extractor_strategy"]
+    assert strat.startswith("selector:")
+    # Either _article_content (article) or _article_body (wrapper) is
+    # acceptable — both are in the chain.
+    assert "_article_content" in strat or "_article_body" in strat
+    assert body[:20] in result.merged_text
+
+
+def test_naver_selectors_id_first_then_class_then_contents():
+    """The selector chain MUST try ID selectors before class fallbacks,
+    and `#contents` (page-level superset that pulls in the related-news
+    rail) MUST be last so we never accidentally pick it over the
+    cleaner ID/class selectors."""
+    _, sels = _selectors_for_host("n.news.naver.com")
+    # Find indices
+    idx_dic = sels.index("#dic_area")
+    idx_newsct = sels.index("#newsct_article")
+    idx_article_content = sels.index("article._article_content")
+    idx_article_body = sels.index("div._article_body")
+    idx_contents = sels.index("div#contents.newsct_body")
+    # IDs first
+    assert idx_dic < idx_article_content
+    assert idx_newsct < idx_article_body
+    # `#contents` is last (it pulls in the related-news rail)
+    assert idx_contents == max(
+        idx_dic, idx_newsct, idx_article_content, idx_article_body,
+        idx_contents,
+    )
+
+
+def test_naver_desktop_path_still_uses_dic_area():
+    """Regression guard: the legacy desktop path (news.naver.com,
+    /article/...) must still match #dic_area as the first selector.
+    The new class-based fallbacks are additive and MUST NOT shadow
+    the existing ID-based extraction on the desktop layout."""
+    body = _kor_long(30)
+    raw = _html(f"<div id='dic_area'>{body}</div>")
+    with patch(
+        "api.extractors.web_article._try_trafilatura", return_value="",
+    ):
+        result = WebArticleExtractor().extract(
+            raw,
+            {"source_url": "https://news.naver.com/main/read.naver?oid=001"},
+        )
+    strat = result.extracted_metadata["extractor_strategy"]
+    assert strat == "selector:#dic_area"
+    assert body[:20] in result.merged_text
+
+
+# ---------------------------------------------------------------------------
 # 12 Korean publishers must all have entries
 # ---------------------------------------------------------------------------
 

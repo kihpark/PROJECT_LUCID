@@ -86,41 +86,59 @@ KOREAN_MEDIA_SELECTORS: dict[str, list[str]] = {
     # naver.com — covers both n.news.naver.com mnews (modern layout,
     # 2023+) and the legacy news.naver.com layout.
     #
-    # Layout hits as of 2026-06-24:
+    # Layout hits as of 2026-06-26:
     #   - n.news.naver.com/mnews/article/<press>/<id>:
-    #       `#dic_area` (article body, ~2k chars) — current PO test case
+    #       `#dic_area` (article body, ~2.7k chars) — modern mnews body
     #       `#newsct_article` (broader article wrapper, same content)
-    #       `#ct` (page-level container — superset; AVOID as it pulls in
-    #              the related-news rail too)
+    #       `article._article_content` (class fallback for the same node
+    #            when ID is stripped — e.g. extension's
+    #            captureRenderedHtml on partially sanitized DOM)
+    #       `div._article_body` (wrapper class fallback for #newsct_article)
+    #       `#contents` (page-level newsct_body container — superset,
+    #            pulls in related-news rail; LAST resort before falling
+    #            through to readability)
     #   - news.naver.com (legacy):
     #       `#articleBodyContents` (pre-2023 layout, kept as belt-and-
     #        suspenders for archived links)
     #
-    # capture-naver-fix (PO 2026-06-24): the selectors below already
-    # cover the PO's failing URL pattern — server-side reproduction
-    # confirmed #dic_area yields 1,984 chars on a vanilla GET, and
-    # trafilatura recovers 1,375 chars from the same payload. The
-    # observed "추출된 사실 없음" toast is NOT an extractor miss; it is
-    # the Structure-stage LLM emitting `subject_uid: null` on Korean-
-    # ellipsis facts which previously trashed the whole envelope.
-    # See `api/structure/claude_client._drop_facts_without_subject`
-    # for the actual fix.
+    # extractor-naver-mnews (PO 2026-06-26): broaden the chain with
+    # class-based selectors (`._article_content`, `._article_body`).
+    # The two ID selectors (#dic_area, #newsct_article) cover the
+    # vanilla server-rendered HTML — confirmed in this branch's smoke
+    # test: trafilatura recovers 2,683 chars and #dic_area yields
+    # 2,753 chars on /mnews/article/629/0000510915. The class
+    # fallbacks add resilience for the cases where the chrome
+    # extension's rendered-DOM capture loses id attributes (some
+    # CSP-locked iframes / Shadow DOM boundaries strip them) but
+    # keeps class lists intact.
     #
-    # When the chrome extension's `captureRenderedHtml` ships an empty
-    # outerHTML (CSP / iframe sandbox / SPA pre-hydration), all four
-    # selectors miss and the chain falls through to ExtractorError.
-    # The user-facing recovery in that case is the selection-save
-    # action (extension/src/background/context-menu.ts): the user
-    # highlights the article body and right-clicks "선택 영역 저장하기",
-    # which posts `selection_text` in client_metadata and is handled
-    # by `processor._try_selection_bypass` (bypassing the entire
+    # capture-naver-fix (2026-06-24) earlier verified that the
+    # observed "추출된 사실 없음" toast on these URLs was caused by
+    # the Structure-stage LLM emitting `subject_uid: null` on
+    # Korean-ellipsis facts — see
+    # `api/structure/claude_client._drop_facts_without_subject`.
+    #
+    # When ALL selectors miss (rendered outerHTML is empty / shell
+    # only — CSP, iframe sandbox, or SPA pre-hydration capture), the
+    # chain falls through to ExtractorError. The user-facing recovery
+    # in that case is the selection-save action
+    # (extension/src/background/context-menu.ts): the user highlights
+    # the article body and right-clicks "선택 영역 저장하기", which
+    # posts `selection_text` in client_metadata and is handled by
+    # `processor._try_selection_bypass` (bypassing the entire
     # extractor chain). The selection-save path is the
     # "보이는 화면 = 만능 백스톱" fallback for any JS-rendered or
     # CSP-locked page.
     "naver.com": [
+        # ID selectors — primary on vanilla server-rendered HTML
         "#dic_area",
         "#newsct_article",
         "#articleBodyContents",
+        # Class selectors — fallback for rendered DOM with stripped IDs
+        "article._article_content",
+        "div._article_body",
+        # Page-level superset — last resort before falling through
+        "div#contents.newsct_body",
     ],
     "daum.net": [
         "#harmonyContainer",
