@@ -92,18 +92,50 @@ function fakeSyntheticBuilder(): StellarGraphData {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // fix/stellar-cluster-focus-race-fix — pre-set the v2 migration marker
+  // so each test starts in a predictable state. Without this, the lazy
+  // init in StellarView would clear localStorage on the first read of
+  // every test (the migration is one-shot per browser session), making
+  // it impossible for tests to set `lucid.stellar.source` and have it
+  // honored. Tests that explicitly want to exercise the migration path
+  // delete both keys first.
+  window.localStorage.setItem('lucid.stellar.source:migrated:v2', '1');
+  // fix/stellar-cluster-focus-race-fix — default tests to synthetic mode.
+  // Most test scenarios assert against the fakeSyntheticBuilder data
+  // (fake-1 / fake-2). Production default is now 'real' (StellarView
+  // seeds source synchronously from localStorage on mount), so without
+  // an explicit synthetic seed the renderer would receive an empty real
+  // graph and every fake-1/fake-2 assertion would break. Tests that
+  // need to exercise real-mode defaults override this seed locally.
+  window.localStorage.setItem('lucid.stellar.source', 'synthetic');
   lastRendererProps.current = null;
   searchParamsRef.current = new URLSearchParams();
 });
 
 describe('StellarView', () => {
-  it('default mode is synthetic — aria-pressed reflects the active segment', () => {
-    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+  it('default mode (first visit, no localStorage) is real — synced sync from localStorage', () => {
+    // fix/stellar-cluster-focus-race-fix — the previous default was a
+    // stale one-frame 'synthetic' from useState('synthetic'); the post-
+    // mount effect then flipped to real. That stale frame is what
+    // latched syn-3-100 into focus before real data arrived. We now
+    // seed source synchronously from localStorage; first visit (no LS
+    // entry) returns 'real' per readPersistedSource fallback.
+    window.localStorage.removeItem('lucid.stellar.source');
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [], links: [], clusters: [],
+    } satisfies StellarGraphData);
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
     const synth = screen.getByTestId('stellar-source-synthetic');
     const real = screen.getByTestId('stellar-source-real');
-    expect(synth.getAttribute('aria-pressed')).toBe('true');
-    expect(real.getAttribute('aria-pressed')).toBe('false');
-    expect(screen.getByTestId('mock-renderer').getAttribute('data-mode')).toBe('synthetic');
+    expect(synth.getAttribute('aria-pressed')).toBe('false');
+    expect(real.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('mock-renderer').getAttribute('data-mode')).toBe('real');
   });
 
   it('clicking [real] flips mode and persists the choice to localStorage', async () => {
@@ -606,11 +638,11 @@ describe('StellarView', () => {
     });
   });
 
-  it('H-5 — cluster=most_active focuses even WITHOUT a persisted source preference (no localStorage)', async () => {
-    // PO scenario: fresh browser, no localStorage entry. The auto-focus
-    // must NOT wait on sourceHydrated — query param wins. Default
-    // synthetic mode has data on first render, so binding is instant.
-    expect(window.localStorage.getItem('lucid.stellar.source')).toBeNull();
+  it('H-5 — cluster=most_active focuses when source localStorage hint matches available data (synthetic)', async () => {
+    // PO scenario: explicit ?cluster= URL in synthetic mode. Default
+    // beforeEach seeds 'synthetic' so we test against the synthetic
+    // builder data directly without any real loader involvement.
+    expect(window.localStorage.getItem('lucid.stellar.source')).toBe('synthetic');
     searchParamsRef.current = new URLSearchParams('cluster=most_active');
     render(
       <StellarView
@@ -728,16 +760,19 @@ describe('StellarView', () => {
     expect(tip.getAttribute('data-theme-color')).toBe('#4FD1C5');
   });
 
-  it('#10 — cluster=most_active focuses synthetic node immediately even when localStorage prefers real (PO directive: query param > localStorage)', async () => {
-    // fix/stellar-cluster-focus-recover — the OLD behavior gated on
-    // sourceHydrated, so the auto-focus waited for localStorage to
-    // rehydrate to 'real' and then bound to the loaded real graph.
-    // PO inverted this: the query param's intent must win NOW, not
-    // after localStorage. Synthetic data is available on first render,
-    // so binding lands on a synthetic node even when the persisted
-    // source is 'real'. The real graph still loads (realLoader is
-    // called) but the auto-focus ref is already latched, so the user
-    // sees a focus immediately rather than after the network/hydrate.
+  it('#10 — cluster=most_active waits for real data when localStorage prefers real (PO 2026-06-26: no stale syn-* focus)', async () => {
+    // fix/stellar-cluster-focus-race-fix — the PREVIOUS behavior
+    // (recover) latched on synthetic data immediately, then the real
+    // graph loaded and `focused` held a stale synthetic node id —
+    // StellarGraph.fly-to logged 'focused node not in data' for
+    // syn-3-100 and the FocusPanel kept showing the synthetic IPCC
+    // sample. PO repro on 2026-06-26 caught exactly this.
+    //
+    // New contract: when localStorage prefers real, the auto-focus
+    // waits for the real loader to settle BEFORE binding. Synthetic
+    // data is never used to pre-fill `focused` for a real-mode user.
+    // The id we end on must come from the real graph; the synthetic
+    // ids (fake-*) must NEVER appear in focusedId for this scenario.
     searchParamsRef.current = new URLSearchParams('cluster=most_active');
     const realLoader = vi.fn().mockResolvedValue({
       nodes: [
@@ -774,9 +809,175 @@ describe('StellarView', () => {
     await waitFor(() => {
       const focusedId = lastRendererProps.current.focusedId;
       expect(focusedId).toBeTruthy();
-      // Synthetic data wins — query param intent beats localStorage timing.
-      expect(['fake-1', 'fake-2']).toContain(focusedId);
+      // r2 wins the most-active fallback (highest degree). Critically
+      // 'fake-1' / 'fake-2' MUST NOT appear — that would be the bug.
+      expect(focusedId).toBe('r2');
     });
+    expect(['fake-1', 'fake-2']).not.toContain(lastRendererProps.current.focusedId);
+  });
+
+  // fix/stellar-cluster-focus-race-fix — explicit regression tests.
+  it('regression: cluster focus never latches a synthetic id when localStorage prefers real (the PO syn-3-100 bug)', async () => {
+    // Reproduces the exact PO 2026-06-26 sequence:
+    //   1. localStorage = 'real' (user previously toggled to real).
+    //   2. URL has ?cluster=<entity_uid>.
+    //   3. Synthetic generator is the production one (provides syn-*
+    //      ids on first render).
+    //   4. Real loader is intentionally slow so the synthetic data is
+    //      the only thing available for a long window.
+    // BEFORE the fix: cluster-focus useEffect latched on syn-3-100,
+    // then 'focused' kept the stale id when real arrived.
+    // AFTER the fix: useEffect WAITS for real to finish before
+    // binding. The slow window goes by with focusedId=null.
+    const ENTITY = '8e68baf5-97b1-4833-9604-a6b5dd99ec7b';
+    searchParamsRef.current = new URLSearchParams(`cluster=${ENTITY}`);
+    window.localStorage.setItem('lucid.stellar.source', 'real');
+    let resolveLoader: (data: StellarGraphData) => void = () => {};
+    const loaderPromise = new Promise<StellarGraphData>((res) => {
+      resolveLoader = res;
+    });
+    const realLoader = vi.fn().mockReturnValue(loaderPromise);
+    function syntheticHasSynIds(): StellarGraphData {
+      return {
+        nodes: [
+          // Mimics the production generator's `syn-c-i` shape.
+          {
+            id: 'syn-3-100',
+            label: 'IPCC · +1.5℃',
+            cluster: 3,
+            weight: 9,
+            degree: 12,
+            x: 0, y: 0, z: 0,
+            subject: 'IPCC',
+            predicate: 'supports',
+            object: '+1.5℃ 시나리오',
+          },
+        ],
+        links: [],
+        clusters: ['climate'],
+      };
+    }
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={syntheticHasSynIds}
+        realLoader={realLoader}
+      />,
+    );
+    // Before the loader resolves, focus must NOT have latched syn-3-100.
+    await act(async () => { await Promise.resolve(); });
+    expect(lastRendererProps.current.focusedId).not.toBe('syn-3-100');
+    // Resolve the loader with a real graph that DOES have a match.
+    await act(async () => {
+      resolveLoader({
+        nodes: [
+          {
+            id: 'real-spine',
+            label: 'spine',
+            cluster: 0,
+            weight: 1,
+            degree: 12,
+            x: 0, y: 0, z: 0,
+            subject: '모스 탄', predicate: 'states', object: 'X',
+            subject_uid: ENTITY,
+          },
+        ],
+        links: [],
+        clusters: ['c0'],
+      });
+    });
+    await waitFor(() => {
+      expect(lastRendererProps.current.focusedId).toBe('real-spine');
+    });
+  });
+
+  it('regression: source toggle clears stale focus + re-fires cluster auto-focus latch', async () => {
+    // When the user (or the migration path) flips source AFTER an
+    // initial cluster auto-focus has been bound, the focused node id
+    // belongs to the old data. Without the source-change effect that
+    // resets `focused` and `clusterAutoFocusedRef`, we'd ship a stale
+    // id into StellarGraph and trigger 'focused node not in data'.
+    searchParamsRef.current = new URLSearchParams('cluster=most_active');
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [
+        {
+          id: 'r-only',
+          label: 'r',
+          cluster: 0,
+          weight: 1,
+          degree: 1,
+          x: 0, y: 0, z: 0,
+          subject: 'r', predicate: 'supports', object: 'o',
+        },
+      ],
+      links: [],
+      clusters: ['c0'],
+    } satisfies StellarGraphData);
+    // Start in synthetic so cluster focus binds on fake-* first.
+    window.localStorage.setItem('lucid.stellar.source', 'synthetic');
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    await waitFor(() => {
+      expect(['fake-1', 'fake-2']).toContain(lastRendererProps.current.focusedId);
+    });
+    // Toggle to real — focus must clear, and cluster auto-focus must
+    // re-fire against the real graph once it loads.
+    fireEvent.click(screen.getByTestId('stellar-source-real'));
+    await waitFor(() => expect(realLoader).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(lastRendererProps.current.focusedId).toBe('r-only');
+    });
+    // The stale synthetic id never appears post-toggle.
+    expect(['fake-1', 'fake-2']).not.toContain(lastRendererProps.current.focusedId);
+  });
+
+  it('regression: localStorage v2 migration clears stale "synthetic" once', () => {
+    // PO first-visit timeline: opened /stellar when default was
+    // synthetic → localStorage got 'synthetic' written by an explicit
+    // toggle (or by the persistSource side-effect of an early
+    // version). Later default flipped to real, but the explicit
+    // 'synthetic' was honored, sending PO back into the IPCC sample.
+    // v2 migration clears the stale value EXACTLY once.
+    window.localStorage.removeItem('lucid.stellar.source:migrated:v2');
+    window.localStorage.setItem('lucid.stellar.source', 'synthetic');
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [], links: [], clusters: [],
+    } satisfies StellarGraphData);
+    const { unmount } = render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    // Migration ran on mount: stale 'synthetic' cleared, marker set,
+    // source is now 'real'.
+    expect(window.localStorage.getItem('lucid.stellar.source:migrated:v2')).toBe('1');
+    expect(window.localStorage.getItem('lucid.stellar.source')).toBeNull();
+    expect(
+      screen.getByTestId('stellar-source-real').getAttribute('aria-pressed'),
+    ).toBe('true');
+    unmount();
+    // Second mount: user has since explicitly set 'synthetic' again
+    // (via toggle). Migration marker is set, so the explicit value is
+    // honored — we DO NOT migrate twice.
+    window.localStorage.setItem('lucid.stellar.source', 'synthetic');
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    expect(window.localStorage.getItem('lucid.stellar.source')).toBe('synthetic');
+    expect(
+      screen.getByTestId('stellar-source-synthetic').getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 
   // -------------------------------------------------------------------------
