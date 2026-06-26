@@ -46,6 +46,7 @@ import { ActionButton } from './ActionButton';
 import { FactTypeBadge, FactTypeStrip } from './FactCard';
 import {
   recall as apiRecall,
+  recallBriefing as apiRecallBriefing,
   ApiError,
   detachSource as apiDetachSource,
   getFactDetail as apiGetFactDetail,
@@ -54,6 +55,7 @@ import {
   retractFact as apiRetractFact,
   searchEntitySuggestions,
 } from '@/lib/api';
+import type { RecallBriefingResponse } from '@/lib/api';
 import { predicateLabel } from '@/lib/predicateLabels';
 import { notifyStateChanged } from '@/lib/sync';
 import type {
@@ -1207,62 +1209,21 @@ function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
         </label>
       </div>
 
-      {/* v0.2.0 step 1 (fact-claim-layer-v1) — 화자 인용 (claim) filter.
-          Display-only client-side filter: hides action rows so the user
-          can drill into "who said what" without re-querying the server. */}
-      <div className="mb-4">
-        <h3 className="text-xs font-medium mb-1">화자 인용</h3>
-        <p className="text-xxs text-text-muted font-mono mb-1">
-          결과 표시 필터 (서버 재검색 없음)
-        </p>
-        <label
-          data-testid="control-claim-only"
-          className="flex items-center gap-2 text-xs py-0.5"
-        >
-          <input
-            type="checkbox"
-            checked={state.claimOnly}
-            data-testid="control-claim-only-checkbox"
-            onChange={(e) => {
-              if (typeof console !== 'undefined') {
-                console.debug('[recall] claimOnly toggle', e.target.checked);
-              }
-              onChange({ ...state, claimOnly: e.target.checked });
-            }}
-          />
-          <span>💬 화자 인용만 (claim)</span>
-        </label>
-      </div>
+      {/* fix/r1-recall-redesign — left-panel claim_only / measurement_only
+          filters removed.
 
-      {/* v0.2.0 step 2 (fact-measurement-layer-v1) — 수치 (measurement)
-          filter. Same client-side display-only contract as claimOnly.
-          Toggling does NOT re-query the server; it filters the rendered
-          list down to fact_type='measurement' rows so the user can browse
-          the verified time-series moat (metric / value / unit / as_of)
-          without the action / claim noise. */}
-      <div className="mb-4">
-        <h3 className="text-xs font-medium mb-1">수치</h3>
-        <p className="text-xxs text-text-muted font-mono mb-1">
-          결과 표시 필터 (서버 재검색 없음)
-        </p>
-        <label
-          data-testid="control-measurement-only"
-          className="flex items-center gap-2 text-xs py-0.5"
-        >
-          <input
-            type="checkbox"
-            checked={state.measurementOnly}
-            data-testid="control-measurement-only-checkbox"
-            onChange={(e) => {
-              if (typeof console !== 'undefined') {
-                console.debug('[recall] measurementOnly toggle', e.target.checked);
-              }
-              onChange({ ...state, measurementOnly: e.target.checked });
-            }}
-          />
-          <span>📊 수치만 (measurement)</span>
-        </label>
-      </div>
+          PO directive (2026-06-24):
+            "좌패널 fact_type 필터 제거: '화자 인용만/수치만' = 중앙 칩과
+             중복 → 제거. 유사도임계·검증일자·키워드·엔티티연결(서버재검색)
+             은 유지."
+
+          The same filter is now driven exclusively by the chips inside
+          RecallFactTypeSummary (the "행동 / 발언 / 수치" row at the top
+          of the result panel). The `claimOnly` / `measurementOnly`
+          flags on SearchControlsState are kept (initialised false,
+          never flipped from the UI) so the visibleFacts predicate and
+          any test that references them stay valid — back-compat without
+          duplicate surface area. */}
 
       {/* 2nd-tier keyword — client-side filter on claim text */}
       <div className="mb-4">
@@ -1337,10 +1298,23 @@ interface RecallFactTypeSummaryProps {
   // ("이 엔티티에 대한 검증된 사실이 없습니다.") that confused the dogfood
   // user is gone.
   entityBrief?: EntityBrief | null;
+  // fix/r1-recall-redesign — AI 브리핑 (개관).
+  //
+  // PO directive (2026-06-24): the summary box title used to read
+  // "검색 결과 요약 · OOO" with no body text — a chip rail and nothing
+  // else. The PO ask is for an entity 개관 briefing inside the same
+  // box, gated on an on-demand button (cost guard — no auto-fire).
+  // RecallView owns the request lifecycle; the summary box stays
+  // a dumb consumer.
+  briefing: RecallBriefingResponse | null;
+  briefingBusy: boolean;
+  briefingError: string | null;
+  onRequestBriefing: () => void;
 }
 
 function RecallFactTypeSummary({
   total, factTypes, activeFilter, onToggle, query, entityBrief,
+  briefing, briefingBusy, briefingError, onRequestBriefing,
 }: RecallFactTypeSummaryProps) {
   // Build the chip rows. Counts default to 0 when the backend omitted
   // the bucket (legacy responses) or when facets is missing entirely.
@@ -1452,6 +1426,97 @@ function RecallFactTypeSummary({
           </button>
         )}
       </div>
+
+      {/* fix/r1-recall-redesign — AI 브리핑 (개관).
+          The "검색 결과 요약 · OOO" header used to lead into an empty
+          body (chips and nothing else). PO directive: render a 1-3
+          sentence overview here, gated on an on-demand button. The
+          briefing speaks ONLY from verified facts (grounding P1·P2);
+          the LLM gets the same fact set the recall returned, the
+          server filters cited uids against that set, and a transient
+          LLM failure degrades to a "다시 시도" affordance — never to
+          a hallucination. */}
+      <div
+        data-testid="recall-summary-briefing"
+        className="mt-3 pt-3 border-t border-border-subtle/60"
+      >
+        {briefing && briefing.grounded ? (
+          <div data-testid="recall-summary-briefing-text">
+            <p className="text-sm text-text-primary leading-relaxed">
+              {briefing.briefing}
+            </p>
+            <p
+              data-testid="recall-summary-briefing-grounding"
+              className="mt-1 text-xxs font-mono text-text-muted"
+            >
+              근거: 검증된 사실 {briefing.fact_uids.length}건 (총 {briefing.fact_count}건 중)
+              {briefing.cached ? ' · 캐시 응답' : ''}
+            </p>
+            <button
+              type="button"
+              data-testid="recall-summary-briefing-refresh"
+              onClick={onRequestBriefing}
+              disabled={briefingBusy}
+              className="mt-1 text-xxs font-mono text-text-muted hover:text-text-primary underline disabled:opacity-50"
+              title="브리핑 다시 생성"
+            >
+              {briefingBusy ? '생성 중…' : '다시 생성'}
+            </button>
+          </div>
+        ) : briefingError ? (
+          <div data-testid="recall-summary-briefing-error">
+            <p className="text-xs text-accent-error">
+              브리핑 생성 실패: {briefingError}
+            </p>
+            <button
+              type="button"
+              onClick={onRequestBriefing}
+              disabled={briefingBusy}
+              className="mt-1 text-xxs font-mono text-text-muted hover:text-text-primary underline disabled:opacity-50"
+            >
+              다시 시도
+            </button>
+          </div>
+        ) : briefing && !briefing.grounded && briefing.fact_count > 0 ? (
+          <p
+            data-testid="recall-summary-briefing-ungrounded"
+            className="text-xs text-text-muted"
+          >
+            검증된 사실로 개관을 만들지 못했습니다.
+          </p>
+        ) : total === 0 ? (
+          <p
+            data-testid="recall-summary-briefing-empty"
+            className="text-xs text-text-muted"
+          >
+            검증된 사실이 없어 개관을 생성할 수 없습니다.
+          </p>
+        ) : (
+          <button
+            type="button"
+            data-testid="recall-summary-briefing-trigger"
+            onClick={onRequestBriefing}
+            disabled={briefingBusy}
+            className="inline-flex items-center gap-1.5 rounded-md border border-accent-cool/40 bg-accent-cool/5 px-3 py-1.5 text-xs font-medium text-accent-cool hover:bg-accent-cool/10 disabled:opacity-50 disabled:cursor-wait"
+            title="검증된 사실 기반 개관을 생성합니다 (LLM 호출)"
+          >
+            {briefingBusy ? (
+              <>
+                <span
+                  data-testid="recall-summary-briefing-spinner"
+                  className="inline-block h-3 w-3 rounded-full border border-accent-cool border-t-transparent animate-spin"
+                />
+                <span>생성 중…</span>
+              </>
+            ) : (
+              <>
+                <span aria-hidden="true">✨</span>
+                <span>AI 브리핑 보기</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -1527,12 +1592,20 @@ interface RecallSimpleBodyProps {
   onLoadMore: () => void;
   query: string | null;
   onOpenDetail: (factUid: string) => void;
+  // fix/r1-recall-redesign — AI 브리핑 plumbing. The body is a dumb
+  // consumer; RecallView owns the request lifecycle and passes the
+  // current envelope down.
+  briefing: RecallBriefingResponse | null;
+  briefingBusy: boolean;
+  briefingError: string | null;
+  onRequestBriefing: () => void;
 }
 
 function RecallSimpleBody({
   result, visibleFacts, pagedFacts, error,
   factTypeFilter, onToggleFactType, onLoadMore,
   query, onOpenDetail,
+  briefing, briefingBusy, briefingError, onRequestBriefing,
 }: RecallSimpleBodyProps) {
   return (
     <>
@@ -1559,6 +1632,10 @@ function RecallSimpleBody({
             activeFilter={factTypeFilter}
             onToggle={onToggleFactType}
             query={query}
+            briefing={briefing}
+            briefingBusy={briefingBusy}
+            briefingError={briefingError}
+            onRequestBriefing={onRequestBriefing}
           />
           {pagedFacts.length > 0 && (
             pagedFacts.map((f) => (
@@ -1601,6 +1678,11 @@ interface RecallPowerBodyProps {
   onLoadMore: () => void;
   query: string | null;
   onOpenDetail: (factUid: string) => void;
+  // fix/r1-recall-redesign — AI 브리핑 plumbing.
+  briefing: RecallBriefingResponse | null;
+  briefingBusy: boolean;
+  briefingError: string | null;
+  onRequestBriefing: () => void;
 }
 
 function RecallPowerBody({
@@ -1610,6 +1692,7 @@ function RecallPowerBody({
   onToggleEntity, onRemoveChip, onClearAll,
   factTypeFilter, onToggleFactType, onLoadMore,
   query, onOpenDetail,
+  briefing, briefingBusy, briefingError, onRequestBriefing,
 }: RecallPowerBodyProps) {
   return (
     <div className="flex gap-4" data-testid="recall-power-body">
@@ -1655,6 +1738,10 @@ function RecallPowerBody({
               onToggle={onToggleFactType}
               query={query}
               entityBrief={result.entity_brief}
+              briefing={briefing}
+              briefingBusy={briefingBusy}
+              briefingError={briefingError}
+              onRequestBriefing={onRequestBriefing}
             />
             {sortedFacts.length > 0 && (
               <>
@@ -1791,6 +1878,17 @@ export function RecallView({ spaceId }: Props) {
   // renders the first `displayLimit` facts of `visibleFacts`; "더 보기"
   // bumps it by PAGE_SIZE. Resets on each new query + on filter flip.
   const [displayLimit, setDisplayLimit] = useState<number>(PAGE_SIZE);
+  // fix/r1-recall-redesign — AI 브리핑 state.
+  //
+  // On-demand cost guard: the briefing is NEVER auto-fetched. The
+  // user clicks "AI 브리핑 보기" inside the summary box; we then call
+  // /api/spaces/{ks}/recall/briefing which re-runs the recall pipeline
+  // server-side and composes the 1-3 sentence 개관 from the same
+  // verified fact set. A new query clears the briefing so the stale
+  // text from the previous search never bleeds into a new result.
+  const [briefing, setBriefing] = useState<RecallBriefingResponse | null>(null);
+  const [briefingBusy, setBriefingBusy] = useState(false);
+  const [briefingError, setBriefingError] = useState<string | null>(null);
 
   // feat/recall-search-entity-autocomplete — PO dogfood directive 2026-06-24:
   // "Recall에서 사용자가 타이핑 할때 엔티티 자동 완성하는 기능 원래 있지 않았나?"
@@ -1933,6 +2031,29 @@ export function RecallView({ spaceId }: Props) {
     setDisplayLimit((prev) => prev + PAGE_SIZE);
   };
 
+  // fix/r1-recall-redesign — AI 브리핑 request handler.
+  //
+  // The button on the summary box calls this. We always re-fetch on
+  // click (the server cache absorbs repeat clicks); the FE only
+  // suppresses the call when there's nothing useful to summarise
+  // (no submittedQuery yet).
+  const onRequestBriefing = async () => {
+    if (!submittedQuery) return;
+    setBriefingBusy(true);
+    setBriefingError(null);
+    try {
+      const r = await apiRecallBriefing(spaceId, submittedQuery, activeEntities);
+      setBriefing(r);
+    } catch (err) {
+      const detail =
+        err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;
+      setBriefingError(detail);
+      setBriefing(null);
+    } finally {
+      setBriefingBusy(false);
+    }
+  };
+
   // Build the "active filter chips" view: walk the current facets to
   // find the name + bucket for each active uid (the backend already
   // resolved labels). When the facets haven't loaded yet (very first
@@ -1992,6 +2113,11 @@ export function RecallView({ spaceId }: Props) {
     // page, matching the user's mental model of "fresh search".
     setFactTypeFilter(null);
     setDisplayLimit(PAGE_SIZE);
+    // fix/r1-recall-redesign — clear any briefing from the previous
+    // search so the new summary box starts with the "AI 브리핑 보기"
+    // CTA, not stale 개관 text.
+    setBriefing(null);
+    setBriefingError(null);
     await runRecall(q, []);
   };
 
@@ -2010,6 +2136,9 @@ export function RecallView({ spaceId }: Props) {
     setActiveEntities([]);
     setFactTypeFilter(null);
     setDisplayLimit(PAGE_SIZE);
+    // fix/r1-recall-redesign — same briefing reset as onSubmit.
+    setBriefing(null);
+    setBriefingError(null);
     await runRecall(picked, []);
   };
 
@@ -2283,6 +2412,10 @@ export function RecallView({ spaceId }: Props) {
           onLoadMore={onLoadMore}
           query={submittedQuery}
           onOpenDetail={onOpenDetail}
+          briefing={briefing}
+          briefingBusy={briefingBusy}
+          briefingError={briefingError}
+          onRequestBriefing={onRequestBriefing}
         />
       ) : (
         <RecallPowerBody
@@ -2303,6 +2436,10 @@ export function RecallView({ spaceId }: Props) {
           onLoadMore={onLoadMore}
           query={submittedQuery}
           onOpenDetail={onOpenDetail}
+          briefing={briefing}
+          briefingBusy={briefingBusy}
+          briefingError={briefingError}
+          onRequestBriefing={onRequestBriefing}
         />
       )}
 

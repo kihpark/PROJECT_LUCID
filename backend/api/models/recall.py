@@ -209,6 +209,47 @@ class RecallFacets(LucidBaseModel):
 
 
 # ---------------------------------------------------------------------------
+# fix/r1-recall-redesign — AI 브리핑 (개관) response.
+#
+# Distinct from ORACLE (/api/assistant/brief — question-answer over the
+# verified graph). This endpoint produces an entity 개관 (overview) text
+# summarising the CURRENT recall result set: "what does the user already
+# know about this entity?". Same zero-hallucination contract: the LLM is
+# given ONLY the verified facts the recall returned, and the response
+# carries the list of fact_uids the briefing actually leaned on so the
+# UI can show grounding (P1·P2).
+#
+# Cost guard: on-demand button on the FE (the user must click "브리핑
+# 보기"), NOT auto-fire on every recall. The endpoint also caches the
+# (space_id, query, entity_uids, fact_uid set) → response for 30 minutes
+# so a repeat click within the window is free.
+# ---------------------------------------------------------------------------
+
+
+class RecallBriefingResponse(LucidBaseModel):
+    """The /recall/briefing envelope.
+
+    `briefing` is the 1-3 sentence overview text. Empty when the recall
+    set has no verified facts (the FE renders a zero-fact message
+    instead of calling the LLM). `grounded` is true iff `fact_uids` is
+    non-empty AND the LLM declared its answer grounded. `fact_uids` is
+    the subset of the recall set the LLM cited — these are the only
+    facts a downstream UI may render as the briefing's evidence.
+
+    `cached` signals the cache path so smoke tests can assert that a
+    second call with the same args is free.
+    """
+
+    briefing: str = ""
+    fact_uids: list[str] = Field(default_factory=list)
+    grounded: bool = False
+    cached: bool = False
+    # Total verified facts the briefing was computed over. 0 short-
+    # circuits the LLM call.
+    fact_count: int = 0
+
+
+# ---------------------------------------------------------------------------
 # B-48b — fact detail
 # ---------------------------------------------------------------------------
 

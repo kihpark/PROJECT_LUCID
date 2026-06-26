@@ -256,6 +256,44 @@ export function recall(
 }
 
 // ---------------------------------------------------------------------------
+// fix/r1-recall-redesign — AI 브리핑 (entity 개관).
+//
+// Distinct from /api/assistant/brief (ORACLE — question answering).
+// This is an on-demand overview of the CURRENT recall result set:
+// "what does the user already know about this entity?". The button
+// is rendered inside the RecallFactTypeSummary box; clicking it fires
+// this call which re-runs recall server-side and feeds the verified
+// facts to Claude with the 개관 system prompt.
+//
+// Cost guard: on-demand only (the user must click), and the server
+// caches the (space, query, entities, fact_uids) → response for 30
+// minutes so a repeat click is free.
+// ---------------------------------------------------------------------------
+
+export interface RecallBriefingResponse {
+  briefing: string;
+  fact_uids: string[];
+  grounded: boolean;
+  cached: boolean;
+  fact_count: number;
+}
+
+export function recallBriefing(
+  spaceId: string,
+  q: string,
+  entities: string[] = [],
+): Promise<RecallBriefingResponse> {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  for (const uid of entities) {
+    params.append('entity', uid);
+  }
+  return request<RecallBriefingResponse>(
+    `/api/spaces/${spaceId}/recall/briefing?${params.toString()}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // B-62 — facts listing (Stellar real-mode).
 //
 // Plain "give me every validated fact in this KS" — not the keyword-
