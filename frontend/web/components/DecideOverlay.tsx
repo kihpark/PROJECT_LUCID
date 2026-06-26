@@ -157,6 +157,8 @@ export function DecideOverlay({
       // and re-reads /api/home/brief in response. A tiny delay guarantees
       // the refetch's transaction reads the committed state on databases
       // where the read replica lags the writer.
+      // eslint-disable-next-line no-console
+      console.debug('[DecideOverlay] discard done — waiting 200ms before notify');
       await new Promise(r => setTimeout(r, 200));
       notifyStateChanged('decision-submitted', { jobId, discarded: true });
     } catch (e) {
@@ -213,6 +215,19 @@ export function DecideOverlay({
       }
       const r = await submitDecisions(spaceId, jobId, payload);
       setResult(r);
+      // fix/h1-state-sync-autorefresh: match the discard path's
+      // defensive 200ms wait. The backend committed the SourceJob
+      // status flip before returning DecideResponse, so Postgres
+      // sees the new state immediately — but ES (this_week_validated,
+      // facts count) lives behind a refresh_interval and the LEDGER
+      // depends on it. A 200ms gap before fanning the notify gives
+      // ES one indexing tick so brief, badge, and LEDGER agree on
+      // numbers within the same render frame the user observes.
+      // Pre-fix the Submit path fired notifyStateChanged synchronously
+      // and the refetch could race the indexer.
+      // eslint-disable-next-line no-console
+      console.debug('[DecideOverlay] submit done — waiting 200ms before notify');
+      await new Promise((r) => setTimeout(r, 200));
       // feat/state-sync-unification — broadcast so AppShell badge,
       // HomePage brief, LEDGER all refetch from backend truth.
       notifyStateChanged('decision-submitted', { jobId });

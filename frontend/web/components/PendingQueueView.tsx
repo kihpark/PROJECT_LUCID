@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { PendingFilters } from './PendingFilters';
 import { PendingQueueList } from './PendingQueueList';
 import { listPending, discardJob, ApiError } from '@/lib/api';
-import { notifyStateChanged } from '@/lib/sync';
+import { notifyStateChanged, useStateChange } from '@/lib/sync';
 import type { PendingListFilters, PendingPage } from '@/lib/types';
 
 interface Props {
@@ -42,6 +42,25 @@ export function PendingQueueView({ spaceId }: Props) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // fix/h1-state-sync-autorefresh: when DecideOverlay submits/discards
+  // on a /pending/[jobId] page and the user navigates back via the
+  // success-panel Link, /pending re-mounts and load() runs naturally.
+  // But if the user keeps /pending open in a second tab while
+  // submitting in the first, the cross-tab BroadcastChannel needs a
+  // listener here too — without it, the second tab's queue stayed
+  // stale. Subscribing also covers in-tab submits-while-list-visible
+  // (e.g. the future inline-decide flow).
+  useStateChange(
+    useCallback(
+      (e) => {
+        // eslint-disable-next-line no-console
+        console.debug('[PendingQueueView] sync event — reload', e.reason);
+        load();
+      },
+      [load],
+    ),
+  );
 
   const handleDiscard = useCallback(async (jobId: string) => {
     await discardJob(spaceId, jobId);

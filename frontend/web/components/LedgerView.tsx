@@ -322,7 +322,15 @@ export function LedgerView({ spaceId }: Props) {
 
   useStateChange(
     useCallback(
-      () => {
+      (e) => {
+        // fix/h1-state-sync-autorefresh: PO trace. The LEDGER reads the
+        // same ES index as the home brief; an out-of-sync LEDGER usually
+        // means the event arrived but the spaceId-scoped load() pulled
+        // stale data because ES hadn't indexed yet. Producers now wait
+        // 200ms; if you still see this then no fresh count, the indexer
+        // is slower than that and `refresh_interval` needs tuning.
+        // eslint-disable-next-line no-console
+        console.debug('[LedgerView] sync event — reload', e.reason);
         void load(filter);
       },
       [load, filter],

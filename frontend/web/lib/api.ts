@@ -48,7 +48,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const resp = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  // fix/h1-state-sync-autorefresh: belt-and-suspenders cache defeat.
+  // The backend's /api/home/brief already returns Cache-Control:
+  // no-store (api/routes/home.py) — but if the caller passes their own
+  // init.cache we honor it, otherwise default to 'no-store' so a stale
+  // browser HTTP cache cannot stand in for a fresh post-validate read.
+  const finalInit: RequestInit = {
+    ...init,
+    headers,
+    cache: init.cache ?? 'no-store',
+  };
+
+  const resp = await fetch(`${API_BASE}${path}`, finalInit);
 
   if (!resp.ok) {
     if (resp.status === 401) {
@@ -351,7 +362,14 @@ export function modifyFact(
 // ---------------------------------------------------------------------------
 
 export function getHomeBrief(): Promise<HomeBrief> {
-  return request<HomeBrief>('/api/home/brief');
+  // fix/h1-state-sync-autorefresh: cache-buster query param. The browser
+  // ignores it; the backend ignores it (no Query() parameter named `_`);
+  // but a unique URL forces past any intermediary that might otherwise
+  // serve a cached body (service worker, CDN edge, broken proxy). This
+  // is the last line of defense if Cache-Control: no-store somehow
+  // gets stripped before reaching the browser.
+  const cacheBuster = Date.now();
+  return request<HomeBrief>(`/api/home/brief?_=${cacheBuster}`);
 }
 
 // ---------------------------------------------------------------------------

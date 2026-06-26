@@ -24,14 +24,30 @@ export function useHomeBrief(): UseHomeBriefResult {
   const [tick, setTick] = useState(0);
 
   const refetch = useCallback(() => {
+    // PO trace — `tick` bumps trigger the effect below to fire a new
+    // /api/home/brief request. If you see "refetch" but no network
+    // request in DevTools Network panel, the effect didn't observe the
+    // tick change (closure problem). If you see the request but the
+    // badge doesn't update, the response was the same (backend stale).
+    // eslint-disable-next-line no-console
+    console.debug('[useHomeBrief] refetch bump');
     setTick((n) => n + 1);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line no-console
+    console.debug('[useHomeBrief] fetch tick=', tick);
     getHomeBrief()
       .then((b) => {
-        if (!cancelled) setBrief(b);
+        if (!cancelled) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            '[useHomeBrief] fetched pending_validation=',
+            b?.pending_validation,
+          );
+          setBrief(b);
+        }
       })
       .catch(() => {
         if (!cancelled) setBrief(null);
