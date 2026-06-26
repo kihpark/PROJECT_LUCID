@@ -507,9 +507,27 @@ chrome.runtime.onMessage.addListener(
           const server = await fetchServerJobStatus(m.job_id);
           const s = server.status;
           if (s === 'structured' || s === 'validated') {
-            await updateJobStatus(m.job_id, 'completed');
+            // fix/decide-zero-fact-ux — popup 의 0-fact 라벨이 동작하려면
+            // tracker row 에 fact_count 가 채워져야 한다. announce_terminal
+            // 경로는 이미 채우고 있지만, 이 복구 경로는 누락이었다.
+            // summary 실패 시에도 status 전이는 진행 — fact_count 만 빠진다.
+            let factCount: number | undefined;
+            try {
+              const summary = await getStructuredSummary(m.job_id);
+              factCount = summary.fact_count;
+            } catch {
+              // ignore — best-effort; row still flips to completed
+            }
+            await updateJobStatus(m.job_id, 'completed', {
+              fact_count: factCount,
+            });
             await updateBadge();
-            sendResponse({ ok: true, server_status: s, tracker_status: 'completed' });
+            sendResponse({
+              ok: true,
+              server_status: s,
+              tracker_status: 'completed',
+              fact_count: factCount,
+            });
             return;
           }
           if (s === 'extract_failed' || s === 'structure_failed') {
