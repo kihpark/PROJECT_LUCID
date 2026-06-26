@@ -78,17 +78,16 @@ export function selectViewState(brief: HomeBrief | null): HomeViewState {
   return 'populated';
 }
 
-/** feat/hearth-oracle-merge — build the stellar cluster-focus href.
- * When the brief carries an entity_uid we forward it as `?cluster=<uid>`;
- * otherwise we fall back to the sentinel `most_active` which StellarView
- * may resolve heuristically (largest cluster by degree). */
+/** fix/stellar-default-real (2026-06-26 PO directive):
+ * "살펴보기" 가 cluster focus 를 시도하지 않고 단순히 STELLAR 진입.
+ * STELLAR 의 default mode 가 real 이라 entity 데이터가 그대로 보임 —
+ * 사용자가 직접 클러스터 탐색. 이전의 ?cluster=<entity_uid> 매칭은
+ * synthetic 모드 first-visit 에서 항상 fail 했고, real 진입 후에도
+ * 노드 매칭이 entity meta-network 미작성으로 부정확. 단순한 path 가 PO 합의. */
 export function clusterFocusHref(
-  cluster: { entity_uid: string | null; linked_count: number } | null,
+  _cluster: { entity_uid: string | null; linked_count: number } | null,
 ): string {
-  if (cluster && cluster.entity_uid && cluster.linked_count > 0) {
-    return `/stellar?cluster=${encodeURIComponent(cluster.entity_uid)}`;
-  }
-  return '/stellar?cluster=most_active';
+  return '/stellar';
 }
 
 // ---------------------------------------------------------------------------
