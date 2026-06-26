@@ -532,3 +532,9 @@ button.link {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+/* fix/decide-zero-fact-ux — 0 fact 인 추출의 "확인" 버튼은 muted */
+.tracker-review-btn.tracker-review-btn-empty {
+  opacity: 0.7;
+  font-style: italic;
+}

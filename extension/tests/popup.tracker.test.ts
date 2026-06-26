@@ -359,3 +359,62 @@ describe('popup tracker — mixed status job cards (counts now expressed by per-
     expect(pills.filter((c) => /completed/.test(c)).length).toBe(2);
   });
 });
+
+describe('popup tracker — fix/decide-zero-fact-ux (0 fact label)', () => {
+  it('renders muted "빈 추출 확인 →" label when fact_count is 0', async () => {
+    stubLoggedIn();
+    stubFetchReject();
+    chrome.tabs.create.mockImplementation(() => {});
+    stubSendMessage({
+      jobs: [
+        {
+          job_id: 'job-zero',
+          source_url: 'https://example.com/empty',
+          title: 'No facts here',
+          status: 'completed',
+          created_at: Date.now() - 60_000,
+          completed_at: Date.now() - 5000,
+          fact_count: 0,
+        },
+      ],
+    });
+
+    await import('@/popup/popup.ts');
+    await flushManyTimes();
+
+    const reviewBtn = document.querySelector(
+      '.tracker-job .tracker-review-btn',
+    ) as HTMLButtonElement | null;
+    expect(reviewBtn).not.toBeNull();
+    expect(reviewBtn?.textContent).toMatch(/빈 추출 확인/);
+    expect(reviewBtn?.classList.contains('tracker-review-btn-empty')).toBe(true);
+  });
+
+  it('keeps the default "검토하기 →" label when fact_count is undefined', async () => {
+    stubLoggedIn();
+    stubFetchReject();
+    chrome.tabs.create.mockImplementation(() => {});
+    stubSendMessage({
+      jobs: [
+        {
+          job_id: 'job-unknown',
+          source_url: 'https://example.com/x',
+          title: 'Recovery-path job',
+          status: 'completed',
+          created_at: Date.now() - 60_000,
+          completed_at: Date.now() - 5000,
+        },
+      ],
+    });
+
+    await import('@/popup/popup.ts');
+    await flushManyTimes();
+
+    const reviewBtn = document.querySelector(
+      '.tracker-job .tracker-review-btn',
+    ) as HTMLButtonElement | null;
+    expect(reviewBtn).not.toBeNull();
+    expect(reviewBtn?.textContent).toMatch(/검토하기/);
+    expect(reviewBtn?.classList.contains('tracker-review-btn-empty')).toBe(false);
+  });
+});

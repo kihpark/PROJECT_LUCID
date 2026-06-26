@@ -265,7 +265,17 @@ function renderJobCard(job: TrackedJob): HTMLElement {
     const review = document.createElement("button");
     review.type = "button";
     review.className = "tracker-review-btn";
-    review.textContent = "검토하기 →";
+    // fix/decide-zero-fact-ux — 0 fact 케이스: 사용자가 popup 의 "검토하기 →"
+    // 를 누르고 Decide 페이지에 도착해도 검토할 fact 가 없다. 라벨로 미리
+    // 신호를 줘서 헛탕을 줄인다. fact_count 가 채워지지 않은 경로에서는
+    // undefined → 기본 라벨 유지 (안전 fallback).
+    if (job.fact_count === 0) {
+      review.textContent = "빈 추출 확인 →";
+      review.classList.add("tracker-review-btn-empty");
+      review.title = "추출된 사실이 0건입니다 — 폐기 권장";
+    } else {
+      review.textContent = "검토하기 →";
+    }
     review.addEventListener("click", () => {
       chrome.tabs.create({ url: `${WEB_BASE}/pending/${job.job_id}` });
       window.close();

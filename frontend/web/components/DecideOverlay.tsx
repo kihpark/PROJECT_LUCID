@@ -317,52 +317,94 @@ export function DecideOverlay({
           </div>
         )}
 
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium">
-            {facts.length} fact(s) — uncheck or edit only the ones you disagree with
-          </h2>
-          <ActionButton
-            variant="danger"
-            disabled={busy}
-            onClick={onDiscardJob}
+        {/* fix/decide-zero-fact-ux — 0 fact 케이스 명시 안내 */}
+        {facts.length === 0 ? (
+          <div
+            data-testid="decide-empty-extract"
+            className="mb-6 rounded-md border border-border-subtle bg-bg-elevated/40 p-6"
           >
-            이 추출 전체 폐기
-          </ActionButton>
-        </div>
+            <h2 className="text-base font-medium text-text-primary mb-3">
+              이 기사에서 추출 가능한 사실이 없었습니다
+            </h2>
+            <p className="text-sm text-text-secondary mb-4">
+              LLM 이 단정적인 사실 진술을 찾지 못해 fact 0건으로 끝났어요.
+              아래 폐기 버튼으로 이 추출을 정리할 수 있어요.
+            </p>
+            <div className="mb-5">
+              <p className="text-xs text-text-muted mb-2">가능한 원인:</p>
+              <ul className="list-disc list-inside text-xs text-text-muted space-y-1">
+                <li>의견·해설 위주의 문장 구조 (사실 단정 부족)</li>
+                <li>광고 또는 짧은 알림성 콘텐츠</li>
+                <li>본문 자체 추출 실패</li>
+              </ul>
+            </div>
+            <div className="flex items-center gap-3">
+              <ActionButton
+                variant="danger"
+                disabled={busy}
+                onClick={onDiscardJob}
+              >
+                이 추출 전체 폐기
+              </ActionButton>
+              <Link
+                href={'/pending' as Route}
+                data-testid="empty-back-to-pending"
+                className="text-sm text-accent-cool hover:underline"
+              >
+                ← Pending Queue 로 돌아가기
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-sm font-medium">
+                {facts.length} fact(s) — uncheck or edit only the ones you disagree with
+              </h2>
+              <ActionButton
+                variant="danger"
+                disabled={busy}
+                onClick={onDiscardJob}
+              >
+                이 추출 전체 폐기
+              </ActionButton>
+            </div>
 
-        <div className="mb-4">
-          {facts.map((f) => {
-            const uid = f.fact_uid || f.uid || '';
-            if (!uid) return null;
-            const decision = factDecisions[uid] ?? { action: 'accept' as FactAction };
-            return (
-              <FactCard
-                key={uid}
-                fact={f}
-                objects={initial.objects}
-                lang="en"
-                action={decision.action}
-                editedClaim={decision.editedClaim}
-                editedSubjectUid={decision.editedSubjectUid}
-                editedPredicate={decision.editedPredicate}
-                editedObjectValue={decision.editedObjectValue}
-                onChange={(next) => onFactChange(uid, next)}
-                reviewMode={reviewMode}
-                spaceId={spaceId}
-              />
-            );
-          })}
-        </div>
+            <div className="mb-4">
+              {facts.map((f) => {
+                const uid = f.fact_uid || f.uid || '';
+                if (!uid) return null;
+                const decision = factDecisions[uid] ?? { action: 'accept' as FactAction };
+                return (
+                  <FactCard
+                    key={uid}
+                    fact={f}
+                    objects={initial.objects}
+                    lang="en"
+                    action={decision.action}
+                    editedClaim={decision.editedClaim}
+                    editedSubjectUid={decision.editedSubjectUid}
+                    editedPredicate={decision.editedPredicate}
+                    editedObjectValue={decision.editedObjectValue}
+                    onChange={(next) => onFactChange(uid, next)}
+                    reviewMode={reviewMode}
+                    spaceId={spaceId}
+                  />
+                );
+              })}
+            </div>
 
-        <div className="sticky bottom-0 bg-bg-base/95 py-4 -mx-4 px-4 border-t border-border-subtle">
-          <ActionButton
-            variant="primary"
-            disabled={busy || facts.length === 0}
-            onClick={onSubmit}
-          >
-            {busy ? "처리 중…" : "Submit decisions"}
-          </ActionButton>
-        </div>
+            <div className="sticky bottom-0 bg-bg-base/95 py-4 -mx-4 px-4 border-t border-border-subtle">
+              <ActionButton
+                variant="primary"
+                disabled={busy || facts.length === 0}
+                onClick={onSubmit}
+              >
+                {busy ? "처리 중…" : "Submit decisions"}
+              </ActionButton>
+            </div>
+          </>
+        )}
       </section>
       )}
     </div>

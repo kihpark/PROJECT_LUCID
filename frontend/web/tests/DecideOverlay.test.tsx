@@ -237,3 +237,36 @@ describe('DecideOverlay — discard race fix (feat/popup-cleanup-discard-sync)',
     }
   });
 });
+
+describe('DecideOverlay — fix/decide-zero-fact-ux (0 fact 케이스)', () => {
+  const emptyJob = {
+    ...baseJob,
+    facts: [],
+  };
+
+  it('renders the empty-extract panel instead of the raw fact list', () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={emptyJob} />);
+    const panel = screen.getByTestId('decide-empty-extract');
+    expect(panel).toBeInTheDocument();
+    expect(panel).toHaveTextContent(/이 기사에서 추출 가능한 사실이 없었습니다/);
+    expect(panel).toHaveTextContent(/의견·해설 위주의 문장 구조/);
+  });
+
+  it('prominent 폐기 button is visible in the empty panel', () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={emptyJob} />);
+    const panel = screen.getByTestId('decide-empty-extract');
+    expect(panel.querySelector('button')).not.toBeNull();
+    expect(panel).toHaveTextContent('이 추출 전체 폐기');
+  });
+
+  it('does not render Submit decisions button when facts are empty', () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={emptyJob} />);
+    expect(screen.queryByText('Submit decisions')).toBeNull();
+  });
+
+  it('renders a back-to-pending link from the empty panel', () => {
+    render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={emptyJob} />);
+    const back = screen.getByTestId('empty-back-to-pending') as HTMLAnchorElement;
+    expect(back.getAttribute('href')).toBe('/pending');
+  });
+});
