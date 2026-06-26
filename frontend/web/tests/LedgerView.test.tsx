@@ -225,4 +225,37 @@ describe('LedgerView', () => {
     const badge = await screen.findByTestId('fact-claim-badge-claim-fact');
     expect(badge.textContent).toBe('CLAIM');
   });
+
+  it('fix/h1-state-sync-autorefresh — decision-submitted event triggers reload', async () => {
+    const initial = [
+      buildItem({ fact_uid: 'old-1', claim: 'old claim 1' }),
+    ];
+    const refreshed = [
+      buildItem({ fact_uid: 'new-1', claim: 'new claim 1' }),
+      buildItem({ fact_uid: 'old-1', claim: 'old claim 1' }),
+    ];
+    (api.fetchLedger as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(buildResponse(initial))
+      .mockResolvedValueOnce(buildResponse(refreshed));
+
+    render(<LedgerView spaceId="ks-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('old claim 1')).toBeInTheDocument();
+    });
+    expect(api.fetchLedger).toHaveBeenCalledTimes(1);
+
+    // Fire the same event DecideOverlay fires post-Submit.
+    window.dispatchEvent(
+      new CustomEvent('lucid:state-changed', {
+        detail: { reason: 'decision-submitted', payload: { jobId: 'j-1' } },
+      }),
+    );
+
+    // LedgerView should re-call fetchLedger and surface the new claim.
+    await waitFor(() => expect(api.fetchLedger).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByText('new claim 1')).toBeInTheDocument(),
+    );
+  });
 });

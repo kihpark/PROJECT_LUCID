@@ -266,6 +266,47 @@ describe('AppShell', () => {
     );
   });
 
+  it('fix/h1-state-sync-autorefresh — decision-submitted event triggers a brief refetch', async () => {
+    // First call returns 3 pending; after the sync event a second call returns 2.
+    (api.getHomeBrief as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ...noBrief,
+        pending_validation: 3,
+        is_empty: false,
+      })
+      .mockResolvedValueOnce({
+        ...noBrief,
+        pending_validation: 2,
+        is_empty: false,
+      });
+
+    render(
+      <AppShell>
+        <div>child</div>
+      </AppShell>,
+    );
+
+    // Initial fetch — badge shows (3).
+    await waitFor(() =>
+      expect(screen.getByTestId('app-shell-nav-pending')).toHaveTextContent('(3)'),
+    );
+    expect(api.getHomeBrief).toHaveBeenCalledTimes(1);
+
+    // Fire the sync bus the same way DecideOverlay does post-submit.
+    window.dispatchEvent(
+      new CustomEvent('lucid:state-changed', {
+        detail: { reason: 'decision-submitted', payload: { jobId: 'j-1' } },
+      }),
+    );
+
+    // useHomeBrief should refetch and the badge should update to (2)
+    // without any router navigation or component remount.
+    await waitFor(() => expect(api.getHomeBrief).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId('app-shell-nav-pending')).toHaveTextContent('(2)'),
+    );
+  });
+
   it('B-61 — renders me.email when useAuthMe returns a me object', async () => {
     useAuthMeMock.mockReturnValue({
       me: {

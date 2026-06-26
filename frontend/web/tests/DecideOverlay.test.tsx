@@ -225,8 +225,19 @@ describe('DecideOverlay — discard race fix (feat/popup-cleanup-discard-sync)',
       await waitFor(() => expect(api.discardJob).toHaveBeenCalled());
       // 200ms delay before notify lands — give it time
       await new Promise((r) => setTimeout(r, 300));
+      // fix/h1-state-sync-autorefresh: pick the FIRST event that
+      // matches *this* job_id (not just by reason). Previously Submit
+      // fired its notify synchronously and there was no risk of a
+      // cross-test bleed; now Submit waits 200ms and a leftover Submit
+      // timer from an earlier test in the same file could fire its
+      // own decision-submitted event into this listener. Filter by
+      // discarded:true so only the discard path matches.
       const discardEvent = events.find(
-        (e) => (e.detail as { reason?: string })?.reason === 'decision-submitted',
+        (e) => {
+          const detail = e.detail as { reason?: string; payload?: { discarded?: boolean } };
+          return detail?.reason === 'decision-submitted'
+            && detail?.payload?.discarded === true;
+        },
       );
       expect(discardEvent).toBeDefined();
       const payload = (discardEvent!.detail as { payload?: { jobId: string; discarded: boolean } }).payload;
@@ -268,5 +279,32 @@ describe('DecideOverlay — fix/decide-zero-fact-ux (0 fact 케이스)', () => {
     render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={emptyJob} />);
     const back = screen.getByTestId('empty-back-to-pending') as HTMLAnchorElement;
     expect(back.getAttribute('href')).toBe('/pending');
+  });
+});
+
+describe('DecideOverlay — submit fires notifyStateChanged (fix/h1-state-sync-autorefresh)', () => {
+  it('fires decision-submitted notify after successful submit', async () => {
+    const events: CustomEvent[] = [];
+    const handler = (e: Event) => events.push(e as CustomEvent);
+    window.addEventListener('lucid:state-changed', handler);
+    try {
+      render(<DecideOverlay spaceId="ks-1" jobId="job-xyz" initial={baseJob} />);
+      fireEvent.click(screen.getByText('Submit decisions'));
+      await waitFor(() => expect(api.submitDecisions).toHaveBeenCalledTimes(1));
+      // submit path now waits 200ms before notify (parity with discard)
+      await new Promise((r) => setTimeout(r, 300));
+      const submitEvent = events.find(
+        (e) => (e.detail as { reason?: string })?.reason === 'decision-submitted',
+      );
+      expect(submitEvent).toBeDefined();
+      const payload = (submitEvent!.detail as {
+        payload?: { jobId: string; discarded?: boolean };
+      }).payload;
+      expect(payload?.jobId).toBe('job-xyz');
+      // submit (not discard) — discarded field MUST NOT be true
+      expect(payload?.discarded).not.toBe(true);
+    } finally {
+      window.removeEventListener('lucid:state-changed', handler);
+    }
   });
 });

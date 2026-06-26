@@ -52,6 +52,12 @@ function safeChannel(): BroadcastChannel | null {
  * Fire-and-forget — dispatch a same-tab CustomEvent AND a cross-tab
  * BroadcastChannel message. Safe to call from any client code; no-ops
  * on the server.
+ *
+ * fix/h1-state-sync-autorefresh: `console.debug` traces so PO can open
+ * DevTools (verbose) and verify the producer side actually fires. If
+ * the trace is missing, the producer never invoked notifyStateChanged
+ * (look at the call site). If the trace appears but the badge doesn't
+ * refresh, the listener side is broken (see `useStateChange`).
  */
 export function notifyStateChanged(
   reason: SyncReason,
@@ -59,6 +65,9 @@ export function notifyStateChanged(
 ): void {
   if (typeof window === 'undefined') return;
   const detail: SyncEventPayload = { reason, payload };
+  // PO trace — visible in browser DevTools console (verbose level).
+  // eslint-disable-next-line no-console
+  console.debug('[lucid:sync] notify FIRE', reason, payload);
   try {
     window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail }));
   } catch {
@@ -93,7 +102,12 @@ export function useStateChange(
     if (typeof window === 'undefined') return;
     const onEvent = (e: Event) => {
       const ce = e as CustomEvent<SyncEventPayload>;
-      if (ce.detail) handler(ce.detail);
+      if (ce.detail) {
+        // PO trace — same-tab listener received the event.
+        // eslint-disable-next-line no-console
+        console.debug('[lucid:sync] LISTEN same-tab', ce.detail.reason);
+        handler(ce.detail);
+      }
     };
     window.addEventListener(SYNC_EVENT, onEvent as EventListener);
 
@@ -103,7 +117,12 @@ export function useStateChange(
         bc = new BroadcastChannel(SYNC_CHANNEL);
         bc.onmessage = (e: MessageEvent) => {
           const data = e.data as SyncEventPayload | undefined;
-          if (data) handler(data);
+          if (data) {
+            // PO trace — cross-tab listener received the event.
+            // eslint-disable-next-line no-console
+            console.debug('[lucid:sync] LISTEN cross-tab', data.reason);
+            handler(data);
+          }
         };
       } catch {
         bc = null;
