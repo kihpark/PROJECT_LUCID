@@ -325,17 +325,43 @@ def test_type_and_label_humanise_opl_code_fallback() -> None:
     assert label == "regulate market"
 
 
-def test_type_and_label_related_to_uses_related_to_label() -> None:
-    """RELATED_TO fallback gets the literal "related to" label and
-    needs_review=True."""
+def test_type_and_label_related_to_preserves_raw_surface() -> None:
+    """fix/recall-predicate-and-entity-type (PO 2026-06-26): the
+    RELATED_TO fallback used to rewrite EVERY unmapped predicate's
+    label to "related to", which then surfaced uniformly on recall
+    cards even when the original surface carried information (e.g.
+    Korean speech-act verbs "답했다", "덧붙였다", "주장했다"). The
+    canonical OPL code stays RELATED_TO so dedup / facets are
+    unchanged, but the label preserves the raw surface so the recall
+    card shows the verb the user actually wrote. needs_review stays
+    True because the predicate IS still ambiguous from the OPL
+    perspective."""
+    code, label, needs_review = map_predicate_to_type_and_label("답했다")
+    assert code == "RELATED_TO"
+    assert label == "답했다"
+    assert needs_review is True
+
+
+def test_type_and_label_related_to_preserves_unknown_english() -> None:
+    """Unknown English predicate also preserves the raw surface."""
     code, label, needs_review = map_predicate_to_type_and_label("xyz_quux_blat")
+    assert code == "RELATED_TO"
+    assert label == "xyz_quux_blat"
+    assert needs_review is True
+
+
+def test_type_and_label_empty_input_falls_back_to_related_to() -> None:
+    """Only EMPTY raw input still falls back to the generic
+    "related to" gloss — there is no surface to preserve, and the
+    label must never be the empty string."""
+    code, label, needs_review = map_predicate_to_type_and_label("")
     assert code == "RELATED_TO"
     assert label == "related to"
     assert needs_review is True
 
 
-def test_type_and_label_empty_input_falls_back_to_related_to() -> None:
-    code, label, needs_review = map_predicate_to_type_and_label("")
+def test_type_and_label_whitespace_only_falls_back_to_related_to() -> None:
+    code, label, needs_review = map_predicate_to_type_and_label("   ")
     assert code == "RELATED_TO"
     assert label == "related to"
     assert needs_review is True

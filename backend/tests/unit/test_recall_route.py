@@ -21,6 +21,8 @@ from api.routes.recall import (
     RECALL_SCORE_FLOOR,
     SIGNATURE_EMPTY,
     SIGNATURE_HIT_TEMPLATE,
+    _bucket_for,
+    _bucket_for_unresolved,
     _date_range_filter,
     _empty,
     _entity_link_facts,
@@ -135,6 +137,71 @@ def test_hit_to_fact_serializes_clean_manual_hit():
     assert f.fact_uid == "fn-1"
     assert f.claim == "삼성전자 영업이익"
     assert f.score == 0.85
+
+
+def test_hit_to_fact_preserves_raw_predicate_and_predicate_label() -> None:
+    """fix/recall-predicate-and-entity-type (PO 2026-06-26): the recall
+    card calls `predicateLabel(fact.predicate, fact.predicate_label)`
+    which prefers a non-empty `predicate_label`. The backend MUST pass
+    BOTH fields through verbatim so the frontend can choose. A Korean
+    speech-act predicate ("답했다") that landed in the RELATED_TO bucket
+    is the PO repro: predicate carries the raw surface, predicate_label
+    carries the same surface (under the new mapper behavior) or
+    "related to" (legacy facts already on disk)."""
+    hit = {
+        "_source": {
+            "fact_uid": "fn-han",
+            "claim": "한성숙 답했다 ...",
+            "subject_uid": "한성숙",
+            "predicate": "답했다",
+            "predicate_label": "답했다",
+            "object_value": "(저가형 반도체 생산 보장 문제를) 챙겨보겠다",
+            "source_uids": [],
+            "validated_at": "2026-06-25T10:00:00Z",
+            "validator_id": "u-1",
+            "validation_method": "manual",
+            "knowledge_space_id": "ks-1",
+            "negation_flag": False,
+            "negation_scope": None,
+        },
+        "_score": 0.83,
+    }
+    f = _hit_to_fact(hit)
+    assert f is not None
+    # Both fields must survive serialisation so the FE has them.
+    assert f.predicate == "답했다"
+    assert f.predicate_label == "답했다"
+
+
+def test_hit_to_fact_legacy_predicate_label_related_to_still_passes_through() -> None:
+    """Legacy facts already on disk persisted predicate_label="related to"
+    for every RELATED_TO fallback. The serialiser must still surface the
+    field verbatim — the FE helper drops "related to" in favour of the
+    canonical surface, so the card recovers the verb."""
+    hit = {
+        "_source": {
+            "fact_uid": "fn-legacy",
+            "claim": "한성숙 답했다 ...",
+            "subject_uid": "한성숙",
+            "predicate": "답했다",
+            # Legacy: mapper used to write the literal "related to".
+            "predicate_label": "related to",
+            "object_value": "(저가형 반도체 생산 보장 문제를) 챙겨보겠다",
+            "source_uids": [],
+            "validated_at": "2026-06-25T10:00:00Z",
+            "validator_id": "u-1",
+            "validation_method": "manual",
+            "knowledge_space_id": "ks-1",
+            "negation_flag": False,
+            "negation_scope": None,
+        },
+        "_score": 0.83,
+    }
+    f = _hit_to_fact(hit)
+    assert f is not None
+    assert f.predicate == "답했다"
+    # Pass-through is verbatim — the FE helper applies the legacy guard.
+    assert f.predicate_label == "related to"
 
 
 # ---------------------------------------------------------------------------
@@ -516,3 +583,80 @@ def test_recall_no_new_params_preserves_pre_b50_behaviour():
     assert r.total == 1
     assert knn_calls[0]["date_from"] is None
     assert knn_calls[0]["date_to"] is None
+
+
+# ---------------------------------------------------------------------------
+# fix/recall-predicate-and-entity-type (PO 2026-06-26): facet bucketing
+# Korean-name fallback. When a fact carries an unresolved subject_uid
+# (raw Korean surface, e.g. "한성숙" — the entity resolver never ran on
+# legacy captures), the facet panel used to drop the name into the
+# "other" bucket because mget on lucid_objects returned no doc. The
+# `_bucket_for_unresolved` helper applies the same Korean-name heuristic
+# the backfill tool uses so the obvious cases (2-4 Hangul syllable
+# personal names) land in "person".
+# ---------------------------------------------------------------------------
+
+
+def test_bucket_for_unresolved_korean_person_name() -> None:
+    """한성숙 / 안도걸 / 박기흥 — 2-4 Hangul syllables, no org suffix,
+    no location suffix → person."""
+    assert _bucket_for_unresolved("한성숙") == "person"
+    assert _bucket_for_unresolved("안도걸") == "person"
+    assert _bucket_for_unresolved("박기흥") == "person"
+
+
+def test_bucket_for_unresolved_korean_org_suffix() -> None:
+    """국회 / 위원회 / 공사 — known org suffix wins."""
+    assert _bucket_for_unresolved("국회") == "organization"
+    assert _bucket_for_unresolved("최저임금위원회") == "organization"
+    assert _bucket_for_unresolved("한국전력공사") == "organization"
+
+
+def test_bucket_for_unresolved_korean_place_suffix() -> None:
+    """서울시 / 경기도 — known location suffix → place."""
+    assert _bucket_for_unresolved("서울시") == "place"
+    assert _bucket_for_unresolved("경기도") == "place"
+
+
+def test_bucket_for_unresolved_country_whitelist() -> None:
+    """미국 / 중국 — 2-3 Hangul on the country whitelist → place
+    (BEFORE the person heuristic which would otherwise grab them)."""
+    assert _bucket_for_unresolved("미국") == "place"
+    assert _bucket_for_unresolved("중국") == "place"
+
+
+def test_bucket_for_unresolved_canonical_uid_returns_other() -> None:
+    """A canonical UUID4 should NEVER be classified by the heuristic —
+    those resolve via lucid_objects mget; the fallback path is only for
+    raw-surface subject_uids."""
+    canonical = "550e8400-e29b-41d4-a716-446655440000"
+    assert _bucket_for_unresolved(canonical) == "other"
+
+
+def test_bucket_for_unresolved_obj_placeholder_returns_other() -> None:
+    """obj-N placeholders also resolve via lucid_objects; not our path."""
+    assert _bucket_for_unresolved("obj-1") == "other"
+    assert _bucket_for_unresolved("obj-42") == "other"
+
+
+def test_bucket_for_unresolved_empty_returns_other() -> None:
+    """Defensive: empty / None never throw, always 'other'."""
+    assert _bucket_for_unresolved("") == "other"
+    assert _bucket_for_unresolved("   ") == "other"
+
+
+def test_bucket_for_unresolved_non_korean_returns_other() -> None:
+    """A Latin string with no Korean shape is not classified by the
+    heuristic — falls back to 'other' so the FE shows it neutrally."""
+    assert _bucket_for_unresolved("ACME Corp") == "other"
+    assert _bucket_for_unresolved("xyzzy") == "other"
+
+
+def test_bucket_for_legacy_class_still_routes_correctly() -> None:
+    """Regression guard: the existing `_bucket_for(class_name)` path is
+    untouched — only the unresolved fallback is new."""
+    assert _bucket_for("person") == "person"
+    assert _bucket_for("organization") == "organization"
+    assert _bucket_for("place") == "place"
+    assert _bucket_for(None) == "other"
+    assert _bucket_for("concept") == "other"

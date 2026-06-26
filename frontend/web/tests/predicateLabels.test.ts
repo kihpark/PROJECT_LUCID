@@ -91,4 +91,45 @@ describe('predicateLabel — display layer (B-56)', () => {
       'weird_unknown_predicate',
     );
   });
+
+  // --- fix/recall-predicate-and-entity-type (PO 2026-06-26) ------------------
+  // The OPL RELATED_TO fallback used to write predicate_label = "related to"
+  // for every Korean speech-act predicate the deterministic mapper did
+  // not cover ("답했다", "덧붙였다", "주장했다", …). On legacy facts
+  // already in ES, that "related to" string is persisted and would
+  // otherwise leak onto every recall card. The helper recovers the
+  // verb from the canonical surface (the raw original_surface stored
+  // on the fact's `predicate` field) so the card shows what the user
+  // actually wrote.
+
+  it('fix/recall-predicate — falls back to canonical when predicate_label is the legacy "related to"', () => {
+    // PO repro: subject_uid="한성숙", predicate="답했다",
+    // predicate_label="related to". The card MUST show "답했다", not
+    // "related to".
+    expect(predicateLabel('답했다', 'related to')).toBe('답했다');
+  });
+
+  it('fix/recall-predicate — "related to" fallback is case-insensitive', () => {
+    expect(predicateLabel('답했다', 'Related To')).toBe('답했다');
+    expect(predicateLabel('답했다', 'RELATED TO')).toBe('답했다');
+  });
+
+  it('fix/recall-predicate — "related to" fallback tolerates surrounding whitespace', () => {
+    expect(predicateLabel('답했다', '  related to  ')).toBe('답했다');
+  });
+
+  it('fix/recall-predicate — covered canonical + "related to" prefers the curated KO map', () => {
+    // Even when the legacy backend wrote predicate_label="related to",
+    // a canonical predicate already in PREDICATE_LABELS gives a nicer
+    // Korean reading than the raw English snake_case.
+    expect(predicateLabel('decided_to_remove', 'related to')).toBe(
+      '철거하기로 결정한 것은',
+    );
+  });
+
+  it('fix/recall-predicate — any non-"related to" label still wins (regression guard for B-62)', () => {
+    // The new guard must not over-trigger: a real server-resolved label
+    // like "answers" / "states" still wins over the curated map.
+    expect(predicateLabel('답했다', 'answers')).toBe('answers');
+  });
 });

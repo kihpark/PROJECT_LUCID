@@ -736,6 +736,41 @@ def _bucket_for(class_name: str | None) -> str:
     return _OBJECT_CLASS_BUCKET.get(class_name.lower(), "other")
 
 
+def _bucket_for_unresolved(uid: str) -> str:
+    """fix/recall-predicate-and-entity-type (PO 2026-06-26): a fallback
+    bucket pick for entity references that did not resolve to a
+    lucid_objects doc — typically a subject_uid still carrying the raw
+    Korean surface ("한성숙") because the legacy capture never went
+    through the entity-resolver. Without this guard the facet would
+    classify every such name as "기타" (other), which the dogfood user
+    correctly flagged as wrong for an obvious Korean person name.
+
+    The heuristic itself lives in `entity_reclassifier` so the backfill
+    tool and the live facet path agree on what "looks like a Korean
+    person" means. Returns "other" for anything the heuristic cannot
+    confidently classify — no LLM call, no surprise allocations.
+    """
+    if not uid or not isinstance(uid, str):
+        return "other"
+    # Skip canonical / placeholder uids — those resolve via lucid_objects
+    # and we should never need this fallback for them.
+    if _UUID4_RE.match(uid) or _OBJ_PLACEHOLDER_RE.match(uid):
+        return "other"
+    try:
+        from api.structure.entity_reclassifier import classify_by_heuristic
+    except Exception as exc:  # noqa: BLE001 - degrade quietly
+        logger.warning("recall: heuristic import failed: %s", exc)
+        return "other"
+    try:
+        guess = classify_by_heuristic(uid)
+    except Exception as exc:  # noqa: BLE001 - degrade quietly
+        logger.warning(
+            "recall: heuristic classify failed for %r: %s", uid, exc,
+        )
+        return "other"
+    return _bucket_for(guess)
+
+
 def _entity_type_of(src: dict[str, Any]) -> str | None:
     """feat/entity-layer-restore (PO 2026-06-23): prefer the canonical
     `entity_type` metadata field; fall back to legacy `class` for docs
@@ -860,7 +895,18 @@ def _facets_for(
     for uid, c in counts.items():
         name, cls = label_class.get(uid, (uid, None))
         item = EntityFacetItem(uid=uid, name=name, count=c)
-        buckets[_bucket_for(cls)].append(item)
+        # fix/recall-predicate-and-entity-type (PO 2026-06-26): when the
+        # entity has no lucid_objects doc (legacy facts that store the
+        # raw Korean surface as subject_uid because the resolver never
+        # ran), fall back to a Korean-name heuristic so an obvious
+        # person name does not drop into "기타". The heuristic is the
+        # same one the backfill tool uses; the facet path always
+        # degrades to "other" on heuristic failure.
+        if cls is None and uid not in label_class:
+            bucket = _bucket_for_unresolved(uid)
+        else:
+            bucket = _bucket_for(cls)
+        buckets[bucket].append(item)
     for v in buckets.values():
         v.sort(key=lambda i: (-i.count, i.name.lower()))
 
@@ -1277,6 +1323,12 @@ def _build_fact_detail(
         subject_uid=fact_doc["subject_uid"],
         subject_label=subject_entity.name if subject_entity else None,
         predicate=fact_doc["predicate"],
+        # fix/recall-predicate-and-entity-type (PO 2026-06-26): pass the
+        # server-resolved predicate gloss through so the modal renders
+        # the same label as the recall card. Legacy docs without the
+        # field stay None and the frontend helper falls back to the
+        # canonical predicate surface.
+        predicate_label=fact_doc.get("predicate_label"),
         object_value=object_value,
         object_label=object_entity.name if object_entity else None,
         validated_at=fact_doc["validated_at"],
