@@ -55,9 +55,30 @@ function makeNotificationId(jobId: string): string {
 
 async function fireTerminalNotification(args: {
   jobId: string;
-  status: 'structured' | 'extract_failed' | 'structure_failed';
+  // fix/popup-auto-cleanup-on-terminal — 'validated' / 'discarded' 는 backend
+  // 가 검토/폐기 처리를 끝낸 상태. 이 두 케이스에서는 OS notification 을
+  // 건너뛰고 (사용자가 이미 결과를 알고 있음) tracker row 만 dismiss 한다.
+  status:
+    | 'structured'
+    | 'extract_failed'
+    | 'structure_failed'
+    | 'validated'
+    | 'discarded';
   factCount: number | null;
 }): Promise<void> {
+  // fix/popup-auto-cleanup-on-terminal — validated / discarded 는 backend
+  // 가 이미 처리한 상태. 사용자가 별도로 알 필요 없으므로 OS notification
+  // 은 생략하고, tracker row 만 즉시 제거하여 popup 검토 대기 목록에서
+  // 자동으로 사라지게 한다.
+  if (args.status === 'validated' || args.status === 'discarded') {
+    try {
+      await dismissJob(args.jobId);
+      await updateBadge();
+    } catch (err) {
+      console.info('[lucid] tracker terminal dismiss failed', err);
+    }
+    return;
+  }
   const notifications = (chrome as { notifications?: unknown }).notifications;
   if (
     !notifications
@@ -324,7 +345,15 @@ chrome.runtime.onMessage.addListener(
       const m = msg as {
         type: 'announce_terminal';
         job_id: string;
-        status: 'structured' | 'extract_failed' | 'structure_failed';
+        // fix/popup-auto-cleanup-on-terminal — validated / discarded 분기 추가.
+        // 두 상태 모두 fireTerminalNotification 내부에서 OS notification 을
+        // 건너뛰고 tracker row 를 즉시 dismiss 한다.
+        status:
+          | 'structured'
+          | 'extract_failed'
+          | 'structure_failed'
+          | 'validated'
+          | 'discarded';
         fact_count: number | null;
       };
       (async () => {
@@ -506,7 +535,31 @@ chrome.runtime.onMessage.addListener(
         try {
           const server = await fetchServerJobStatus(m.job_id);
           const s = server.status;
-          if (s === 'structured' || s === 'validated') {
+          // fix/popup-auto-cleanup-on-terminal — backend 가 이미 검토/폐기
+          // 처리를 끝낸 (validated / discarded) 행은 popup 검토 대기 목록에
+          // 남아 있을 이유가 없다. 사용자가 × 를 하나씩 누를 필요 없도록
+          // 즉시 tracker 에서 제거 (storage-only; brief 카운트는 별도 경로).
+          //
+          // structured (= decide 대기 중) 은 사용자가 검토해야 하므로
+          // 'completed' 상태로 유지하여 검토 대기 카드로 남긴다.
+          //
+          // 분기 정당화:
+          //   structured  → 검토 대기 (사용자 행동 필요)             → completed 유지
+          //   validated   → 검토 완료 (backend 가 사실 확정)         → auto-dismiss
+          //   discarded   → 폐기 완료 (backend 가 폐기 확정)         → auto-dismiss
+          //   *_failed    → 실패 (사용자가 인지/재시도 결정 필요)    → failed 유지
+          if (s === 'validated' || s === 'discarded') {
+            await dismissJob(m.job_id);
+            await updateBadge();
+            sendResponse({
+              ok: true,
+              server_status: s,
+              tracker_status: 'dismissed',
+              auto_dismissed: true,
+            });
+            return;
+          }
+          if (s === 'structured') {
             // fix/decide-zero-fact-ux — popup 의 0-fact 라벨이 동작하려면
             // tracker row 에 fact_count 가 채워져야 한다. announce_terminal
             // 경로는 이미 채우고 있지만, 이 복구 경로는 누락이었다.

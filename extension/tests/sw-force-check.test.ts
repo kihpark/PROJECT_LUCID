@@ -288,7 +288,11 @@ describe("SW force_check_status handler -- tracker mutation contract", () => {
     expect(j?.error_message).toBe("404 from upstream");
   });
 
-  it("validated (200 path) -> flips tracker row to completed (NOT via 500 fallback)", async () => {
+  it("validated (200 path) -> auto-dismisses tracker row (fix/popup-auto-cleanup-on-terminal)", async () => {
+    // fix/popup-auto-cleanup-on-terminal — validated 는 backend 가 검토를
+    // 끝낸 상태. popup 검토 대기 카드에 남길 이유가 없으므로 즉시 tracker
+    // 에서 제거 (사용자가 × 를 누를 필요 없음). 이전 동작은 'completed'
+    // 로 유지였음 — 이 PR 이 동작을 변경한다.
     stubAuthCookies();
     installMemStorage();
     vi.stubGlobal(
@@ -330,10 +334,118 @@ describe("SW force_check_status handler -- tracker mutation contract", () => {
     expect(response).toMatchObject({
       ok: true,
       server_status: "validated",
-      tracker_status: "completed",
+      tracker_status: "dismissed",
+      auto_dismissed: true,
+    });
+    // Crucially: row is GONE — popup card list no longer shows it.
+    const jobs = await getJobs();
+    expect(jobs.find((x) => x.job_id === "j-validated")).toBeUndefined();
+    // Badge update was called so the numeric counter resets.
+    expect(chrome.action.setBadgeText).toHaveBeenCalled();
+  });
+
+  it("discarded (200 path) -> auto-dismisses tracker row (fix/popup-auto-cleanup-on-terminal)", async () => {
+    // 'discarded' = user (or backend cleanup) 가 폐기 결정을 내린 상태.
+    // validated 와 대칭으로, popup 검토 대기 카드에서 자동 사라져야 한다.
+    stubAuthCookies();
+    installMemStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          job_id: "j-discarded",
+          knowledge_space_id: "ks-1",
+          source_url: "https://e.com/d",
+          source_type: "web_article",
+          status: "discarded",
+          captured_at: "2026-06-24T08:00:00Z",
+          captured_from: "chrome_ext",
+          error_message: null,
+          created_at: "2026-06-24T08:00:00Z",
+          updated_at: "2026-06-24T08:00:00Z",
+        }),
+      }),
+    );
+
+    await clearAllJobs();
+    await addJob({
+      job_id: "j-discarded",
+      source_url: "https://e.com/d",
+      status: "analyzing",
+    });
+
+    const listener = await importSw();
+    let response: unknown = undefined;
+    listener(
+      { type: "force_check_status", job_id: "j-discarded" },
+      {},
+      (r) => { response = r; },
+    );
+
+    await waitFor(() => response !== undefined);
+    expect(response).toMatchObject({
+      ok: true,
+      server_status: "discarded",
+      tracker_status: "dismissed",
+      auto_dismissed: true,
     });
     const jobs = await getJobs();
-    const j = jobs.find((x) => x.job_id === "j-validated");
+    expect(jobs.find((x) => x.job_id === "j-discarded")).toBeUndefined();
+  });
+
+  it("structured -> tracker row stays in list as 'completed' (검토 대기 유지)", async () => {
+    // fix/popup-auto-cleanup-on-terminal regression guard — structured
+    // 는 사용자 검토가 필요한 상태이므로 자동 dismiss 하면 안 된다.
+    // 'completed' 라벨로 유지하여 popup 검토 대기 카드에 남는다.
+    stubAuthCookies();
+    installMemStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          job_id: "j-structured",
+          knowledge_space_id: "ks-1",
+          source_url: "https://e.com/s",
+          source_type: "web_article",
+          status: "structured",
+          captured_at: "2026-06-24T08:00:00Z",
+          captured_from: "chrome_ext",
+          error_message: null,
+          created_at: "2026-06-24T08:00:00Z",
+          updated_at: "2026-06-24T08:00:00Z",
+        }),
+      }),
+    );
+
+    await clearAllJobs();
+    await addJob({
+      job_id: "j-structured",
+      source_url: "https://e.com/s",
+      status: "analyzing",
+    });
+
+    const listener = await importSw();
+    let response: unknown = undefined;
+    listener(
+      { type: "force_check_status", job_id: "j-structured" },
+      {},
+      (r) => { response = r; },
+    );
+
+    await waitFor(() => response !== undefined);
+    expect(response).toMatchObject({
+      ok: true,
+      server_status: "structured",
+      tracker_status: "completed",
+    });
+    // Row remains, with terminal 'completed' status — user can still
+    // see it and click × manually if desired (보조 escape hatch).
+    const jobs = await getJobs();
+    const j = jobs.find((x) => x.job_id === "j-structured");
     expect(j?.status).toBe("completed");
   });
 
