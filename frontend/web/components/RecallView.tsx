@@ -541,7 +541,7 @@ function FactDetailModal({
             const objectName =
               object?.name ?? fact.object_label ?? fact.object_value;
             const titleText = reconstructed
-              ? `${subjectName} → ${predicateLabel(fact.predicate)} → ${objectName}`
+              ? `${subjectName} → ${predicateLabel(fact.predicate, fact.predicate_label)} → ${objectName}`
               : claimText;
             return (
               <p
@@ -701,7 +701,7 @@ function FactDetailModal({
               </span>
               <span className="text-text-muted font-mono text-xs">→</span>
               <span className="rounded-md bg-accent-cool/10 border border-accent-cool/30 text-accent-cool px-3 py-1.5 font-mono text-xs">
-                {predicateLabel(fact.predicate)}
+                {predicateLabel(fact.predicate, fact.predicate_label)}
               </span>
               <span className="text-text-muted font-mono text-xs">→</span>
               <span

@@ -608,7 +608,13 @@ def map_predicate_to_type_and_label(
 
     Strategy:
       1. Resolve the OPL code via the deterministic lookup.
-      2. RELATED_TO fallback -> label = "related to", needs_review=True.
+      2. RELATED_TO fallback -> preserve the raw surface as the user-
+         facing label when one was supplied (so a Korean speech-act like
+         "답했다" surfaces verbatim in the recall card rather than the
+         generic "related to" gloss). Empty / whitespace-only raw input
+         falls back to "related to". `needs_review` is preserved from
+         the resolver so the HITL UI can still ask the user to
+         disambiguate.
       3. Else: pick the english label by precedence:
            a. Korean (or curated) gloss dict (longest substring wins).
            b. Echo the raw input when it looks English (de-snake-cased).
@@ -619,8 +625,23 @@ def map_predicate_to_type_and_label(
         raw_predicate, subject_lang=subject_lang, object_lang=object_lang,
     )
     if code == "RELATED_TO":
-        # Ambiguous predicates always get "related to" and needs_review
-        # so the HITL UI can ask the user to disambiguate.
+        # fix/recall-predicate-and-entity-type — PO 2026-06-26.
+        # Previously the RELATED_TO fallback rewrote the label to
+        # "related to" verbatim, which then surfaced on every recall
+        # card for Korean speech-act predicates ("답했다", "덧붙였다",
+        # "주장했다", "했다") that the deterministic mapper does not
+        # cover. The fact detail modal still rendered the raw surface
+        # ("답했다") because it reads `predicate` directly, so the user
+        # saw two contradictory predicates for the SAME fact across
+        # surfaces. Preserve the raw surface as the user-facing label
+        # when it carries information; the canonical code stays
+        # RELATED_TO so dedup / facets / structure invariants do not
+        # shift.
+        raw_str = str(raw_predicate or "").strip()
+        if raw_str:
+            # Normalise whitespace but keep the original-language text.
+            label = re.sub(r"\s+", " ", raw_str)
+            return code, label, needs_review
         return code, "related to", needs_review
 
     raw_str = str(raw_predicate or "").strip()

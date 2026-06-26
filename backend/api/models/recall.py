@@ -272,6 +272,14 @@ class FactDetailHeader(LucidBaseModel):
     subject_uid: str
     subject_label: str | None = None
     predicate: str
+    # fix/recall-predicate-and-entity-type (PO 2026-06-26): mirror the
+    # natural-English predicate gloss that RecallFact already carries so
+    # the Recall detail modal renders the SAME predicate string that the
+    # card does. Without this, the modal called `predicateLabel(predicate)`
+    # alone — losing the server-resolved label — and the user saw
+    # different predicates on the card vs the detail. Null on legacy
+    # docs; the frontend helper falls back to the canonical surface.
+    predicate_label: str | None = None
     object_value: str
     object_label: str | None = None
     validated_at: datetime

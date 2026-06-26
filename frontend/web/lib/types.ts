@@ -351,6 +351,11 @@ export interface FactDetailHeader {
   subject_uid: string;
   subject_label?: string | null;
   predicate: string;
+  // fix/recall-predicate-and-entity-type (PO 2026-06-26): mirror
+  // RecallFact.predicate_label so the detail modal renders the same
+  // server-resolved predicate gloss the recall card does. Null on
+  // legacy docs; predicateLabel() falls back to the canonical surface.
+  predicate_label?: string | null;
   object_value: string;
   object_label?: string | null;
   validated_at: string;

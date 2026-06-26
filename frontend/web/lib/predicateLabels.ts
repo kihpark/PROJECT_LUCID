@@ -96,13 +96,30 @@ export const PREDICATE_LABELS: Record<string, PredicateLabelEntry> = {
   profit_change: { ko: '이익 변동은' },
 };
 
+// fix/recall-predicate-and-entity-type (PO 2026-06-26): the "related to"
+// gloss is the OPL RELATED_TO fallback that the backend used to write
+// for EVERY unmapped predicate (Korean speech-acts like "답했다" /
+// "덧붙였다" / "주장했다" all landed here). On legacy facts already in
+// the index, predicate_label is "related to" while `predicate` (the raw
+// `original_surface`) still carries the verb the user actually wrote.
+// PO directive: the card MUST show the verb, not "related to". The
+// canonical fix lives in the backend mapper for new captures; this
+// frontend guard recovers the verb for the legacy docs already on disk
+// without needing an ES backfill / mapping change.
+const RELATED_TO_FALLBACK = 'related to';
+
 /**
  * Return the display label for a canonical predicate.
  *
- * Contract (B-62 natural-spo-display):
- *   - If `predicate_label` is a non-empty string, return it verbatim.
+ * Contract (B-62 natural-spo-display + fix/recall-predicate-and-entity-type):
+ *   - If `predicate_label` is a non-empty string AND is NOT the legacy
+ *     RELATED_TO fallback gloss ("related to"), return it verbatim.
  *     This is the server-resolved natural-English gloss from the OPL
  *     pipeline and wins over the static seed below.
+ *   - If `predicate_label` IS the legacy "related to" fallback, prefer
+ *     the canonical surface (the raw original_surface persisted on the
+ *     fact's `predicate` field) so a Korean speech-act like "답했다"
+ *     surfaces verbatim instead of the generic gloss.
  *   - Else if `canonicalOrLabel` is in PREDICATE_LABELS, return its
  *     `ko` label (curated Korean reading-friendly text).
  *   - Otherwise, return the input string unchanged (fallback).
@@ -112,7 +129,11 @@ export function predicateLabel(
   canonicalOrLabel: string,
   predicate_label?: string | null,
 ): string {
-  if (typeof predicate_label === 'string' && predicate_label.length > 0) {
+  if (
+    typeof predicate_label === 'string'
+    && predicate_label.length > 0
+    && predicate_label.trim().toLowerCase() !== RELATED_TO_FALLBACK
+  ) {
     return predicate_label;
   }
   return PREDICATE_LABELS[canonicalOrLabel]?.ko ?? canonicalOrLabel;
