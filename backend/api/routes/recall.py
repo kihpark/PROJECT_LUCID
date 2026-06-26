@@ -50,6 +50,7 @@ from api.models.recall import (
     LedgerResponse,
     ModifyFactRequest,
     PredicateFacetItem,
+    RecallBriefingResponse,
     RecallFacets,
     RecallFact,
     RecallResponse,
@@ -1874,3 +1875,248 @@ def list_ledger(
         limit=limit,
         offset=offset,
     )
+
+
+# ---------------------------------------------------------------------------
+# fix/r1-recall-redesign — AI 브리핑 (entity 개관).
+#
+# PO directive (2026-06-24):
+#   "빈 요약박스 → AI 브리핑: '검색 결과 요약 · OOO' 이 칩만 있고 텍스트
+#    없음 → entity 개관 브리핑 추가. 검증 fact 만 근거 (grounding P1·P2).
+#    ORACLE 질문응답과 구분 (개관 vs 질문). 비용가드 (캐싱/온디맨드 버튼)."
+#
+# Distinct from /api/assistant/brief (ORACLE):
+#   · ORACLE answers a question: "What did X say?" → answers from facts.
+#   · This BRIEFING is an overview: "Summarise what's verified about X."
+#     The LLM is asked to compose 1-3 sentences of zh-ko narrative
+#     surface over the current recall result, NOT to answer a question.
+#
+# Zero-hallucination contract (grounding P1·P2):
+#   1. The LLM only ever sees facts that came out of the same recall
+#      pipeline the user just ran (the call re-runs recall internally,
+#      no second source of truth).
+#   2. The LLM is instructed to cite by fact_uid; we then filter the
+#      cited uids against the candidate set so the response can never
+#      reference a fact that wasn't in the input. A briefing that
+#      lands with 0 grounded uids returns grounded=False and an empty
+#      text (the FE renders a "검증된 fact 없음" notice).
+#
+# Cost guard (★ PO):
+#   · On-demand: this endpoint is called from a "AI 브리핑 보기" button
+#     on the FE, NOT auto-fired on every recall search.
+#   · Cache: in-memory LRU keyed on
+#       (space_id, query, sorted(entity_uids), sorted(fact_uids)).
+#     A repeat click within `_BRIEFING_CACHE_TTL_S` returns cached=True
+#     and skips the LLM call. The fact_uid set is part of the key so
+#     a stale cache can't bleed across a fact mutation (retract/edit
+#     changes the fact_uid composition → cache miss → fresh compute).
+# ---------------------------------------------------------------------------
+
+
+_BRIEFING_CACHE_TTL_S = 30 * 60  # 30 minutes
+_BRIEFING_CACHE_MAX = 256
+_briefing_cache: dict[tuple[str, str, tuple[str, ...], tuple[str, ...]], tuple[float, RecallBriefingResponse]] = {}
+
+
+def _briefing_cache_get(
+    key: tuple[str, str, tuple[str, ...], tuple[str, ...]],
+) -> RecallBriefingResponse | None:
+    """In-memory cache lookup with TTL eviction.
+
+    Returns None on miss / expired entry. Threadsafe-ish: the dict
+    mutation is not atomic but the only invariant we need is that an
+    expired entry is rebuilt on next access — losing a write to a
+    race is fine.
+    """
+    entry = _briefing_cache.get(key)
+    if entry is None:
+        return None
+    ts, resp = entry
+    import time as _time
+    if _time.time() - ts > _BRIEFING_CACHE_TTL_S:
+        _briefing_cache.pop(key, None)
+        return None
+    # Return a copy with cached=True so a stale-cache hit is observable
+    # in the response (and tests can assert the second call was free).
+    return resp.model_copy(update={"cached": True})
+
+
+def _briefing_cache_put(
+    key: tuple[str, str, tuple[str, ...], tuple[str, ...]],
+    resp: RecallBriefingResponse,
+) -> None:
+    """Insert with a coarse LRU bound. When we hit the size cap, drop
+    the oldest entry — good enough for a hand-thrown in-memory cache."""
+    import time as _time
+    if len(_briefing_cache) >= _BRIEFING_CACHE_MAX:
+        # Find the oldest timestamp and evict it. O(N) but N is tiny.
+        oldest_key = min(_briefing_cache.items(), key=lambda kv: kv[1][0])[0]
+        _briefing_cache.pop(oldest_key, None)
+    # Always store with cached=False so the FIRST hit (compute path)
+    # reports cached=False, and the helper above flips it to True on
+    # subsequent reads.
+    _briefing_cache[key] = (_time.time(), resp.model_copy(update={"cached": False}))
+
+
+BRIEFING_SYSTEM_PROMPT = """\
+당신은 Lucid 검증 사실 개관 작성자입니다. 아래 검증된 사실 목록만 근거로
+1-3 문장의 한국어 개관을 작성하세요.
+
+규칙:
+1. 사실 목록 밖의 정보를 추가하거나 추론하지 마세요.
+2. 동일한 사실이 반복되면 한 번만 언급하세요.
+3. "검증된 사실에 따르면", "보고서에 따르면" 같은 군더더기 어구를
+   넣지 마세요. 사실 자체를 자연스럽게 서술하세요.
+4. 질문 답변이 아니라 개관입니다. "...에 대해 답하면" 같은 어투를
+   쓰지 말고 대상이 무엇이며 어떤 검증된 사실들이 있는지 요약하세요.
+5. 사용한 fact_uid 들을 cited_fact_uids 에 나열하세요 (최대 8개).
+6. 개관이 검증 사실에 근거하면 grounded=true.
+
+반드시 JSON만 출력하세요:
+{"briefing": "...", "cited_fact_uids": [...], "grounded": true/false}"""
+
+
+def _build_briefing_user_prompt(
+    query: str, facts_text: str, total_facts: int,
+) -> str:
+    return (
+        f"검색어: {query}\n"
+        f"검증된 사실 총 {total_facts}건:\n"
+        f"{facts_text}\n\n"
+        "위 사실들에 대한 한국어 개관을 작성하세요."
+    )
+
+
+def _facts_to_briefing_lines(facts: list[RecallFact]) -> str:
+    """Render the recall facts as a single block for the LLM prompt.
+
+    Format: `[fact_uid] subject_label predicate object` — one per line.
+    We pull subject_label / object_label so the LLM sees readable
+    Korean rather than raw uids, mirroring the ORACLE prompt path.
+    """
+    lines: list[str] = []
+    for f in facts:
+        subj = f.subject_label or f.subject_uid
+        obj = f.object_label or f.object_value or ""
+        pred = f.predicate_label or f.predicate
+        lines.append(f"[{f.fact_uid}] {subj} {pred} {obj}".rstrip())
+    return "\n".join(lines)
+
+
+@router.get(
+    "/recall/briefing",
+    response_model=RecallBriefingResponse,
+)
+def recall_briefing(
+    space_id: uuid.UUID,
+    q: str = Query(..., min_length=1, max_length=2000),
+    entity: list[str] = Query(default_factory=list, alias="entity"),
+    user: User = Depends(get_current_user),
+) -> RecallBriefingResponse:
+    """fix/r1-recall-redesign — AI 브리핑 (개관) over the recall set.
+
+    Pipeline:
+      1. Authorise space ownership (same as /recall).
+      2. Re-run the recall pipeline (same kNN + entity-name + entity-link
+         expansion path) so the briefing always sees exactly the same
+         fact set the user saw. There is NO second retrieval logic; the
+         briefing is a layer on top of recall, not a parallel path.
+      3. If the recall returned 0 facts → return an empty briefing with
+         grounded=False. NO LLM call (zero cost when there is nothing
+         to summarise).
+      4. Cache key = (space_id, q, sorted(entity), sorted(fact_uids)).
+         Hit → cached=True, no LLM call.
+      5. Miss → call Claude with the briefing system prompt, parse the
+         JSON, filter cited_fact_uids against the candidate set so a
+         hallucinated uid can never escape, store in cache.
+
+    Failure-mode: any LLM error returns a grounded=False envelope with
+    an empty briefing string. The FE renders a fallback notice.
+    """
+    session = _new_session()
+    try:
+        ks = _resolve_space(session, space_id, user)
+    finally:
+        session.close()
+
+    # Re-use the recall pipeline so the briefing is provably grounded
+    # in the SAME fact set the user saw. We call the recall() route
+    # function directly with the canonical defaults — no override of
+    # threshold / dates, mirroring the simple-mode UX where the brief
+    # button lives.
+    recall_resp = recall(
+        space_id=space_id,
+        q=q,
+        limit=RECALL_DEFAULT_K,
+        entity=entity if isinstance(entity, list) else [],
+        include_retracted=False,
+        score_threshold=None,
+        date_from=None,
+        date_to=None,
+        user=user,
+    )
+
+    facts = list(recall_resp.facts)
+    fact_uids = tuple(sorted(f.fact_uid for f in facts))
+
+    # Zero-fact short-circuit: no LLM spend when there's nothing to
+    # summarise. This is the same zero-hallucination contract as the
+    # recall route — silence is the right answer.
+    if not facts:
+        return RecallBriefingResponse(
+            briefing="",
+            fact_uids=[],
+            grounded=False,
+            cached=False,
+            fact_count=0,
+        )
+
+    cache_key = (
+        str(space_id),
+        q,
+        tuple(sorted(entity if isinstance(entity, list) else [])),
+        fact_uids,
+    )
+    cached = _briefing_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    facts_text = _facts_to_briefing_lines(facts)
+    user_prompt = _build_briefing_user_prompt(q, facts_text, len(facts))
+
+    try:
+        from api.structure.claude_client import call_claude_structured
+        llm_out = call_claude_structured(
+            BRIEFING_SYSTEM_PROMPT, user_prompt, max_tokens=600,
+        )
+    except Exception as exc:  # noqa: BLE001 — degrade quietly
+        logger.warning("recall.briefing: LLM call failed: %s", exc)
+        return RecallBriefingResponse(
+            briefing="",
+            fact_uids=[],
+            grounded=False,
+            cached=False,
+            fact_count=len(facts),
+        )
+
+    candidate_uids = {f.fact_uid for f in facts}
+    cited_raw = llm_out.get("cited_fact_uids") or []
+    cited = [
+        uid for uid in cited_raw
+        if isinstance(uid, str) and uid in candidate_uids
+    ][:8]
+    briefing_text = (llm_out.get("briefing") or "").strip()
+    grounded_flag = bool(llm_out.get("grounded", False)) and bool(cited)
+
+    resp = RecallBriefingResponse(
+        briefing=briefing_text if grounded_flag else "",
+        fact_uids=cited if grounded_flag else [],
+        grounded=grounded_flag,
+        cached=False,
+        fact_count=len(facts),
+    )
+    if grounded_flag:
+        # Only cache grounded responses; an LLM transient failure
+        # shouldn't poison the cache for the next 30 minutes.
+        _briefing_cache_put(cache_key, resp)
+    return resp

@@ -14,6 +14,8 @@ vi.mock('@/lib/api', () => ({
   modifyFact: vi.fn(),
   // feat/recall-search-entity-autocomplete — entity suggestion API
   searchEntitySuggestions: vi.fn(),
+  // fix/r1-recall-redesign — AI 브리핑 (on-demand button inside summary box)
+  recallBriefing: vi.fn(),
   ApiError: class extends Error {
     status = 0;
     detail: string | undefined;
@@ -2497,7 +2499,19 @@ describe('RecallView entity autocomplete', () => {
 //       names the checkbox so the PO knows the filter is the cause.
 // ---------------------------------------------------------------------------
 
-describe('RecallView — left-panel claim/measurement filters (fix/recall-left-panel-filters)', () => {
+describe('RecallView — left-panel fact_type filters REMOVED (fix/r1-recall-redesign)', () => {
+  // PO directive (2026-06-24):
+  //   "좌패널 fact_type 필터 제거: '화자 인용만 / 수치만' = 중앙 칩과
+  //    중복 → 제거. 유사도임계·검증일자·키워드·엔티티연결(서버재검색)은
+  //    유지."
+  //
+  // The old describe block above used to drive these two checkboxes and
+  // assert filter behaviour. Now the only fact_type filter is the chip
+  // row inside RecallFactTypeSummary — exercised by the 'fact_type
+  // summary box + pagination' describe block above. These tests pin
+  // the REMOVAL: the left-panel checkboxes are gone, the remaining
+  // controls are still there.
+
   function buildMixed(opts: {
     actions: number;
     claims: number;
@@ -2538,7 +2552,6 @@ describe('RecallView — left-panel claim/measurement filters (fix/recall-left-p
   async function bootstrap(response: RecallResponse) {
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response);
     render(<RecallView spaceId="ks-1" />);
-    // Left-panel checkboxes live in the power rail.
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '삼성전기' },
@@ -2547,54 +2560,195 @@ describe('RecallView — left-panel claim/measurement filters (fix/recall-left-p
     await screen.findByTestId('recall-fact-type-summary');
   }
 
-  it('toggling 화자 인용만 (claim) filters visible cards to claim only', async () => {
+  it('the 화자 인용만 / 수치만 left-panel checkboxes are NOT rendered', async () => {
     await bootstrap(buildMixed({ actions: 2, claims: 2, measurements: 1 }));
 
-    // Sanity: all three layers are visible before the checkbox flip.
-    expect(screen.getByTestId('recall-fact-a-0')).toBeInTheDocument();
-    expect(screen.getByTestId('recall-fact-c-0')).toBeInTheDocument();
-    expect(screen.getByTestId('recall-fact-m-0')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('control-claim-only-checkbox'));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('recall-fact-a-0')).toBeNull();
-    });
-    expect(screen.queryByTestId('recall-fact-m-0')).toBeNull();
-    expect(screen.getByTestId('recall-fact-c-0')).toBeInTheDocument();
-    expect(screen.getByTestId('recall-fact-c-1')).toBeInTheDocument();
+    // The whole "duplicate" surface is gone — chip row is the only
+    // fact_type filter affordance.
+    expect(screen.queryByTestId('control-claim-only')).toBeNull();
+    expect(screen.queryByTestId('control-claim-only-checkbox')).toBeNull();
+    expect(screen.queryByTestId('control-measurement-only')).toBeNull();
+    expect(screen.queryByTestId('control-measurement-only-checkbox')).toBeNull();
   });
 
-  it('toggling 수치만 (measurement) filters visible cards to measurement only', async () => {
-    await bootstrap(buildMixed({ actions: 2, claims: 1, measurements: 2 }));
+  it('the retained left-panel controls (threshold, date, keyword, entity-link) are still rendered', async () => {
+    await bootstrap(buildMixed({ actions: 2, claims: 2, measurements: 1 }));
 
-    expect(screen.getByTestId('recall-fact-a-0')).toBeInTheDocument();
-    expect(screen.getByTestId('recall-fact-c-0')).toBeInTheDocument();
-    expect(screen.getByTestId('recall-fact-m-0')).toBeInTheDocument();
+    // PO directive: "유사도임계·검증일자·키워드·엔티티연결(서버재검색)
+    // 은 유지." Pin every one of those so a future cleanup PR can't
+    // accidentally widen the removal scope.
+    expect(screen.getByTestId('control-threshold-slider')).toBeInTheDocument();
+    expect(screen.getByTestId('control-date-from')).toBeInTheDocument();
+    expect(screen.getByTestId('control-date-to')).toBeInTheDocument();
+    expect(screen.getByTestId('control-keyword2')).toBeInTheDocument();
+    expect(screen.getByTestId('control-match-entity-link-checkbox')).toBeInTheDocument();
+  });
+});
 
-    fireEvent.click(screen.getByTestId('control-measurement-only-checkbox'));
+// ---------------------------------------------------------------------------
+// fix/r1-recall-redesign — AI 브리핑 (on-demand button inside summary box).
+//
+// PO directive (2026-06-24):
+//   "빈 요약박스 → AI 브리핑: '검색 결과 요약 · OOO' 가 칩만 있고 텍스트
+//    없음 → entity 개관 브리핑 추가. 검증 fact 만 근거(grounding P1·P2).
+//    ORACLE 질문응답과 구분(개관 vs 질문). 비용가드(캐싱/온디맨드 버튼)."
+//
+// Cost guard contract this block pins:
+//   1. The trigger button renders inside the summary box (not auto-fired).
+//   2. Clicking the button fires apiRecallBriefing — not on render, not
+//      on search, ONLY on click. That's the "온디맨드" guard.
+//   3. The grounded response renders briefing text + a grounding line.
+//   4. An ungrounded response surfaces a "검증된 사실로 개관을 만들지
+//      못했습니다" notice instead of pretending the briefing succeeded.
+//   5. A 0-fact recall renders an empty-state notice and the trigger
+//      button does NOT appear (no LLM call possible).
+// ---------------------------------------------------------------------------
 
-    await waitFor(() => {
-      expect(screen.queryByTestId('recall-fact-a-0')).toBeNull();
+describe('RecallView — AI 브리핑 (fix/r1-recall-redesign)', () => {
+  function summaryResponse(total: number): RecallResponse {
+    return {
+      signature: total === 0
+        ? '검증된 사실이 없습니다'
+        : `As far as I know — 그래프에 ${total}개 검증 사실이 있습니다`,
+      total,
+      facts: total === 0
+        ? []
+        : [
+            {
+              fact_uid: `briefing-${total}`,
+              claim: '브리핑 대상 사실.',
+              claim_en: null,
+              subject_uid: 'obj-sem',
+              predicate: 'reports',
+              object_value: '실적',
+              source_uids: [],
+              validated_at: new Date('2026-06-01T00:00:00Z').toISOString(),
+              validator_id: 'u-1',
+              validation_method: 'manual',
+              knowledge_space_id: 'ks-1',
+              negation_flag: false,
+              negation_scope: null,
+              score: 0.9,
+            },
+          ],
+      facets: {
+        entities: {
+          organization: total === 0
+            ? []
+            : [{ uid: 'obj-sem', name: '삼성전기', count: total }],
+          person: [],
+          place: [],
+          other: [],
+        },
+        predicates: total === 0 ? [] : [{ name: 'reports', count: total }],
+        fact_types: { action: total, claim: 0, measurement: 0 },
+      },
+    };
+  }
+
+  async function searchWith(response: RecallResponse, query = '삼성전기') {
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response);
+    render(<RecallView spaceId="ks-1" />);
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: query },
     });
-    expect(screen.queryByTestId('recall-fact-c-0')).toBeNull();
-    expect(screen.getByTestId('recall-fact-m-0')).toBeInTheDocument();
-    expect(screen.getByTestId('recall-fact-m-1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await screen.findByTestId('recall-fact-type-summary');
+  }
+
+  it('renders the "AI 브리핑 보기" trigger inside the summary box and does NOT auto-fire (cost guard)', async () => {
+    await searchWith(summaryResponse(2));
+
+    // The button is present.
+    const btn = screen.getByTestId('recall-summary-briefing-trigger');
+    expect(btn).toBeInTheDocument();
+    expect(btn.textContent).toContain('AI 브리핑 보기');
+    // The cost guard: search alone NEVER calls the briefing endpoint —
+    // a user click is required.
+    expect(api.recallBriefing as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 
-  it('claim-only with no claim facts surfaces a checkbox-aware empty message', async () => {
-    // Seed action+measurement only; flipping claim-only must produce 0
-    // visible facts and the empty-state message must name the filter.
-    await bootstrap(buildMixed({ actions: 3, claims: 0, measurements: 2 }));
+  it('clicking the trigger calls apiRecallBriefing and renders the grounded briefing text', async () => {
+    await searchWith(summaryResponse(2), '삼성전기');
 
-    fireEvent.click(screen.getByTestId('control-claim-only-checkbox'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('recall-keyword-empty')).toBeInTheDocument();
+    (api.recallBriefing as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      briefing: '삼성전기는 실적을 보고했다.',
+      fact_uids: ['briefing-2'],
+      grounded: true,
+      cached: false,
+      fact_count: 1,
     });
-    expect(screen.getByTestId('recall-keyword-empty').textContent).toContain(
-      '화자 인용 (claim) 층위의 결과가 없습니다',
+
+    fireEvent.click(screen.getByTestId('recall-summary-briefing-trigger'));
+
+    // Briefing text renders inside the summary box.
+    const text = await screen.findByTestId('recall-summary-briefing-text');
+    expect(text.textContent).toContain('삼성전기는 실적을 보고했다.');
+    // Grounding footer announces P1·P2 evidence count.
+    expect(
+      screen.getByTestId('recall-summary-briefing-grounding').textContent,
+    ).toContain('검증된 사실 1건');
+    // API was called with the submitted query.
+    expect(api.recallBriefing as ReturnType<typeof vi.fn>)
+      .toHaveBeenCalledWith('ks-1', '삼성전기', []);
+  });
+
+  it('renders an ungrounded notice when the LLM cannot anchor the briefing', async () => {
+    await searchWith(summaryResponse(2));
+
+    (api.recallBriefing as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      briefing: '',
+      fact_uids: [],
+      grounded: false,
+      cached: false,
+      fact_count: 1,
+    });
+
+    fireEvent.click(screen.getByTestId('recall-summary-briefing-trigger'));
+
+    await screen.findByTestId('recall-summary-briefing-ungrounded');
+    // The grounded-only text container never renders.
+    expect(screen.queryByTestId('recall-summary-briefing-text')).toBeNull();
+  });
+
+  it('renders an empty-state notice (and NO trigger button) when the recall returned 0 facts', async () => {
+    await searchWith(summaryResponse(0), '없는검색');
+
+    // The "no facts to summarise" notice replaces the button entirely.
+    expect(screen.getByTestId('recall-summary-briefing-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('recall-summary-briefing-trigger')).toBeNull();
+    // Cost guard hard contract: the briefing endpoint is NEVER called.
+    expect(api.recallBriefing as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it('a new search clears the previous briefing so stale text does not bleed into the new result', async () => {
+    await searchWith(summaryResponse(2), '삼성전기');
+
+    (api.recallBriefing as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      briefing: '삼성전기 개관.',
+      fact_uids: ['briefing-2'],
+      grounded: true,
+      cached: false,
+      fact_count: 1,
+    });
+    fireEvent.click(screen.getByTestId('recall-summary-briefing-trigger'));
+    await screen.findByTestId('recall-summary-briefing-text');
+
+    // Run a fresh search — the briefing text from the previous query
+    // must be wiped, and the trigger button must come back.
+    (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      summaryResponse(2),
     );
+    fireEvent.change(screen.getByLabelText('recall query'), {
+      target: { value: 'LG에너지솔루션' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    await screen.findByTestId('recall-fact-type-summary');
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('recall-summary-briefing-text')).toBeNull();
+    });
+    expect(screen.getByTestId('recall-summary-briefing-trigger')).toBeInTheDocument();
   });
 });
 
