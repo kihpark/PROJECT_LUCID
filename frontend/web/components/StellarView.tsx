@@ -90,6 +90,16 @@ interface FocusRelation {
   other: StellarNode;
 }
 
+// fix/stellar-cluster-focus-race-fix (2026-06-26): one-shot migration of
+// stale 'synthetic' localStorage values written by the pre-d017a3a
+// default. PO 의 첫 방문 시점에 synthetic 이 default 였고 localStorage
+// 에 'synthetic' 이 명시 set 됐을 가능 → 이후 default 가 real 로 바뀌어도
+// localStorage 의 명시값이 우선해 synthetic 으로 떨어졌음. v2 migration
+// 은 첫 한 번만 옛 'synthetic' 을 무효화하여 real 진입을 풀어준다.
+// 사용자가 toggle 로 의도적으로 'synthetic' 을 다시 켜면 그 시점부터의
+// 명시값은 보존된다 (v2 marker 가 set 된 후 기록 된 것이기 때문).
+const LS_MIGRATION_KEY = `${LS_KEY}:migrated:v2`;
+
 function readPersistedSource(): StellarSource {
   // fix/stellar-default-real (2026-06-26): default = 'real' on first
   // visit. PO 의 살펴보기 흐름이 synthetic 모드로 떨어져 IPCC sample
@@ -97,6 +107,15 @@ function readPersistedSource(): StellarSource {
   // (사용자가 toggle 후 의도 보존), 그 외 모두 real.
   if (typeof window === 'undefined') return 'real';
   try {
+    // fix/stellar-cluster-focus-race-fix — one-shot v2 migration. Clears
+    // stale 'synthetic' written before d017a3a. Runs at most once per
+    // browser; subsequent reads honour the user's explicit toggle.
+    if (!window.localStorage.getItem(LS_MIGRATION_KEY)) {
+      window.localStorage.removeItem(LS_KEY);
+      window.localStorage.setItem(LS_MIGRATION_KEY, '1');
+      console.debug('[stellar] readPersistedSource: v2 migration applied, clearing stale source key');
+      return 'real';
+    }
     const v = window.localStorage.getItem(LS_KEY);
     return v === 'synthetic' ? 'synthetic' : 'real';
   } catch {
@@ -1135,7 +1154,20 @@ export interface StellarViewProps {
 }
 
 export function StellarView(props: StellarViewProps = {}) {
-  const [source, setSource] = useState<StellarSource>('synthetic');
+  // fix/stellar-cluster-focus-race-fix — initial source seeded by reading
+  // localStorage synchronously inside the lazy initial-state callback.
+  // The previous default ('synthetic') caused a one-frame window where
+  // the cluster-focus useEffect saw synthetic data even when the user's
+  // persisted choice was 'real'. That stale frame latched syn-3-100
+  // into `focused`, then `clusterAutoFocusedRef` blocked any re-bind
+  // when real data arrived → "IPCC supports +1.5℃" stuck on screen +
+  // 'focused node not in data' warnings.
+  //
+  // useState's lazy initializer is allowed to read localStorage in a
+  // Client Component (the file is 'use client'). On SSR the typeof
+  // window guard inside readPersistedSource() returns 'real', which
+  // is also what the hydration pass converges to — so no mismatch.
+  const [source, setSource] = useState<StellarSource>(() => readPersistedSource());
   // feat/stellar-hover-restore-by-type — hover state restored. The
   // bubble now branches on fact_type (action / claim / measurement)
   // and renders the shape that carries the info for that kind. Side
@@ -1177,10 +1209,12 @@ export function StellarView(props: StellarViewProps = {}) {
   // hydration completes — refs alone wouldn't trigger a re-run.
   const [sourceHydrated, setSourceHydrated] = useState(false);
 
-  // Re-hydrate the persisted toggle on mount (no SSR mismatch — useEffect runs client-side only).
+  // fix/stellar-cluster-focus-race-fix — source itself is now seeded
+  // from localStorage by the useState lazy initializer above, so the
+  // post-mount setSource() is gone. We still flip sourceHydrated on
+  // mount so the cluster-focus useEffect can distinguish the SSR
+  // shell (no localStorage access) from the hydrated client render.
   useEffect(() => {
-    const persisted = readPersistedSource();
-    setSource(persisted);
     setSourceHydrated(true);
   }, []);
 
@@ -1267,36 +1301,97 @@ export function StellarView(props: StellarViewProps = {}) {
     [],
   );
 
-  // feat/hearth-oracle-merge + fix/stellar-cluster-focus-recover —
-  // auto-focus from /stellar?cluster=<value>.
+  // feat/hearth-oracle-merge + fix/stellar-cluster-focus-recover +
+  // fix/stellar-cluster-focus-race-fix — auto-focus from
+  // /stellar?cluster=<value>.
   //
-  // The query param flows from HomePage's "살펴보기 →" link. PO directive:
-  // **query param > localStorage preference**. If the user explicitly
-  // navigated with `?cluster=`, that intent wins over whatever the
-  // persisted source-toggle says — we don't gate on sourceHydrated for
-  // synthetic mode (which is the default and always has nodes available).
+  // The query param flows from HomePage's "살펴보기 →" link.
+  //
+  // Race condition history (root cause of PO 2026-06-26 repro):
+  //   1. Pre-fix initial state was source='synthetic'; the first render
+  //      had syntheticData ready and the cluster-focus useEffect latched
+  //      onto syn-3-100.
+  //   2. Mount useEffect then flipped source to 'real' (per localStorage).
+  //   3. Real data loaded; activeData switched. But `focused` still held
+  //      the stale syn-3-100 node — the FocusPanel kept showing "IPCC
+  //      supports +1.5℃" and StellarGraph's fly-to logged
+  //      "focused node not in data" five times in a row.
+  //
+  // Two-part fix:
+  //   • Source is now seeded synchronously from localStorage (useState
+  //     lazy initializer above), so the synthetic transient is gone.
+  //   • A dedicated effect (below) clears stale focus + resets the
+  //     cluster-focus latch whenever `source` flips, so any user toggle
+  //     from REAL→SYNTHETIC (or vice-versa) re-binds cluster focus
+  //     against the new data and never leaks an id from the old mode.
   //
   // For real mode we still wait for the lazy load to settle (otherwise
   // we'd pick a node from the empty fallback graph and re-fire later).
-  // But we no longer wait on `sourceHydrated` itself: synthetic data is
-  // built in `useMemo`, available on first render, so binding immediately
-  // gives the user the focus they asked for at the URL.
   //
   // Detailed console.debug breadcrumbs help PO trace flow in DevTools.
   const searchParams = useSearchParams();
   const clusterParam = searchParams?.get('cluster') ?? null;
   const clusterAutoFocusedRef = useRef(false);
+
+  // fix/stellar-cluster-focus-race-fix — source-change guard.
+  //
+  // When `source` toggles (REAL↔SYNTHETIC) we MUST reset the
+  // cluster-focus latch and drop any stale `focused` node — its id
+  // belongs to the previous data set and would feed the fly-to
+  // useEffect a node id that no longer exists, producing the
+  // 'focused node not in data' console warnings PO saw.
+  //
+  // The handleToggle callback already does this for explicit user
+  // clicks, but the initial mount path (source seeded sync from
+  // localStorage, then activeData lands later for real mode) doesn't
+  // route through handleToggle. This effect closes that gap and is
+  // also the recovery mechanism for the second-and-later toggle.
+  //
+  // We deliberately use a ref to skip the very first run — on mount
+  // there is nothing to clear, and skipping prevents the cluster
+  // focus useEffect from racing this one to set/clear focus.
+  const prevSourceRef = useRef<StellarSource | null>(null);
+  useEffect(() => {
+    if (prevSourceRef.current === null) {
+      prevSourceRef.current = source;
+      return;
+    }
+    if (prevSourceRef.current === source) return;
+    console.debug('[stellar] source change: resetting cluster focus latch', {
+      from: prevSourceRef.current,
+      to: source,
+    });
+    prevSourceRef.current = source;
+    clusterAutoFocusedRef.current = false;
+    setFocused(null);
+    setFocusHistory([]);
+    setSelected(null);
+    setExpandedIds(new Set());
+  }, [source]);
+
   useEffect(() => {
     if (!clusterParam) return;
     if (clusterAutoFocusedRef.current) return;
+    if (!sourceHydrated) {
+      // Without hydration we don't know yet whether the user prefers
+      // real — picking on the SSR-default synthetic data would be the
+      // race we are trying to kill. Wait one tick.
+      console.debug('[stellar] cluster focus: awaiting source hydration', {
+        clusterParam,
+        source,
+      });
+      return;
+    }
 
     // Real mode: wait for the lazy load to settle (focus the loaded graph,
-    // not the empty placeholder). Synthetic mode is sync — no wait.
-    if (source === 'real' && realLoading) {
+    // not the empty placeholder, and not stale synthetic data either).
+    // Synthetic mode is sync — no wait.
+    if (source === 'real' && (realLoading || realData === null)) {
       console.debug('[stellar] cluster focus: waiting for real load', {
         clusterParam,
         source,
         realLoading,
+        realDataReady: realData !== null,
       });
       return;
     }
@@ -1309,6 +1404,13 @@ export function StellarView(props: StellarViewProps = {}) {
       });
       return;
     }
+
+    console.debug('[stellar] cluster focus: resolving', {
+      clusterParam,
+      source,
+      realLoading,
+      nodes: activeData.nodes.length,
+    });
 
     const node = pickClusterFocusNode(activeData, clusterParam);
     if (!node) {
@@ -1335,6 +1437,7 @@ export function StellarView(props: StellarViewProps = {}) {
     activeData,
     source,
     realLoading,
+    realData,
     handleClick,
     sourceHydrated,
   ]);
