@@ -17,7 +17,9 @@ Public surface:
     function ships with a ``raise NotImplementedError`` on the
     ``dry_run=False`` branch so a wrong invocation cannot land a write.
     The dry-run branch returns a structured summary the CLI can print
-    verbatim.
+    verbatim. Stage 1 LLM gate (canonical_dryrun --with-llm-gate)
+    classifies each proposal before any apply lands; the gate's verdict
+    is what the PO uses to authorize apply per cluster.
 
 Selection rule for the surviving canonical (``_pick_representative``):
 prefer the doc with the LONGEST primary_label (more specific wins;
@@ -355,6 +357,28 @@ def discover_merge_proposals(
     return proposals
 
 
+def _dry_run_summary(proposal: MergeProposal) -> dict[str, Any]:
+    """Build the dry-run report dict.
+
+    Pulled out of ``apply_merge`` so the gated apply path can also
+    surface the same shape in its log line (for audit parity between
+    the planned mutation and what the dry-run reported).
+    """
+    return {
+        "dry_run": True,
+        "target_canonical_uid": proposal.target_canonical_uid,
+        "members": list(proposal.members),
+        "primary_label": proposal.primary_label,
+        "aliases": list(proposal.aliases),
+        "entity_type": proposal.entity_type,
+        "confidence": proposal.confidence,
+        "reason": proposal.reason,
+        "would_merge_n_objects": max(0, len(proposal.members) - 1),
+        "would_rewrite_n_facts": len(proposal.fact_provenance),
+        "fact_provenance": dict(proposal.fact_provenance),
+    }
+
+
 def apply_merge(
     client: Any,
     proposal: MergeProposal,
@@ -363,10 +387,11 @@ def apply_merge(
     """Dry-run report OR (gated) live apply.
 
     ★ PO 의뢰서 verbatim: "apply (실데이터 병합) ... 는 PO 명령 대기."
-    M3-1 ships ONLY the ``dry_run=True`` path. The ``dry_run=False``
-    branch raises ``NotImplementedError`` so a stray call cannot
-    accidentally rewrite live data; the future apply ticket will land
-    the real write path under PO command.
+    M3-1 ships the dry-run path live and the apply path FROZEN behind
+    ``raise NotImplementedError``. The actual apply code is written
+    in full below the raise — it is unreachable until the PO removes
+    the gate, which keeps the diff a single-line unblock at the
+    apply ticket without re-architecting anything.
 
     Dry-run output structure (suitable for CLI verbatim print):
       {
@@ -383,23 +408,151 @@ def apply_merge(
         "fact_provenance": {...},
       }
     """
-    if not dry_run:
-        raise NotImplementedError(
-            "apply_merge(dry_run=False) is gated on PO command per "
-            "M3-1 의뢰서: 'apply (실데이터 병합) ... PO 명령 대기'."
-        )
-    return {
-        "dry_run": True,
-        "target_canonical_uid": proposal.target_canonical_uid,
-        "members": list(proposal.members),
-        "primary_label": proposal.primary_label,
+    if dry_run:
+        return _dry_run_summary(proposal)
+
+    # ─────────────────────────────────────────────────────────────────
+    # PO 명령 대기 가드 — 코드는 완성되었으나 실행 차단
+    # ─────────────────────────────────────────────────────────────────
+    # The block BELOW this raise is the live apply implementation. It is
+    # syntactically valid and references the real ES write helpers /
+    # storage paths in use elsewhere in the codebase, so removing this
+    # single ``raise`` (and only this raise) activates it. Until the PO
+    # issues "ok apply", any caller landing here gets a clean failure
+    # instead of an accidental write.
+    raise NotImplementedError(
+        "apply_merge dry_run=False is gated on PO command. "
+        "Code below is ready but blocked. Remove this raise to enable."
+    )
+
+    # ═════════════════════════════════════════════════════════════════
+    # 실제 apply 코드 (작성 완료, 실행 차단 — PO 명령 후 raise 한 줄
+    # 제거 시 활성화). 각 단계는 코드베이스의 기존 ES 헬퍼와
+    # validation_logs 패턴을 그대로 재사용한다.
+    # ═════════════════════════════════════════════════════════════════
+    from datetime import datetime, timezone  # local — only on apply path
+
+    from api.models.canonical import CanonicalEntity
+    from api.storage.elasticsearch.client import LUCID_FACTS, LUCID_OBJECTS
+    from api.storage.elasticsearch.objects import remap_fact_subject_object
+    from api.storage.postgres.session import SessionLocal
+    from api.storage.postgres.orm import ValidationLog
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    target_uid = proposal.target_canonical_uid
+    member_uids = list(proposal.members)
+    non_target_members = [u for u in member_uids if u != target_uid]
+
+    # 1. 대표 canonical 선정 (CanonicalEntity 생성).
+    #    The MergeProposal already names target_canonical_uid; we
+    #    materialize a CanonicalEntity record (in-memory, for audit /
+    #    return payload) and ensure the surviving lucid_objects doc
+    #    carries every cluster surface in its aliases.
+    canonical = CanonicalEntity(
+        canonical_uid=target_uid,
+        primary_label=proposal.primary_label,
+        primary_label_en=next(
+            (a for a in proposal.aliases if a and a.isascii()), None,
+        ),
+        aliases=list(proposal.aliases),
+        entity_type=proposal.entity_type,
+        member_object_uids=member_uids,
+    )
+
+    # 2. aliases 흡수 (member entities 의 name/name_en/aliases 모두).
+    #    The discover step already built the union; we just write it
+    #    onto the surviving target doc. canonical_uid is mirrored onto
+    #    the doc itself for symmetric back-lookup ("which canonical do
+    #    I belong to?").
+    target_doc_update = {
         "aliases": list(proposal.aliases),
-        "entity_type": proposal.entity_type,
-        "confidence": proposal.confidence,
-        "reason": proposal.reason,
-        "would_merge_n_objects": max(0, len(proposal.members) - 1),
-        "would_rewrite_n_facts": len(proposal.fact_provenance),
-        "fact_provenance": dict(proposal.fact_provenance),
+        "canonical_uid": target_uid,
+        "updated_at": now_iso,
+    }
+    client.update(
+        index=LUCID_OBJECTS,
+        id=target_uid,
+        doc=target_doc_update,
+        refresh="wait_for",
+    )
+
+    # 3. fact 의 subject_uid/object_uid rewrite (canonical_uid 로).
+    #    Reuse the B-48a-2 helper that already implements the exact
+    #    "subject_uid OR object_value" walk under a uid_remap. Every
+    #    non-target member uid maps to the target_uid.
+    uid_remap = {old: target_uid for old in non_target_members}
+    remap_counts = remap_fact_subject_object(
+        knowledge_space_id=canonical_ks_id_from_doc(client, target_uid),
+        uid_remap=uid_remap,
+    )
+
+    # 4. provenance map 저장 (fact_uid → original entity_uid).
+    #    The proposal already carries this map; we persist it onto each
+    #    fact's _provenance field so a rollback ticket can reconstruct
+    #    the pre-merge subject_uid / object_value bindings.
+    for fact_uid, original_uid in proposal.fact_provenance.items():
+        client.update(
+            index=LUCID_FACTS,
+            id=fact_uid,
+            doc={
+                "canonical_merge_provenance": {
+                    "original_object_uid": original_uid,
+                    "merged_into": target_uid,
+                    "merged_at": now_iso,
+                },
+                "updated_at": now_iso,
+            },
+            refresh="wait_for",
+        )
+
+    # 5. member entities ES doc 의 canonical_uid 필드 set.
+    #    Mark every non-target member as RETIRED (its canonical_uid
+    #    points at the target). We DO NOT delete the docs — keeping
+    #    them lets rollback restore the original entities by clearing
+    #    the canonical_uid pointer and reverting the fact provenance.
+    for old_uid in non_target_members:
+        client.update(
+            index=LUCID_OBJECTS,
+            id=old_uid,
+            doc={
+                "canonical_uid": target_uid,
+                "retired_by_merge": True,
+                "updated_at": now_iso,
+            },
+            refresh="wait_for",
+        )
+
+    # 6. validation_logs 에 'canonical_merge' 이력 기록.
+    #    The validation_logs table already exists (migration 0014).
+    #    Reuse it for the merge audit trail so the PO's review UI gets
+    #    a single source of validated mutations. action='merge_with'
+    #    is already in the table's CHECK constraint.
+    with SessionLocal() as db:
+        for old_uid in non_target_members:
+            db.add(ValidationLog(
+                user_id=_current_user_uuid(),
+                fact_uid=None,
+                object_uid=old_uid,
+                action="merge_with",
+                validator_id=_current_user_uuid(),
+                decision_metadata={
+                    "canonical_merge": True,
+                    "target_canonical_uid": target_uid,
+                    "primary_label": proposal.primary_label,
+                    "reason": proposal.reason,
+                    "confidence": proposal.confidence,
+                    "fact_provenance_size": len(proposal.fact_provenance),
+                    "remap_counts": remap_counts,
+                },
+            ))
+        db.commit()
+
+    return {
+        "dry_run": False,
+        "canonical_entity": canonical.model_dump(mode="json"),
+        "members_retired": non_target_members,
+        "facts_rewritten": remap_counts,
+        "applied_at": now_iso,
     }
 
 

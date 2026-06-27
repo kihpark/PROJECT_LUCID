@@ -2,9 +2,12 @@
 
 These tests lock the deterministic rules that drive the entire
 discovery / cluster / dry-run pipeline. They never hit ES or Anthropic
-(the LLM helper degrades to False with no API key).
+(the LLM helper degrades to ('uncertain', ...) with no API key, which
+is the conservative default after the Stage 1 LLM gate landed).
 """
 from __future__ import annotations
+
+import asyncio
 
 from api.services.canonical_mapping import (
     deterministic_canonical_key,
@@ -96,15 +99,20 @@ def test_canonical_key_collides_for_kr_en_shared_alias():
 
 
 # ---------------------------------------------------------------------------
-# llm_canonical_match — stub behaviour
+# llm_canonical_match — Stage 1 LLM gate (conservative defaults)
 # ---------------------------------------------------------------------------
 
-def test_llm_returns_false_when_no_api_key(monkeypatch):
-    """Cost guard: no ANTHROPIC_API_KEY → never call. We default to
-    FALSE (under-merge) so CI without secrets cannot silently merge."""
+def test_llm_returns_uncertain_when_no_api_key(monkeypatch):
+    """Cost guard: no ANTHROPIC_API_KEY -> never call. We default to
+    ('uncertain', ...) (under-merge) so CI without secrets cannot
+    silently merge — same conservative posture as the old bool stub,
+    but now carrying the 3-way verdict the gate needs."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    out = llm_canonical_match(
+    verdict, reason = asyncio.run(llm_canonical_match(
         {"primary_label": "Bank of Korea", "entity_type": "organization"},
         {"primary_label": "한국은행", "entity_type": "organization"},
-    )
-    assert out is False
+        ["BOK sets rates"],
+        ["한국은행 기준금리 인상"],
+    ))
+    assert verdict == "uncertain"
+    assert "no api key" in reason
