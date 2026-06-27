@@ -426,8 +426,10 @@ def apply_merge(
     from api.models.canonical import CanonicalEntity
     from api.storage.elasticsearch.client import LUCID_FACTS, LUCID_OBJECTS
     from api.storage.elasticsearch.objects import remap_fact_subject_object
-    from api.storage.postgres.session import SessionLocal
+    from api.storage.postgres.session import make_sessionmaker
     from api.storage.postgres.orm import ValidationLog
+
+    _SessionLocal = make_sessionmaker()
 
     now_iso = datetime.now(timezone.utc).isoformat()
     target_uid = proposal.target_canonical_uid
@@ -518,7 +520,7 @@ def apply_merge(
     #    Reuse it for the merge audit trail so the PO's review UI gets
     #    a single source of validated mutations. action='merge_with'
     #    is already in the table's CHECK constraint.
-    with SessionLocal() as db:
+    with _SessionLocal() as db:
         for old_uid in non_target_members:
             db.add(ValidationLog(
                 user_id=_current_user_uuid(),
