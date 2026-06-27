@@ -91,6 +91,12 @@ def suggest_entities(
                     {"match_phrase_prefix": {"aliases": q}},
                 ],
                 "minimum_should_match": 1,
+                # M3-1 canonical apply (PO 2026-06-27): 자동완성에서
+                # canonical 병합으로 retire 된 entity 제외. 같은 표면형
+                # ("애플 / 애플") 중 canonical target 만 노출.
+                "must_not": [
+                    {"exists": {"field": "retired_by_merge"}},
+                ],
             },
         },
     }
