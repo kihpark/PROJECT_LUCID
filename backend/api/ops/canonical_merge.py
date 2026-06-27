@@ -512,7 +512,7 @@ def apply_merge(
             id=old_uid,
             doc={
                 "canonical_uid": target_uid,
-                "retired_by_merge": True,
+                "retired_by_merge": now_iso,
                 "updated_at": now_iso,
             },
             refresh="wait_for",
