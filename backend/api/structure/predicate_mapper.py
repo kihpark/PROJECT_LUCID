@@ -486,97 +486,16 @@ SUBSTRING_CUES: list[tuple[str, str]] = [
 ]
 
 
-# B-62 natural-spo-display: Korean (and a handful of common multi-word
-# English) surface predicates -> idiomatic English label. The label is
-# what the user sees in recall; it does NOT participate in the dedup
-# canonical_key. Keys are the post-normalised input (lowercased, NFC,
-# whitespace-collapsed) so a Korean string maps cleanly.
-_KO_TO_EN_GLOSS: dict[str, str] = {
-    # fix/predicate-mapper-korean-conjugation — natural English glosses
-    # for Korean conjugated speech-act / leadership / partnership verbs.
-    # Labels read more naturally than RELATED_TO fallback.
-    "말했다": "stated", "밝혔다": "stated", "덧붙였다": "added",
-    "주장했다": "claimed", "언급했다": "mentioned", "강조했다": "emphasized",
-    "지적했다": "pointed out", "비판했다": "criticized", "비난했다": "criticized",
-    "요구했다": "demanded", "경고했다": "warned", "답했다": "answered",
-    "분석했다": "analyzed", "추산했다": "estimated", "집계했다": "tallied",
-    "예측했다": "predicted", "진단했다": "diagnosed",
-    "발견했다": "discovered", "기록했다": "recorded",
-    "결정했다": "decided", "판시했다": "ruled",
-    "업무협약을 체결하였다": "signed MOU with",
-    "협약을 체결하였다": "signed agreement with",
-    "세부과제를 이끈다": "leads sub-task", "이끈다": "leads",
-    # finance / planning
-    "회사채 발행 계획": "plans bond issuance",
-    "발행 계획": "plans issuance",
-    "계획": "plans",
-    "검토": "discusses",
-    "논의": "discusses",
-    "추정": "estimates",
-    "예상": "estimates",
-    "전망": "forecasts",
-    "보고": "reports",
-    "보고서": "reports on",
-    "발표": "announces",
-    "공개": "announces",
-    "인수": "acquires",
-    "투자": "invests in",
-    "제휴": "partners with",
-    "협력": "collaborates with",
-    "고용": "employs",
-    "채용": "hires",
-    "경쟁": "competes with",
-    "대상": "targets",
-    "목표": "targets",
-    "가격": "priced at",
-    "공모가": "priced at",
-    "조달": "raises",
-    "모집": "raises",
-    "배정": "allocates",
-    "비율": "has rate",
-    "금리": "has rate",
-    "기준금리": "has base rate of",
-    "승인": "approves",
-    "허가": "approves",
-    "규제": "regulates",
-    "감독": "oversees",
-    "정의": "defines",
-    "원인": "causes",
-    "야기": "causes",
-    "의도": "intends",
-    "목적": "intends",
-    # v0 surface coverage so a Korean v0 surface still glosses nicely.
-    "설립자": "founded by",
-    "창업자": "founded by",
-    "설립": "founded by",
-    "수장": "led by",
-    "대표": "led by",
-    "대표이사": "led by",
-    "분류": "is a",
-    "종류": "is a",
-    "유형": "is a",
-    "값": "has value",
-    "수치": "has value",
-    "금액": "has value",
-    "속성": "has attribute",
-    "특징": "has attribute",
-    "특성": "has attribute",
-    "구성": "part of",
-    "산하": "part of",
-    "산하기관": "part of",
-    "소속": "part of",
-    "위치": "located in",
-    "본사": "headquartered in",
-    "소재지": "located in",
-    "생산": "produces",
-    "제조": "produces",
-    "제작": "produces",
-    "개발": "develops",
-    "발생일": "occurred on",
-    "일자": "occurred on",
-    "날짜": "occurred on",
-    "발생": "occurred",
-}
+# B-62 natural-spo-display (REPEALED 2026-06-28, STAGE 3):
+# feat/stage3-predicate-code-fact-type — the Korean → English gloss
+# dict was a SPO-on-English regression. PO directive (의뢰서 STAGE 3
+# Acceptance #2): "_KO_TO_EN_GLOSS 영어회귀 0 — '밝혔다' must NOT
+# become 'stated'." The dict is now permanently empty; the label
+# precedence in map_predicate_to_type_and_label falls through to the
+# raw-surface preservation branch for any non-ASCII input so Korean
+# surfaces echo back verbatim. Do NOT repopulate; this is a closed
+# gate.
+_KO_TO_EN_GLOSS: dict[str, str] = {}
 
 
 # Strip common ASCII punctuation; leave Hangul / latin word chars intact.
@@ -697,10 +616,17 @@ def map_predicate_to_type_and_label(
          the resolver so the HITL UI can still ask the user to
          disambiguate.
       3. Else: pick the english label by precedence:
-           a. Korean (or curated) gloss dict (longest substring wins).
+           a. (REPEALED 2026-06-28, STAGE 3) the Korean → English gloss
+              dict is now permanently empty — see _KO_TO_EN_GLOSS
+              comment. The lookup falls through.
            b. Echo the raw input when it looks English (de-snake-cased).
-           c. Humanise the OPL code (PLANS_BOND_ISSUANCE -> "plans bond
-              issuance").
+           c. feat/stage3-predicate-code-fact-type: raw-surface
+              preservation for non-ASCII (i.e. Korean) input — return
+              the raw surface verbatim so the recall card shows the
+              verb the user actually wrote, NOT a humanised English
+              OPL code.
+           d. Humanise the OPL code (PLANS_BOND_ISSUANCE -> "plans bond
+              issuance") — only when no raw surface was supplied at all.
     """
     code, needs_review = _resolve_opl_code(
         raw_predicate, subject_lang=subject_lang, object_lang=object_lang,
@@ -743,7 +669,23 @@ def map_predicate_to_type_and_label(
         if echo:
             return code, echo, needs_review
 
-    # Precedence 3: humanise the OPL code itself.
+    # Precedence 3 (feat/stage3-predicate-code-fact-type 2026-06-28):
+    # raw-surface preservation for non-ASCII (i.e. Korean) input. The
+    # _KO_TO_EN_GLOSS gloss dict was the SPO-on-English regression and
+    # is now empty; we never humanise the English OPL code as the
+    # label for Korean input because that would surface
+    # "PLANS_BOND_ISSUANCE" → "plans bond issuance" on a Korean fact
+    # whose user-facing predicate was "회사채 발행 계획". Preserve the
+    # Korean surface verbatim (whitespace-normalized only) so the
+    # recall card shows the verb the user actually wrote.
+    if raw_str:
+        return code, re.sub(r"\s+", " ", raw_str), needs_review
+
+    # Precedence 4: fall through — humanise the OPL code only when no
+    # raw surface was supplied at all. Empty input + non-RELATED_TO
+    # code is essentially impossible (the resolver only emits a
+    # specific code on a non-empty input) so this is a guard, not a
+    # path.
     return code, _humanise_opl_code(code), needs_review
 
 

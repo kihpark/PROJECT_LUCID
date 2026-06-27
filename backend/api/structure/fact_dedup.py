@@ -8,13 +8,31 @@ collapse to the same canonical tuple). Live evidence
 (job_id=3bab7b79-3fdc-4a87-a9ec-5e7273e76847): 14 facts emitted, four
 exact (subject, RELATED_TO, None) duplicates clutter the Decide UI.
 
+feat/stage3-predicate-code-fact-type (PO 2026-06-28) — STAGE 3
+predicate_code → fact_type 격하. The English OPL predicate_code layer
+is being removed because Korean conjugation cannot be statically
+mapped onto a 30-code English vocabulary (RELATED_TO fallback at
+91.6% of all facts). The new dedup key is the 4-tuple
+
+    (subject, fact_type, natural_predicate_normalized, object)
+
+where fact_type is the 3종 bucket (action / claim / measurement) and
+the natural predicate is the LLM's raw Korean / English surface,
+normalized to whitespace-stripped lowercase only (NO morphological
+analysis, NO dictionary augmentation — those were the failed paths).
+
+Backwards compat: if `fact_type` is missing on a dict (legacy
+serializer output, raw payloads not yet stamped with fact_type), the
+key falls back to using `predicate_code` so the old test corpus keeps
+passing; if BOTH are missing, the natural-language predicate alone
+carries the bucket.
+
 `dedup_facts` runs over the serialized `facts_payload` (the dicts
 written to `extracted_metadata.structure.facts`) and keeps the first
-occurrence of each canonical (subject, predicate_code, object) tuple.
-The match is case- and whitespace-insensitive, and `object_label`
-(entity reference) takes precedence over `object_value` (literal) —
-matching the precedence the recall surface uses to display the object
-side.
+occurrence of each canonical tuple. The match is case- and whitespace-
+insensitive, and `object_label` (entity reference) takes precedence
+over `object_value` (literal) — matching the precedence the recall
+surface uses to display the object side.
 
 The dropped fact_uids are returned so the caller can also filter the
 `fact_object_links_detail` / `fact_fact_links_detail` cross-references
@@ -30,8 +48,8 @@ def _norm_lower(value: Any) -> str:
     """Whitespace-strip + lowercase a value for tuple-key normalization.
 
     None / non-string values collapse to empty string so the tuple
-    stays comparable. The empty tuple ("", "", "") is itself unique —
-    the caller keeps the first such fact.
+    stays comparable. The empty tuple ("", "", "", "") is itself
+    unique — the caller keeps the first such fact.
     """
     if value is None:
         return ""
@@ -39,28 +57,34 @@ def _norm_lower(value: Any) -> str:
     return text
 
 
-def _norm_upper(value: Any) -> str:
-    """Same as _norm_lower but uppercased — used for the predicate_code
-    segment so the OPL code ("RELATED_TO") normalizes consistently
-    regardless of source casing.
-    """
-    if value is None:
-        return ""
-    return str(value).strip().upper()
-
-
-def _fact_key(fact: dict[str, Any]) -> tuple[str, str, str]:
-    """Build the canonical dedup tuple for one serialized fact dict.
+def _fact_key(fact: dict[str, Any]) -> tuple[str, str, str, str]:
+    """Build the dedup tuple for one serialized fact dict.
 
     Field precedence mirrors the recall surface:
       subject: subject_label > subject_uid
-      predicate: predicate_code > predicate
+      type bucket: fact_type > predicate_code (legacy fallback)
+      predicate: predicate (natural-language LLM surface)
       object: object_label > object_value
+
+    The fact_type segment is the 3종 bucket (action/claim/measurement)
+    introduced by v0.2.0 step1+2; on legacy payloads where fact_type is
+    not stamped we fall back to the (now deprecated) predicate_code so
+    the historical KIST-dup scenario still collapses correctly. The
+    natural predicate is `strip().lower()`-only — no morphological
+    analysis, no dictionary; tight Korean conjugation variants
+    ("밝혔다" / "밝혔습니다") survive as weak near-duplicates and the
+    PO accepts a human pass to clean them up downstream.
     """
     subject = fact.get("subject_label") or fact.get("subject_uid")
-    predicate = fact.get("predicate_code") or fact.get("predicate")
+    fact_type = fact.get("fact_type") or fact.get("predicate_code")
+    predicate = fact.get("predicate")
     obj = fact.get("object_label") or fact.get("object_value")
-    return (_norm_lower(subject), _norm_upper(predicate), _norm_lower(obj))
+    return (
+        _norm_lower(subject),
+        _norm_lower(fact_type),
+        _norm_lower(predicate),
+        _norm_lower(obj),
+    )
 
 
 def dedup_facts(
@@ -80,7 +104,7 @@ def dedup_facts(
     if not facts:
         return [], set()
 
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     kept: list[dict[str, Any]] = []
     dropped_uids: set[str] = set()
     for fact in facts:
