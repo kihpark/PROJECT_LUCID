@@ -412,18 +412,9 @@ def apply_merge(
         return _dry_run_summary(proposal)
 
     # ─────────────────────────────────────────────────────────────────
-    # PO 명령 대기 가드 — 코드는 완성되었으나 실행 차단
-    # ─────────────────────────────────────────────────────────────────
-    # The block BELOW this raise is the live apply implementation. It is
-    # syntactically valid and references the real ES write helpers /
-    # storage paths in use elsewhere in the codebase, so removing this
-    # single ``raise`` (and only this raise) activates it. Until the PO
-    # issues "ok apply", any caller landing here gets a clean failure
-    # instead of an accidental write.
-    raise NotImplementedError(
-        "apply_merge dry_run=False is gated on PO command. "
-        "Code below is ready but blocked. Remove this raise to enable."
-    )
+    # PO 명령 가드 해제 (2026-06-27): "ok apply" 명령 후 raise 제거.
+    # STAGE 1 LLM gate dry-run 결과 (8 YES / 2 NO false-positive 차단)
+    # PO 가 리뷰 + 합의 → apply 활성화.
 
     # ═════════════════════════════════════════════════════════════════
     # 실제 apply 코드 (작성 완료, 실행 차단 — PO 명령 후 raise 한 줄
