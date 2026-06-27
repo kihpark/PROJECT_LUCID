@@ -526,11 +526,12 @@ def apply_merge(
     with _SessionLocal() as db:
         for old_uid in non_target_members:
             db.add(ValidationLog(
-                user_id=None  # system-initiated merge (no user context in CLI apply),
+                # system-initiated merge (no user context in CLI apply)
+                user_id=None,
                 fact_uid=None,
                 object_uid=old_uid,
                 action="merge_with",
-                validator_id=None  # system-initiated merge (no user context in CLI apply),
+                validator_id=None,
                 decision_metadata={
                     "canonical_merge": True,
                     "target_canonical_uid": target_uid,
