@@ -343,9 +343,11 @@ class ModifyFactRequest(LucidBaseModel):
     feat/fact-detail-modify (PO directive 2026-06-22): the Recall Fact
     detail modal needs an inline edit affordance — same shape as Decide
     UI's "edit" action, but limited to SURFACE fields. Identity fields
-    (subject_uid, predicate_code, validation_method, validator_id) stay
-    immutable: structural changes require a retract + re-validate flow
-    (out of scope here).
+    (subject_uid, fact_type, predicate, validation_method, validator_id)
+    stay immutable: structural changes require a retract + re-validate
+    flow (out of scope here). predicate_code is legacy after
+    feat/stage3-predicate-code-fact-type (2026-06-28) and no longer
+    participates in fact identity.
 
     Every field is optional — only the keys present in the request body
     get touched. Empty body → 400 (no-op patch is a client bug, not an

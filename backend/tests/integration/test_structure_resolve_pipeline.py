@@ -214,8 +214,16 @@ def test_cross_language_entity_merge_via_co_mention_collapses_subjects() -> None
 
 def test_dedup_via_canonical_key_appends_source_to_existing_fact() -> None:
     """★ Acceptance criterion #5: dedup + source 층위. Two captures of
-    the same canonical triple from different sources collapse to ONE
-    fact doc; sources[] gets BOTH source uids."""
+    the same canonical triple (incl. same natural-language surface)
+    from different sources collapse to ONE fact doc; sources[] gets
+    BOTH source uids.
+
+    feat/stage3-predicate-code-fact-type: the natural-language
+    predicate is now part of the dedup tie-breaker, so the two
+    captures must share the same `original_surface` to collapse.
+    Different surfaces (e.g. 'founded_by' vs 'founder') are now an
+    intentional non-collapse — the PO accepts that as a weak duplicate
+    that a human cleans up downstream."""
 
     fact_store: dict[str, dict[str, Any]] = {}
 
@@ -227,15 +235,28 @@ def test_dedup_via_canonical_key_appends_source_to_existing_fact() -> None:
             terms = {next(iter(f["term"])): next(iter(f["term"].values())) for f in filt}
             ckey_subject = terms.get("subject_uid")
             ckey_predicate = terms.get("predicate_code")
+            ckey_fact_type = terms.get("fact_type")
             ckey_object = terms.get("object_canonical")
+            ckey_predicate_natlang = terms.get("predicate")
             for doc in fact_store.values():
-                if (
-                    doc.get("subject_uid") == ckey_subject
-                    and doc.get("predicate_code") == ckey_predicate
-                    and doc.get("object_canonical") == ckey_object
-                    and not doc.get("retracted_at")
-                ):
-                    return {"hits": {"hits": [{"_source": doc}]}}
+                if doc.get("retracted_at"):
+                    continue
+                if doc.get("subject_uid") != ckey_subject:
+                    continue
+                if doc.get("object_canonical") != ckey_object:
+                    continue
+                if ckey_fact_type is not None:
+                    if doc.get("fact_type") != ckey_fact_type and \
+                       doc.get("type") != ckey_fact_type:
+                        continue
+                elif ckey_predicate is not None:
+                    if doc.get("predicate_code") != ckey_predicate:
+                        continue
+                if ckey_predicate_natlang is not None:
+                    stored_pred = (doc.get("predicate") or "").strip().lower()
+                    if stored_pred != ckey_predicate_natlang:
+                        continue
+                return {"hits": {"hits": [{"_source": doc}]}}
             return {"hits": {"hits": []}}
 
         client.search.side_effect = _search
@@ -273,14 +294,15 @@ def test_dedup_via_canonical_key_appends_source_to_existing_fact() -> None:
     )
     assert created_a is True
 
-    # Second capture: same canonical triple, different source.
+    # Second capture: same canonical triple AND same natural surface,
+    # different source -> dedup hit.
     uid_b, created_b = insert_or_dedup_fact(
         subject_entity_id="ent-spacex",
         predicate_code=code,
         object_ref=obj_ref,
         knowledge_space_id="ks-1",
         source_uid="src-B",
-        original_surface="founder",  # different surface predicate
+        original_surface="founded_by",  # same surface predicate
         capture_lang="en",
         object_value="Elon Musk",
         es_client=client,

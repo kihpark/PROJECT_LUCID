@@ -258,30 +258,50 @@ def _find_fact_by_canonical_key(
     subject_entity_id: str,
     predicate_code: str,
     object_canonical: str,
+    fact_type: str | None = None,
+    predicate: str | None = None,
 ) -> dict[str, Any] | None:
     """B-62 canonical S/P/O dedup lookup.
 
-    Filters by the new canonical fields (predicate_code + object_canonical)
-    rather than the legacy surface fields (predicate + object_value).
-    The legacy `find_fact_by_spo` keeps working for the validate.py
-    surface-keyed lookup; this helper is the canonical-keyed equivalent.
+    feat/stage3-predicate-code-fact-type — the dedup is bound to
+    `fact_type` (3종 bucket) + natural-language `predicate` whenever they
+    are supplied. predicate_code stays in the filter chain as a legacy
+    co-key so already-indexed facts with no fact_type stamp still dedup
+    on their original semantics. New writes (which always carry
+    fact_type via the v0.2.0 LLM payload) collapse on the
+    (subject_uid, fact_type, predicate, object_canonical) 4-key.
 
     Skips retracted facts and only matches validation_method='manual'
     so a flaky duplicate auto-write never collapses with a user-validated
     fact. Returns the existing _source dict or None.
     """
     client = get_client()
+    filters: list[dict[str, Any]] = [
+        {"term": {"knowledge_space_id": knowledge_space_id}},
+        {"term": {"subject_uid": subject_entity_id}},
+        {"term": {"object_canonical": object_canonical}},
+        {"term": {"validation_method": "manual"}},
+    ]
+    # Stage 3: prefer fact_type (3종 bucket) when present; otherwise fall
+    # back to predicate_code (legacy English OPL code) so already-indexed
+    # facts still collapse on their original key.
+    if fact_type:
+        filters.append({"term": {"fact_type": fact_type}})
+    elif predicate_code:
+        filters.append({"term": {"predicate_code": predicate_code}})
+    # Natural-language predicate tie-breaker (lowercased keyword
+    # match). When the LLM emits "밝혔다" vs "밝혔습니다" these still
+    # differ — the PO accepts the weak conjugation duplicate; a human
+    # cleans it up downstream. We compare the predicate field (keyword)
+    # exact-match (no normalization). When predicate is empty we skip
+    # this filter so the older lookup behavior is preserved.
+    if predicate:
+        filters.append({"term": {"predicate": predicate}})
     try:
         resp = client.search(
             index=LUCID_FACTS,
             query={"bool": {
-                "filter": [
-                    {"term": {"knowledge_space_id": knowledge_space_id}},
-                    {"term": {"subject_uid": subject_entity_id}},
-                    {"term": {"predicate_code": predicate_code}},
-                    {"term": {"object_canonical": object_canonical}},
-                    {"term": {"validation_method": "manual"}},
-                ],
+                "filter": filters,
                 "must_not": [{"exists": {"field": "retracted_at"}}],
             }},
             size=1,
@@ -359,18 +379,27 @@ def insert_or_dedup_fact(
                 subject_entity_id=subject_entity_id,
                 predicate_code=predicate_code,
                 object_canonical=obj_canon,
+                fact_type=fact_type,
+                predicate=(original_surface or predicate_code).strip().lower(),
             )
         else:
+            inj_filters: list[dict[str, Any]] = [
+                {"term": {"knowledge_space_id": knowledge_space_id}},
+                {"term": {"subject_uid": subject_entity_id}},
+                {"term": {"object_canonical": obj_canon}},
+                {"term": {"validation_method": validation_method}},
+            ]
+            if fact_type:
+                inj_filters.append({"term": {"fact_type": fact_type}})
+            elif predicate_code:
+                inj_filters.append({"term": {"predicate_code": predicate_code}})
+            inj_predicate_norm = (original_surface or predicate_code or "").strip().lower()
+            if inj_predicate_norm:
+                inj_filters.append({"term": {"predicate": inj_predicate_norm}})
             resp = client.search(
                 index=LUCID_FACTS,
                 query={"bool": {
-                    "filter": [
-                        {"term": {"knowledge_space_id": knowledge_space_id}},
-                        {"term": {"subject_uid": subject_entity_id}},
-                        {"term": {"predicate_code": predicate_code}},
-                        {"term": {"object_canonical": obj_canon}},
-                        {"term": {"validation_method": validation_method}},
-                    ],
+                    "filter": inj_filters,
                     "must_not": [{"exists": {"field": "retracted_at"}}],
                 }},
                 size=1,

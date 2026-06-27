@@ -262,26 +262,47 @@ def test_underscore_space_variant_match() -> None:
 
 
 def test_type_and_label_korean_gloss_dict() -> None:
-    """A Korean surface from the gloss dict returns the curated English."""
+    """feat/stage3-predicate-code-fact-type: gloss dict is empty; Korean
+    surface is preserved verbatim as the label."""
     code, label, needs_review = map_predicate_to_type_and_label(
         "회사채 발행 계획",
     )
     assert code == "PLANS"
-    assert label == "plans bond issuance"
+    assert label == "회사채 발행 계획"
     assert needs_review is False
 
 
 def test_type_and_label_korean_short_gloss() -> None:
+    """STAGE 3: '검토' surface preserved verbatim, not glossed to 'discusses'."""
     code, label, needs_review = map_predicate_to_type_and_label("검토")
     assert code == "DISCUSSES"
-    assert label == "discusses"
+    assert label == "검토"
     assert needs_review is False
 
 
 def test_type_and_label_korean_announces() -> None:
+    """STAGE 3: '발표' surface preserved verbatim, not glossed to 'announces'."""
     code, label, _ = map_predicate_to_type_and_label("발표")
     assert code == "ANNOUNCES"
-    assert label == "announces"
+    assert label == "발표"
+
+
+def test_ko_to_en_gloss_is_empty_stage3_guard() -> None:
+    """feat/stage3-predicate-code-fact-type (PO 2026-06-28): the
+    Korean → English gloss dict was the SPO-on-English regression and
+    is permanently empty. Guard against any future repopulation."""
+    from api.structure.predicate_mapper import _KO_TO_EN_GLOSS
+    assert _KO_TO_EN_GLOSS == {}
+
+
+def test_korean_speech_act_label_is_raw_surface_not_english() -> None:
+    """'밝혔다' MUST NOT become 'stated'. Acceptance criterion #2."""
+    code, label, _ = map_predicate_to_type_and_label("밝혔다")
+    # Code is allowed to be ANNOUNCES via the SUBSTRING_CUES — that is
+    # the classification, which is fine. But the LABEL must be the raw
+    # Korean surface, not the English gloss.
+    assert label == "밝혔다"
+    assert label != "stated"
 
 
 def test_type_and_label_english_idiomatic_input_echoes() -> None:

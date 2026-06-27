@@ -1381,10 +1381,17 @@ def fact_detail(
 #
 # PO wants the Recall Fact-detail modal to be EDITABLE — same affordance
 # as Decide's edit mode, but limited to surface fields. Identity stays
-# immutable (subject_uid / predicate_code / validation_method); the
-# user-visible chrome (claim / predicate_label / object_value / tags)
-# can be corrected in-place. Structural changes still require a retract
-# + new-fact flow.
+# immutable (subject_uid / fact_type / predicate / validation_method);
+# the user-visible chrome (claim / predicate_label / object_value /
+# tags) can be corrected in-place. Structural changes still require a
+# retract + new-fact flow.
+#
+# feat/stage3-predicate-code-fact-type (2026-06-28): predicate_code is
+# now legacy after the STAGE 3 격하 and no longer participates in fact
+# identity — the dedup key is (subject_uid, fact_type, predicate as
+# natural-language surface, validation_method). predicate_code stays
+# nullable on the ES doc for backfill safety but it is not part of
+# identity.
 #
 # The endpoint is PATCH (idempotent semantics — a re-PATCH with the
 # same body is a no-op against ES because `update_fact` recomputes
@@ -1412,9 +1419,11 @@ def modify_fact(
     """Modify a validated fact's surface fields.
 
     Editable: claim, predicate_label, object_value, tags. Identity
-    fields (subject_uid, predicate_code, validation_method,
+    fields (subject_uid, fact_type, predicate, validation_method,
     validator_id) are NEVER changed by this endpoint — a structural
-    change goes through retract + re-validate.
+    change goes through retract + re-validate. predicate_code is
+    legacy after feat/stage3-predicate-code-fact-type and no longer
+    participates in fact identity.
 
     400 when no editable fields are present (empty patch).
     404 when the fact does not exist OR belongs to a different KS.

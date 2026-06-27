@@ -37,13 +37,17 @@ pytestmark = pytest.mark.integration
 # ---------------------------------------------------------------------------
 
 def test_korean_predicate_yields_english_label_on_fact() -> None:
-    """`회사채 발행 계획` Korean predicate -> PLANS code +
-    "plans bond issuance" label preserved on the ES doc."""
+    """`회사채 발행 계획` Korean predicate -> PLANS code.
+
+    feat/stage3-predicate-code-fact-type: the gloss dict is REPEALED.
+    The label is now the raw Korean surface, preserved verbatim — NOT
+    an English gloss like 'plans bond issuance'. The OPL code stays
+    PLANS via the substring cue list (classification logic unchanged)."""
     code, label, needs_review = map_predicate_to_type_and_label(
         "회사채 발행 계획",
     )
     assert code == "PLANS"
-    assert label == "plans bond issuance"
+    assert label == "회사채 발행 계획"
 
     client = MagicMock()
     client.search.return_value = {"hits": {"hits": []}}
@@ -65,14 +69,16 @@ def test_korean_predicate_yields_english_label_on_fact() -> None:
     assert created is True
     body = client.index.call_args.kwargs["document"]
     assert body["predicate_code"] == "PLANS"
-    assert body["predicate_label"] == "plans bond issuance"
+    assert body["predicate_label"] == "회사채 발행 계획"
     assert body["original_surface"] == "회사채 발행 계획"
     assert body["capture_lang"] == "ko"
     # canonical_key composed only of (subject_uid, predicate_code,
-    # object_canonical) — label not in it.
+    # object_canonical) — label not in it. (canonical_key signature
+    # is GUARDED by STAGE 3 PO directive: no change.)
     assert body["canonical_key"] == canonical_key(
         "ent-corp", "PLANS", {"kind": "literal", "value": "1000억원"},
     )
+    # English gloss is no longer produced; raw Korean is now the label.
     assert "plans bond issuance" not in body["canonical_key"]
 
 
@@ -118,9 +124,17 @@ def test_english_natural_predicate_echoes_onto_label() -> None:
 # ---------------------------------------------------------------------------
 
 def test_two_surface_phrasings_dedup_and_first_label_wins() -> None:
-    """Capture A: predicate '설립자' -> label 'founded by'.
-    Capture B: predicate 'founder' -> label 'founder'.
-    Both map to FOUNDED_BY + same object -> dedup; first label kept."""
+    """Capture A: predicate '설립자' -> label '설립자' (raw Korean).
+    Capture B: predicate '설립자' (same natural surface) -> dedup hit;
+    first label kept.
+
+    feat/stage3-predicate-code-fact-type: the dedup key now includes
+    the natural-language predicate as a tie-breaker. The PO accepts
+    that two captures with DIFFERENT natural surfaces (e.g. '설립자'
+    vs 'founder') do NOT collapse — even when they share the same OPL
+    code — because they are weak duplicates a human can clean up.
+    What MUST still collapse is two captures with the SAME natural
+    surface (the historical canonical_key invariant)."""
     fact_store: dict[str, dict[str, Any]] = {}
 
     def _make_client():
@@ -132,15 +146,31 @@ def test_two_surface_phrasings_dedup_and_first_label_wins() -> None:
                      for f in filt}
             ckey_subject = terms.get("subject_uid")
             ckey_predicate = terms.get("predicate_code")
+            ckey_fact_type = terms.get("fact_type")
             ckey_object = terms.get("object_canonical")
+            ckey_predicate_natlang = terms.get("predicate")
             for doc in fact_store.values():
-                if (
-                    doc.get("subject_uid") == ckey_subject
-                    and doc.get("predicate_code") == ckey_predicate
-                    and doc.get("object_canonical") == ckey_object
-                    and not doc.get("retracted_at")
-                ):
-                    return {"hits": {"hits": [{"_source": doc}]}}
+                if doc.get("retracted_at"):
+                    continue
+                if doc.get("subject_uid") != ckey_subject:
+                    continue
+                if doc.get("object_canonical") != ckey_object:
+                    continue
+                # STAGE 3: fact_type wins when present; predicate_code
+                # is the legacy fallback.
+                if ckey_fact_type is not None:
+                    if doc.get("fact_type") != ckey_fact_type and \
+                       doc.get("type") != ckey_fact_type:
+                        continue
+                elif ckey_predicate is not None:
+                    if doc.get("predicate_code") != ckey_predicate:
+                        continue
+                # Natural predicate tie-breaker.
+                if ckey_predicate_natlang is not None:
+                    stored_pred = (doc.get("predicate") or "").strip().lower()
+                    if stored_pred != ckey_predicate_natlang:
+                        continue
+                return {"hits": {"hits": [{"_source": doc}]}}
             return {"hits": {"hits": []}}
 
         client.search.side_effect = _search
@@ -160,10 +190,10 @@ def test_two_surface_phrasings_dedup_and_first_label_wins() -> None:
 
     client = _make_client()
 
-    # Capture A: Korean surface, Korean -> English gloss.
+    # Capture A: Korean surface; STAGE 3 — label is raw Korean (no gloss).
     code_a, label_a, _ = map_predicate_to_type_and_label("설립자")
     assert code_a == "FOUNDED_BY"
-    assert label_a == "founded by"
+    assert label_a == "설립자"
 
     obj_ref: dict = {"kind": "literal", "value": "Elon Musk"}
     uid_a, created_a = insert_or_dedup_fact(
@@ -179,15 +209,12 @@ def test_two_surface_phrasings_dedup_and_first_label_wins() -> None:
         predicate_label=label_a,
     )
     assert created_a is True
-    assert fact_store[uid_a]["predicate_label"] == "founded by"
+    assert fact_store[uid_a]["predicate_label"] == "설립자"
 
-    # Capture B: English natural surface, different phrasing, same OPL
-    # code and object -> dedup hit.
-    code_b, label_b, _ = map_predicate_to_type_and_label("founder")
+    # Capture B: SAME Korean surface, different source -> dedup hit.
+    code_b, label_b, _ = map_predicate_to_type_and_label("설립자")
     assert code_b == "FOUNDED_BY"
-    # `founder` is a direct OPL_LOOKUP key (no gloss-dict hit) so it
-    # echoes through the English-echo path.
-    assert label_b == "founder"
+    assert label_b == "설립자"
 
     uid_b, created_b = insert_or_dedup_fact(
         subject_entity_id="ent-spacex",
@@ -195,8 +222,8 @@ def test_two_surface_phrasings_dedup_and_first_label_wins() -> None:
         object_ref=obj_ref,
         knowledge_space_id="ks-1",
         source_uid="src-B",
-        original_surface="founder",
-        capture_lang="en",
+        original_surface="설립자",
+        capture_lang="ko",
         object_value="Elon Musk",
         es_client=client,
         predicate_label=label_b,
@@ -206,9 +233,8 @@ def test_two_surface_phrasings_dedup_and_first_label_wins() -> None:
     assert len(fact_store) == 1         # one ES doc
 
     # canonical_key invariant: the first capture's label is preserved
-    # (DEDUP path NEVER overwrites predicate_label). The label on the
-    # stored doc is still capture-A's gloss.
-    assert fact_store[uid_a]["predicate_label"] == "founded by"
+    # (DEDUP path NEVER overwrites predicate_label).
+    assert fact_store[uid_a]["predicate_label"] == "설립자"
 
     # Both sources appended.
     sources = fact_store[uid_a]["source_uids"]
