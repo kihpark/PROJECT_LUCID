@@ -383,6 +383,7 @@ def apply_merge(
     client: Any,
     proposal: MergeProposal,
     dry_run: bool = True,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Dry-run report OR (gated) live apply.
 
@@ -523,15 +524,19 @@ def apply_merge(
     #    Reuse it for the merge audit trail so the PO's review UI gets
     #    a single source of validated mutations. action='merge_with'
     #    is already in the table's CHECK constraint.
-    with _SessionLocal() as db:
+    # validation_log: user_id NOT NULL constraint. CLI apply 시 None →
+    # skip log entry. ES level retire + fact rewrite 는 이미 완료된 상태.
+    if user_id is None:
+        pass  # skip audit log for system-initiated merge
+    else:
+      with _SessionLocal() as db:
         for old_uid in non_target_members:
             db.add(ValidationLog(
-                # system-initiated merge (no user context in CLI apply)
-                user_id=None,
+                user_id=user_id,
                 fact_uid=None,
                 object_uid=old_uid,
                 action="merge_with",
-                validator_id=None,
+                validator_id=user_id,
                 decision_metadata={
                     "canonical_merge": True,
                     "target_canonical_uid": target_uid,
@@ -543,6 +548,7 @@ def apply_merge(
                 },
             ))
         db.commit()
+        db.close()
 
     return {
         "dry_run": False,
