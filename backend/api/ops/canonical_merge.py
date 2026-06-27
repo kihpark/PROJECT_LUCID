@@ -474,8 +474,11 @@ def apply_merge(
     #    "subject_uid OR object_value" walk under a uid_remap. Every
     #    non-target member uid maps to the target_uid.
     uid_remap = {old: target_uid for old in non_target_members}
+    # ks_id from target's existing doc — apply 가 같은 KS 안에서만 작동
+    _target_doc = client.get(index=LUCID_OBJECTS, id=target_uid)["_source"]
+    _ks_id = _target_doc.get("knowledge_space_id", "")
     remap_counts = remap_fact_subject_object(
-        knowledge_space_id=canonical_ks_id_from_doc(client, target_uid),
+        knowledge_space_id=_ks_id,
         uid_remap=uid_remap,
     )
 
@@ -523,11 +526,11 @@ def apply_merge(
     with _SessionLocal() as db:
         for old_uid in non_target_members:
             db.add(ValidationLog(
-                user_id=_current_user_uuid(),
+                user_id=None  # system-initiated merge (no user context in CLI apply),
                 fact_uid=None,
                 object_uid=old_uid,
                 action="merge_with",
-                validator_id=_current_user_uuid(),
+                validator_id=None  # system-initiated merge (no user context in CLI apply),
                 decision_metadata={
                     "canonical_merge": True,
                     "target_canonical_uid": target_uid,
