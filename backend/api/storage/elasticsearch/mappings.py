@@ -175,6 +175,18 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             },
             "created_at": {"type": "date"},
             "updated_at": {"type": "date"},
+            # M3-1 canonical-layer apply — fact provenance after entity merge.
+            # When a fact's subject_uid/object was rewritten to point at a
+            # canonical target, this records the original object_uid + merge
+            # timestamp so a rollback can reconstruct the pre-merge state.
+            "canonical_merge_provenance": {
+                "type": "object",
+                "properties": {
+                    "original_object_uid": {"type": "keyword"},
+                    "merged_into": {"type": "keyword"},
+                    "merged_at": {"type": "date"},
+                },
+            },
         },
     },
 }
