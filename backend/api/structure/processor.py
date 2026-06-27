@@ -57,6 +57,7 @@ from api.structure.completeness_validator import (
 )
 from api.structure.decomposer import decompose
 from api.structure.entity_resolver import _detect_lang
+from api.structure.fact_dedup import dedup_facts, filter_links_by_fact_uids
 from api.structure.link_creator import LinkCreationResult, create_links
 from api.structure.models import StructureFact, StructureObject, StructureResult
 from api.structure.object_matcher import MatchResult, match_or_create_object
@@ -958,6 +959,28 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             )
             for f in decomp.facts
         ]
+        # fix/fact-dedup-on-structure-output (PO 2026-06-27): drop facts
+        # whose canonical (subject, predicate_code, object) tuple has
+        # already been seen earlier in the payload. PO live evidence
+        # (job_id 3bab7b79…): a single article emitted 14 facts of
+        # which four were exact dups (RELATED_TO fallback on Korean verbs
+        # the OPL mapper does not cover). The dedup keeps the first
+        # occurrence and cascades the dropped fact_uids onto the link
+        # detail lists so the Decide overlay stays consistent. The
+        # processor's downstream telemetry (fact_count, metrics row)
+        # then reads the deduped length — not the raw LLM count — so
+        # the dashboard reflects what the user actually sees.
+        pre_dedup_count = len(facts_payload)
+        facts_payload, _dropped_dup_fact_uids = dedup_facts(facts_payload)
+        if _dropped_dup_fact_uids:
+            logger.info(
+                "structure: dedup dropped %d duplicate fact(s) "
+                "(pre=%d, post=%d, job=%s)",
+                pre_dedup_count - len(facts_payload),
+                pre_dedup_count,
+                len(facts_payload),
+                job_id,
+            )
         objects_payload = [
             _serialize_struct_object(
                 o,
@@ -983,6 +1006,19 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             }
             for ff in decomp.fact_fact_links
         ]
+        # Cascade the dedup onto the link detail lists so no ghost edge
+        # references a dropped fact_uid.
+        if _dropped_dup_fact_uids:
+            fact_object_links_detail = filter_links_by_fact_uids(
+                fact_object_links_detail,
+                _dropped_dup_fact_uids,
+                uid_fields=("fact_uid",),
+            )
+            fact_fact_links_detail = filter_links_by_fact_uids(
+                fact_fact_links_detail,
+                _dropped_dup_fact_uids,
+                uid_fields=("from_uid", "to_uid"),
+            )
 
 
         # B-46: attach per-fact video locators when the job is VIDEO_STT.
@@ -998,7 +1034,10 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         # M1 / E telemetry + DR-067 content payload.
         meta = dict(job.extracted_metadata or {})
         meta["structure"] = {
-            "fact_count": len(decomp.facts),
+            # fix/fact-dedup-on-structure-output: report the deduped count
+            # so the dashboard / Decide overlay header agree with the
+            # actual `facts` list length below.
+            "fact_count": len(facts_payload),
             "object_count": len(decomp.objects),
             "object_auto_matched": sum(
                 1 for m in match_per_object.values() if m.matched_object_uid is not None
@@ -1036,7 +1075,7 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
                 session,
                 user_id=job.user_id,
                 source_job_id=job.id,
-                fact_count=len(decomp.facts),
+                fact_count=len(facts_payload),
                 object_count_auto=sum(
                     1 for m in match_per_object.values()
                     if m.matched_object_uid is not None
