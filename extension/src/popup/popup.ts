@@ -464,12 +464,20 @@ async function loadBriefSnapshot(): Promise<{
  * onChanged listener re-render.
  */
 async function forceCheckInflightJobs(jobs: TrackedJob[]): Promise<void> {
-  const inflight = jobs.filter(
-    (j) => j.status === "saving" || j.status === "analyzing",
+  // fix/popup-force-check-completed (PO 2026-06-27): also re-check rows
+  // that are 'completed' in the local tracker but may have terminalised
+  // on the backend (validated/discarded) via another path (e.g. user
+  // opened /pending in a separate tab and discarded there). Without
+  // this, ↻ never asks the backend about completed rows so they sit in
+  // the tracker until the user × them. Cost: one /api/jobs lookup per
+  // completed row, but only on ↻ / popup open — not on a polling loop.
+  const candidates = jobs.filter(
+    (j) =>
+      j.status === "saving" || j.status === "analyzing" || j.status === "completed",
   );
-  if (inflight.length === 0) return;
+  if (candidates.length === 0) return;
   await Promise.all(
-    inflight.map(async (job) => {
+    candidates.map(async (job) => {
       try {
         await chrome.runtime.sendMessage({
           type: "force_check_status",
