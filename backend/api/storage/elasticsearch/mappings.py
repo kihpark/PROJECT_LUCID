@@ -254,6 +254,13 @@ LUCID_OBJECTS_MAPPING: dict[str, Any] = {
                     "reason": {"type": "keyword"},
                 },
             },
+            # M3-1 canonical-layer apply (PO 2026-06-27 ok apply) —
+            # canonical_uid: 이 doc 의 canonical 대표 (병합 후 모든 member
+            #   doc 이 surviving target 의 object_uid 를 가르킴).
+            # retired_by_merge: 이 doc 가 다른 canonical 로 흡수되어 더 이상
+            #   primary 가 아님 (병합 시 only set on member docs, target 은 null).
+            "canonical_uid": {"type": "keyword"},
+            "retired_by_merge": {"type": "date"},
         },
     },
 }
