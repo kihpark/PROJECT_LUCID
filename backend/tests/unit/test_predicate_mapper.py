@@ -336,9 +336,13 @@ def test_type_and_label_related_to_preserves_raw_surface() -> None:
     card shows the verb the user actually wrote. needs_review stays
     True because the predicate IS still ambiguous from the OPL
     perspective."""
-    code, label, needs_review = map_predicate_to_type_and_label("답했다")
+    # fix/predicate-mapper-korean-conjugation (2026-06-27): "답했다"
+    # now maps to ANNOUNCES via the new SUBSTRING_CUES Korean stems.
+    # The raw-surface preservation guarantee is verified below with a
+    # truly unmapped Korean phrase ("친구이다") that has no cue / lookup.
+    code, label, needs_review = map_predicate_to_type_and_label("친구이다")
     assert code == "RELATED_TO"
-    assert label == "답했다"
+    assert label == "친구이다"
     assert needs_review is True
 
 

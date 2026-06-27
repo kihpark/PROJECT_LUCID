@@ -70,6 +70,12 @@ OPL_LOOKUP: dict[str, str] = {
     '대표': 'LED_BY',
     '대표이사': 'LED_BY',
     '이끌다': 'LED_BY',
+    # fix/predicate-mapper-korean-conjugation — 활용형
+    '이끈다': 'LED_BY',
+    '이끄는': 'LED_BY',
+    '이끌었다': 'LED_BY',
+    '이끌고 있다': 'LED_BY',
+    '세부과제를 이끈다': 'LED_BY',
     # IS_A
     'is_a': 'IS_A',
     'is a': 'IS_A',
@@ -189,6 +195,11 @@ OPL_LOOKUP: dict[str, str] = {
     '추정': 'ESTIMATES',
     '예상': 'ESTIMATES',
     '전망': 'ESTIMATES',
+    # fix/predicate-mapper-korean-conjugation
+    '분석했다': 'ESTIMATES', '분석한다': 'ESTIMATES',
+    '추산했다': 'ESTIMATES', '집계했다': 'ESTIMATES',
+    '예측했다': 'ESTIMATES', '예측한다': 'ESTIMATES',
+    '진단했다': 'ESTIMATES',
     # INTENDS
     'intends': 'INTENDS',
     'intend': 'INTENDS',
@@ -203,6 +214,8 @@ OPL_LOOKUP: dict[str, str] = {
     'reporting': 'REPORTS',
     '보고': 'REPORTS',
     '보고서': 'REPORTS',
+    # fix/predicate-mapper-korean-conjugation
+    '발견했다': 'REPORTS', '기록했다': 'REPORTS', '보고했다': 'REPORTS',
     # DEFINES
     'defines': 'DEFINES',
     'define': 'DEFINES',
@@ -225,6 +238,18 @@ OPL_LOOKUP: dict[str, str] = {
     'unveils': 'ANNOUNCES',
     '발표': 'ANNOUNCES',
     '공개': 'ANNOUNCES',
+    # fix/predicate-mapper-korean-conjugation — 한국어 speech-act 활용형
+    # PO live data: RELATED_TO 의 91.6% 가 speech-act 활용형. 보강
+    # 후 ratio ~50% 로 감소 예상.
+    '발표한다': 'ANNOUNCES', '발표했다': 'ANNOUNCES', '발표하는': 'ANNOUNCES',
+    '말했다': 'ANNOUNCES', '말한다': 'ANNOUNCES',
+    '밝혔다': 'ANNOUNCES', '밝힌다': 'ANNOUNCES',
+    '덧붙였다': 'ANNOUNCES', '덧붙인다': 'ANNOUNCES',
+    '주장했다': 'ANNOUNCES', '주장한다': 'ANNOUNCES', '주장하고 있다': 'ANNOUNCES',
+    '언급했다': 'ANNOUNCES', '강조했다': 'ANNOUNCES',
+    '지적했다': 'ANNOUNCES', '비판했다': 'ANNOUNCES', '비난했다': 'ANNOUNCES',
+    '요구했다': 'ANNOUNCES', '경고했다': 'ANNOUNCES',
+    '답했다': 'ANNOUNCES', '답한다': 'ANNOUNCES',
     # ACQUIRES
     'acquires': 'ACQUIRES',
     'acquire': 'ACQUIRES',
@@ -245,6 +270,10 @@ OPL_LOOKUP: dict[str, str] = {
     'collaborates_with': 'PARTNERS_WITH',
     '제휴': 'PARTNERS_WITH',
     '협력': 'PARTNERS_WITH',
+    # fix/predicate-mapper-korean-conjugation
+    '협약을 체결하였다': 'PARTNERS_WITH',
+    '업무협약을 체결하였다': 'PARTNERS_WITH',
+    '체결하였다': 'PARTNERS_WITH',
     # EMPLOYS
     'employs': 'EMPLOYS',
     'employ': 'EMPLOYS',
@@ -302,6 +331,9 @@ OPL_LOOKUP: dict[str, str] = {
     'authorizes': 'APPROVES',
     '승인': 'APPROVES',
     '허가': 'APPROVES',
+    # fix/predicate-mapper-korean-conjugation
+    '결정했다': 'APPROVES', '결정한다': 'APPROVES',
+    '판시했다': 'APPROVES',
     # REGULATES
     'regulates': 'REGULATES',
     'regulate': 'REGULATES',
@@ -316,6 +348,41 @@ OPL_LOOKUP: dict[str, str] = {
 # specificity (longer / more-distinctive cues first) so we do not accept
 # a generic match when a precise one is available.
 SUBSTRING_CUES: list[tuple[str, str]] = [
+    # fix/predicate-mapper-korean-conjugation — Korean stems (must come
+    # FIRST so they win over generic English fallbacks for Korean input).
+    # PO live data: RELATED_TO 91.6% of all facts, dominated by Korean
+    # speech-act conjugated verbs. Stems below cover the 30+ most common.
+    ('업무협약', 'PARTNERS_WITH'),
+    ('협약', 'PARTNERS_WITH'),
+    ('체결', 'PARTNERS_WITH'),
+    ('이끈', 'LED_BY'),
+    ('이끌', 'LED_BY'),
+    ('이끄', 'LED_BY'),
+    ('행정부에서 담당', 'REGULATES'),
+    ('밝혔', 'ANNOUNCES'),
+    ('밝히', 'ANNOUNCES'),
+    ('말했', 'ANNOUNCES'),
+    ('말한', 'ANNOUNCES'),
+    ('덧붙', 'ANNOUNCES'),
+    ('주장', 'ANNOUNCES'),
+    ('언급', 'ANNOUNCES'),
+    ('강조', 'ANNOUNCES'),
+    ('지적', 'ANNOUNCES'),
+    ('비판', 'ANNOUNCES'),
+    ('비난', 'ANNOUNCES'),
+    ('요구', 'ANNOUNCES'),
+    ('경고', 'ANNOUNCES'),
+    ('답했', 'ANNOUNCES'),
+    ('답한', 'ANNOUNCES'),
+    ('분석', 'ESTIMATES'),
+    ('추산', 'ESTIMATES'),
+    ('집계', 'ESTIMATES'),
+    ('예측', 'ESTIMATES'),
+    ('진단', 'ESTIMATES'),
+    ('발견', 'REPORTS'),
+    ('기록', 'REPORTS'),
+    ('결정', 'APPROVES'),
+    ('판시', 'APPROVES'),
     ('subsidiary', 'PART_OF'),
     ('member of', 'PART_OF'),
     ('belongs to', 'PART_OF'),
@@ -425,6 +492,20 @@ SUBSTRING_CUES: list[tuple[str, str]] = [
 # canonical_key. Keys are the post-normalised input (lowercased, NFC,
 # whitespace-collapsed) so a Korean string maps cleanly.
 _KO_TO_EN_GLOSS: dict[str, str] = {
+    # fix/predicate-mapper-korean-conjugation — natural English glosses
+    # for Korean conjugated speech-act / leadership / partnership verbs.
+    # Labels read more naturally than RELATED_TO fallback.
+    "말했다": "stated", "밝혔다": "stated", "덧붙였다": "added",
+    "주장했다": "claimed", "언급했다": "mentioned", "강조했다": "emphasized",
+    "지적했다": "pointed out", "비판했다": "criticized", "비난했다": "criticized",
+    "요구했다": "demanded", "경고했다": "warned", "답했다": "answered",
+    "분석했다": "analyzed", "추산했다": "estimated", "집계했다": "tallied",
+    "예측했다": "predicted", "진단했다": "diagnosed",
+    "발견했다": "discovered", "기록했다": "recorded",
+    "결정했다": "decided", "판시했다": "ruled",
+    "업무협약을 체결하였다": "signed MOU with",
+    "협약을 체결하였다": "signed agreement with",
+    "세부과제를 이끈다": "leads sub-task", "이끈다": "leads",
     # finance / planning
     "회사채 발행 계획": "plans bond issuance",
     "발행 계획": "plans issuance",
