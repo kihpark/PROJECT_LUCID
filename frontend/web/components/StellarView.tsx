@@ -1346,7 +1346,11 @@ export function StellarView(props: StellarViewProps = {}) {
        *  so selection enters the existing focus mode (camera fly-to from
        *  StellarGraph + 1-hop dim + side panel + relations chain). */}
       <SearchBar data={filteredData} onSelect={handleClick} />
-      <EdgeLegend mode={source} />
+      {/* fix/stellar-remove-old-edge-panel (PO 2026-06-28):
+       *   옛 EdgeLegend ("EDGE · 관계" / "엔티티 링크") 폐기.
+       *   M3-2c StellarLeftPanel 가 (entity/fact_type/as_of/link_status)
+       *   필터를 모두 담당. M3-2b 의 ENTITY_COLORS + edgeStyleFor 가
+       *   시각 어휘 단일 source. 옛 panel 잔존은 PO 화면 confusing. */}
 
       {realIsEmpty ? <ColdStartHint /> : null}
 
