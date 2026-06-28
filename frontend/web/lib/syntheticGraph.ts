@@ -120,6 +120,20 @@ export interface StellarNode {
   /** Entity uid of the fact object (real mode); null when the object is a
    *  literal (number / date / Korean string) rather than an entity ref. */
   object_uid?: string | null;
+  /** M3-2c — entity-type bucket used by the left-panel WHO/WHAT/WHERE
+   *  checkbox filter. Maps the v0.2 entity classifier output (person /
+   *  organization / group / concept / event / artifact / location …)
+   *  onto the three top-level filter buckets:
+   *
+   *    WHO   — person / organization / group
+   *    WHAT  — concept / event / artifact / claim
+   *    WHERE — location / region / venue
+   *
+   *  Synthetic / legacy nodes leave it undefined; the filter treats
+   *  "undefined" as "match every bucket" so legacy data is never
+   *  hidden by accident. The renderer never reads this field — it is
+   *  data-only, per the 2026-06-28 PO correction (no visual style). */
+  entity_type?: string | null;
 }
 
 export interface StellarLink {
@@ -133,6 +147,16 @@ export interface StellarLink {
    *  flare up. Real-mode edges leave this undefined; the renderer
    *  falls back to a flat accent. */
   corroborationScore?: number;
+  /** M3-2c — provenance gate. 'verified' = backend confirmed the entity
+   *  reference (entity_uid resolved, action / measurement edges land
+   *  here); 'claimed' = the link exists only because a claim mentions
+   *  the entity (related-to edges from CLAIM nodes). The toggle
+   *  "발언(CLAIM) 보기" filters out claimed links + claim nodes when
+   *  off — they are HIDDEN, not dimmed (per 2026-06-28 PO correction).
+   *  The left-panel link_status filter is data-only — it MUST NOT bind
+   *  to any visual style. Legacy links leave it undefined → counted as
+   *  verified for the toggle. */
+  link_status?: 'verified' | 'claimed' | null;
 }
 
 export interface StellarGraphData {
