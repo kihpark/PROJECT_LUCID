@@ -2,7 +2,7 @@
  * M3-2b STELLAR 엣지 스타일 (PO 2026-06-28 정정 spec).
  *
  * ★ 점선 폐기: ACTION / CLAIM-related-to 모두 **실선**.
- *   구분 = color hue 만 (행위 vs 발화 성격).
+ *   구분 = color hue 만 (행위 vs 발언 성격).
  *
  * ★ link_status (verified/claimed) → 시각에 X. 데이터 메타데이터 only.
  *
@@ -14,7 +14,7 @@ import type { CSSProperties } from 'react';
 /** ACTION 엣지 색 — teal. 행위 자체가 검증된 fact. */
 export const ACTION_EDGE_COLOR = '#5EEAD4';
 
-/** CLAIM related-to 엣지 색 — amber. 발화 성격으로 구분. ★ 실선. */
+/** CLAIM related-to 엣지 색 — amber. 발언 성격으로 구분. ★ 실선. */
 export const CLAIM_EDGE_COLOR = '#F5C36B';
 
 /** Edge type discriminator. */
@@ -46,7 +46,7 @@ export function edgeWidth(factCount: number): number {
  *  ★ PO 정정 contract:
  *    - `type` is ALWAYS 'solid'
  *    - `opacity` is ALWAYS 1
- *    - color depends ONLY on `kind` (행위 vs 발화), NEVER on link_status
+ *    - color depends ONLY on `kind` (행위 vs 발언), NEVER on link_status
  *    - width depends ONLY on fact count
  */
 export function edgeStyle(

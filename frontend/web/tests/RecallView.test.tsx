@@ -751,6 +751,8 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     expect(summary).toHaveTextContent('행동');
     expect(summary).toHaveTextContent('발언');
     expect(summary).toHaveTextContent('수치');
+    // fix/terminology-unify-balhwa-balhweon — 과거 '발화' 표기 잔재 0.
+    expect(summary.textContent ?? '').not.toContain('발화');
     // The deleted per-entity chip-row testids are gone from the DOM.
     expect(screen.queryByTestId('brief-fact-type-breakdown')).not.toBeInTheDocument();
   });

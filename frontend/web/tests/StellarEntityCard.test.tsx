@@ -99,6 +99,21 @@ describe('StellarEntityCard render', () => {
     ).toContain('수동 통합/분리');
   });
 
+  // fix/terminology-unify-balhwa-balhweon — 용어 통일 보존 가드.
+  // CLAIM fact 카운트 라벨은 '발언 fact' 로 표기한다 (★ '발화' X).
+  it('CLAIM fact bucket label reads 발언 fact (not 발화)', () => {
+    const entity = makeNode({ subject: '한국은행' });
+    const facts: StellarNode[] = [
+      makeNode({ id: 'c1', subject: '한국은행', fact_type: 'claim' }),
+    ];
+    render(
+      <StellarEntityCard entity={entity} allFacts={facts} onClose={() => {}} />,
+    );
+    const row = screen.getByTestId('stellar-entity-card-count-claim');
+    expect(row.textContent).toContain('발언');
+    expect(row.textContent).not.toContain('발화');
+  });
+
   it('close button fires onClose', () => {
     const entity = makeNode();
     const onClose = vi.fn();

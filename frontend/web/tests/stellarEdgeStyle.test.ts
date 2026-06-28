@@ -97,7 +97,7 @@ describe('edgeStyle — ★ PO 정정: 모든 엣지 실선, opacity 1', () => {
     expect(s1.opacity).toBe(s100.opacity);
   });
 
-  it('color distinguishes ACTION vs CLAIM (행위 vs 발화 — color hue only)', () => {
+  it('color distinguishes ACTION vs CLAIM (행위 vs 발언 — color hue only)', () => {
     expect(edgeStyle('action', 1).color).not.toBe(edgeStyle('claim_related', 1).color);
   });
 });

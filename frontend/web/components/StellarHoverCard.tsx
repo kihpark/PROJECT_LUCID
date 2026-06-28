@@ -60,7 +60,7 @@ function formatMeasurementValue(v: number): string {
 
 const FACT_TYPE_KO: Record<'action' | 'claim' | 'measurement', string> = {
   action: '행위',
-  claim: '발화',
+  claim: '발언',
   measurement: '수치',
 };
 
