@@ -220,6 +220,14 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             # 누락 — recall facet 은 keyword null 을 missing 으로
             # 처리하므로 별도 분기 없이 OK.
             "related_entity_uids": {"type": "keyword"},
+            # m32a-stage4-link-status (PO 2026-06-28 결정 5):
+            # verified/claimed 2종만 (★ 추가 가드 — 셋 이상 정의 안 함).
+            # 의뢰서 verbatim: 검증된 사실 vs claim 노드 경유 주장된 연결.
+            # STELLAR (M3-2b) 가 이 값에 따라 실선/점선 결정.
+            #
+            #   verified = ACTION/MEASUREMENT fact (검증된 SPO 관계)
+            #   claimed  = CLAIM fact 의 related_entity_uids (주장된 연결)
+            "link_status": {"type": "keyword"},
             # M3-1 canonical-layer apply — fact provenance after entity merge.
             # When a fact's subject_uid/object was rewritten to point at a
             # canonical target, this records the original object_uid + merge

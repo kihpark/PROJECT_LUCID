@@ -536,6 +536,22 @@ def _extract_related_entity_uids(
     return resolved
 
 
+def _determine_link_status(fact_type: str | None) -> str:
+    """fact_type → link_status (PO 2026-06-28 결정 5: verified/claimed 2종만).
+
+    ★ 추가 가드: 다른 값 정의 안 함 — claim 만 'claimed', 나머지 (action/
+    measurement/None/unknown) 는 모두 'verified' 로 통합. legacy fact
+    (fact_type 누락) 도 default action 으로 fall-through 하므로 verified.
+
+    ★ provenance 게이트 (P2 가 구조에 박힘): CLAIM 의 related_entity_uids
+    array 는 검증된 사실이 아니라 claim 노드 경유 "주장된 연결" —
+    STELLAR (M3-2b) 가 이 값 보고 점선/실선을 결정한다.
+    """
+    if fact_type == "claim":
+        return "claimed"
+    return "verified"
+
+
 def _serialize_struct_fact(
     f: StructureFact,
     uid_map: dict[str, str] | None = None,
@@ -699,6 +715,12 @@ def _serialize_struct_fact(
     # recall facet / count 에 영향 없음. fact_type 분기 없이 동일하게
     # 직렬화한다 (단순성 — 분기 = 미래 버그).
     d["related_entity_uids"] = _extract_related_entity_uids(f, uid_map)
+    # m32a-stage4-link-status (PO 2026-06-28 결정 5): provenance 게이트 의
+    # 데이터 표현. verified = ACTION/MEASUREMENT (검증된 SPO), claimed =
+    # CLAIM (주장된 연결). STELLAR 가 이 값에 따라 실선/점선을 결정한다.
+    # ★ 추가 가드 — verified/claimed 2종만. legacy fact (fact_type 누락) 는
+    # default 'action' 으로 fall-through 하므로 verified 가 자연 결과.
+    d["link_status"] = _determine_link_status(d.get("fact_type"))
     # feat/spo-decide-payload-wire (PO 2026-06-23): propagate the
     # corrected canonical surface from `match_per_object` so the
     # Decide UI sees the brand-canonical / claim-recovered form (not
