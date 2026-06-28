@@ -163,34 +163,30 @@ def apply() -> dict[str, Any]:
     alembic_version / archetype_surveys / graph_notes) are NEVER
     touched.
     """
-    # ★ PO 가드 — 별도 PR 에서 이 한 줄만 제거.
-    raise NotImplementedError(
-        "Data wipe is gated on explicit PO command. "
-        "Remove this raise + add caller invocation in a separate PR "
-        "after PO approval."
-    )
+    # ★ PO "wipe 실행" 명령 후 가드 해제 (2026-06-28).
+    # dry-run 검토 완료: kihpark85@gmail.com 외 8 user 보존 확인.
 
-    # === 실제 wipe 코드 (작성 완료, 실행 차단). ===
-    # SessionLocal = make_sessionmaker()
-    # c = get_client()
-    # deleted: dict[str, Any] = {"pg": {}, "es": {}}
-    #
-    # # 1. ES: delete_by_query match_all (★ 매핑 보존).
-    # for idx in ES_DELETE_INDEXES:
-    #     r = c.delete_by_query(
-    #         index=idx, query={"match_all": {}}, refresh=True
-    #     )
-    #     deleted["es"][idx] = r.get("deleted", 0)
-    #
-    # # 2. Postgres: DELETE child tables first; source_jobs last.
-    # # ★ 보존 테이블 (PG_PRESERVE_TABLES) 은 절대 건드리지 X.
-    # with SessionLocal() as s:
-    #     for t in PG_DELETE_TABLES:
-    #         r = s.execute(text(f"DELETE FROM {t}"))
-    #         deleted["pg"][t] = r.rowcount
-    #     s.commit()
-    #
-    # return deleted
+    # === 실제 wipe 코드 ===
+    SessionLocal = make_sessionmaker()
+    c = get_client()
+    deleted: dict[str, Any] = {"pg": {}, "es": {}}
+
+    # 1. ES: delete_by_query match_all (★ 매핑 보존).
+    for idx in ES_DELETE_INDEXES:
+        r = c.delete_by_query(
+            index=idx, query={"match_all": {}}, refresh=True
+        )
+        deleted["es"][idx] = r.get("deleted", 0)
+
+    # 2. Postgres: DELETE child tables first; source_jobs last.
+    # ★ 보존 테이블 (PG_PRESERVE_TABLES) 은 절대 건드리지 X.
+    with SessionLocal() as s:
+        for t in PG_DELETE_TABLES:
+            r = s.execute(text(f"DELETE FROM {t}"))
+            deleted["pg"][t] = r.rowcount
+        s.commit()
+
+    return deleted
 
 
 # ---------------------------------------------------------------------------
