@@ -1,44 +1,37 @@
 /**
- * M3-2c — StellarLeftPanel: left-panel filter bar for the Stellar view.
+ * fix/stellar-leftpanel-simplify — left panel reduced to ENTITY only.
  *
- * Surfaces four data-only filters that gate which nodes / links the
- * renderer receives. NONE of these filters touches the renderer's
- * visual style — per the 2026-06-28 PO correction:
+ * 2026-06-28 PO 명령: "좌패널 단순화 부탁".
+ * Direct quote precedent (dogfood): "노드 엔티티 별 구분이 제일 먼저
+ * 필요해 보임. ... 좌패널 복잡함."
  *
- *   ★ All facts = verified = solid lines (M3-2b consistency).
- *   ★ link_status is DATA METADATA ONLY — no opacity, no dashed
- *     lines, no color change derived from it.
- *   ★ CLAIM toggle off (top-right) HIDES claim nodes (filter out),
- *     NOT a visual dim. The link_status filter here is the same
- *     kind of HIDE — drops links from the data set, never restyles
- *     the survivors.
+ * Drastic simplification: ENTITY 토글 (WHO / WHAT / WHERE) 만 남기고
+ * 옛 fact_type / as_of / link_status 섹션은 제거. 데이터 레이어 자체
+ * (link_status, fact_type, as_of 필드) 는 변경 없음 — 좌패널 UI 만
+ * 단순화된다. CLAIM 토글 (우상단) 이 fact_type 분기를 이미 담당하고,
+ * as_of / link_status 는 사용자 가치가 낮아 PO 가 명시적으로 잘라냈다.
  *
- * Filters rendered:
- *   1. Entity bucket — WHO / WHAT / WHERE checkboxes.
- *   2. fact_type    — action / claim / measurement checkboxes.
- *   3. as_of range  — from / to date inputs (measurement-shaped).
- *   4. link_status  — all / verified / claimed select (★ data only).
+ * Phase 2 (옵션): 필요 시 "고급 필터" accordion 으로 재도입 가능. 다만
+ * 이번 PR scope 밖.
  *
- * The parent (StellarView) owns the state; this component is a
- * controlled render surface so the filter logic stays colocated
- * with the activeData → filteredData useMemo.
+ * Rendered surface:
+ *   1. ENTITY — WHO / WHAT / WHERE 체크박스 (M3-2b 색 어휘와 1:1 매칭).
+ *
+ * 디자인 noise (옛 fact_type / as_of / link_status) 가 사라지면서
+ * 좌패널은 한 번 보고 직관적으로 이해할 수 있는 단일 의도 surface 가
+ * 된다 (PO 단순화 원칙).
  */
 
 export type EntityBucket = 'who' | 'what' | 'where';
+// 옛 타입 alias 보존 — StellarView 가 데이터 필터 (CLAIM 토글, link_status
+// metadata) 에서 계속 쓸 수 있도록 export 만 남긴다. 좌패널 UI 에는 더 이상
+// 안 보임.
 export type FactTypeFilter = 'action' | 'claim' | 'measurement';
 export type LinkStatusFilter = 'all' | 'verified' | 'claimed';
 
 export interface StellarLeftPanelProps {
   entityBuckets: Record<EntityBucket, boolean>;
   onEntityBucketChange: (bucket: EntityBucket, checked: boolean) => void;
-  factTypes: Record<FactTypeFilter, boolean>;
-  onFactTypeChange: (factType: FactTypeFilter, checked: boolean) => void;
-  asOfFrom: string;
-  asOfTo: string;
-  onAsOfFromChange: (v: string) => void;
-  onAsOfToChange: (v: string) => void;
-  linkStatus: LinkStatusFilter;
-  onLinkStatusChange: (v: LinkStatusFilter) => void;
 }
 
 const PANEL_BG = 'rgba(12,19,22,0.92)';
@@ -46,7 +39,6 @@ const PANEL_BORDER = '#1c272b';
 const ACCENT = '#3fe0c6';
 const TEXT_BODY = '#cdd9da';
 const TEXT_DIM = '#647479';
-const TEXT_PRIMARY = '#eaf1f2';
 
 const sectionHeaderStyle: React.CSSProperties = {
   color: TEXT_DIM,
@@ -67,29 +59,10 @@ const rowStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-const inputStyle: React.CSSProperties = {
-  background: 'rgba(13,20,23,0.85)',
-  border: `1px solid ${PANEL_BORDER}`,
-  borderRadius: 6,
-  color: TEXT_PRIMARY,
-  fontSize: 12,
-  padding: '6px 8px',
-  outline: 'none',
-  width: '100%',
-  fontFamily: 'Pretendard, sans-serif',
-  colorScheme: 'dark',
-};
-
 const ENTITY_BUCKET_LABEL: Record<EntityBucket, string> = {
   who: 'WHO · 사람/조직',
   what: 'WHAT · 개념/사건',
   where: 'WHERE · 장소',
-};
-
-const FACT_TYPE_LABEL: Record<FactTypeFilter, string> = {
-  action: 'action · 행위',
-  claim: 'claim · 발언',
-  measurement: 'measurement · 수치',
 };
 
 export function StellarLeftPanel(props: StellarLeftPanelProps): React.ReactElement {
@@ -101,7 +74,7 @@ export function StellarLeftPanel(props: StellarLeftPanelProps): React.ReactEleme
         top: 260,
         left: 16,
         zIndex: 10,
-        width: 260,
+        width: 220,
         padding: '14px 14px 16px',
         borderRadius: 12,
         background: PANEL_BG,
@@ -119,7 +92,7 @@ export function StellarLeftPanel(props: StellarLeftPanelProps): React.ReactEleme
         <div style={{ ...sectionHeaderStyle, color: ACCENT }}>FILTER · 좌패널</div>
       </div>
 
-      {/* Section 1 — Entity bucket */}
+      {/* Section 1 — Entity bucket (★ 유일하게 남은 섹션). */}
       <div>
         <div style={sectionHeaderStyle}>ENTITY</div>
         {(Object.keys(ENTITY_BUCKET_LABEL) as EntityBucket[]).map((bucket) => (
@@ -134,67 +107,6 @@ export function StellarLeftPanel(props: StellarLeftPanelProps): React.ReactEleme
             <span>{ENTITY_BUCKET_LABEL[bucket]}</span>
           </label>
         ))}
-      </div>
-
-      {/* Section 2 — fact_type */}
-      <div>
-        <div style={sectionHeaderStyle}>FACT TYPE</div>
-        {(Object.keys(FACT_TYPE_LABEL) as FactTypeFilter[]).map((ft) => (
-          <label key={ft} style={rowStyle}>
-            <input
-              type="checkbox"
-              data-testid={`stellar-filter-fact-type-${ft}`}
-              checked={props.factTypes[ft]}
-              onChange={(e) => props.onFactTypeChange(ft, e.target.checked)}
-              style={{ accentColor: ACCENT }}
-            />
-            <span>{FACT_TYPE_LABEL[ft]}</span>
-          </label>
-        ))}
-      </div>
-
-      {/* Section 3 — as_of date range */}
-      <div>
-        <div style={sectionHeaderStyle}>AS_OF · 시점</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: TEXT_DIM }}>
-            <span style={{ width: 32 }}>from</span>
-            <input
-              type="date"
-              data-testid="stellar-filter-as-of-from"
-              value={props.asOfFrom}
-              onChange={(e) => props.onAsOfFromChange(e.target.value)}
-              style={inputStyle}
-            />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: TEXT_DIM }}>
-            <span style={{ width: 32 }}>to</span>
-            <input
-              type="date"
-              data-testid="stellar-filter-as-of-to"
-              value={props.asOfTo}
-              onChange={(e) => props.onAsOfToChange(e.target.value)}
-              style={inputStyle}
-            />
-          </label>
-        </div>
-      </div>
-
-      {/* Section 4 — link_status. ★ DATA-ONLY (2026-06-28 PO correction).
-        * MUST NOT bind to any visual style. The select changes what
-        * the renderer sees, never how the renderer draws it. */}
-      <div>
-        <div style={sectionHeaderStyle}>LINK STATUS · 데이터만</div>
-        <select
-          data-testid="stellar-filter-link-status"
-          value={props.linkStatus}
-          onChange={(e) => props.onLinkStatusChange(e.target.value as LinkStatusFilter)}
-          style={inputStyle}
-        >
-          <option value="all">all · 전부</option>
-          <option value="verified">verified · 확정</option>
-          <option value="claimed">claimed · 주장</option>
-        </select>
       </div>
     </div>
   );

@@ -16,19 +16,13 @@
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  generateSyntheticGraph,
-  EDGE_COLORS,
-  type EdgeType,
-} from '@/lib/syntheticGraph';
+import { generateSyntheticGraph } from '@/lib/syntheticGraph';
 import type { StellarGraphData, StellarNode } from '@/lib/syntheticGraph';
 import { emptyStellarGraph, loadRealStellarGraph } from '@/lib/stellarRealAdapter';
 import { predicateLabel } from '@/lib/predicateLabels';
 import {
   StellarLeftPanel,
   type EntityBucket,
-  type FactTypeFilter,
-  type LinkStatusFilter,
 } from './StellarLeftPanel';
 // M3-2d interactions — single SPO hover card + entity card + edge facts list.
 // ★ PO 의뢰서 verbatim. 중복 오버레이 0.
@@ -565,17 +559,14 @@ function StatusPill({
 }
 
 // ---------------------------------------------------------------------------
-// B-62-v1 — edge type legend (top-left). In synthetic mode the four
-// relation types are colour-coded so the user knows what they're looking
-// at. In real mode we only have entity-link edges today (single accent).
+// fix/stellar-remove-old-edge-panel - B-62-v1's EdgeLegend (synthetic
+// "EDGE / 관계" key + real-mode "엔티티 링크" single-line) was
+// removed when M3-2c StellarLeftPanel arrived; the dead EdgeLegend
+// function + its EDGE_LABEL_KO map are now cleaned up too so the build
+// stays warning-free (PO 2026-06-28 좌패널 단순화 작업의 부수 정리).
+// M3-2b ENTITY_COLORS + edgeStyleFor remain the single visual-vocab
+// source for both modes; nothing references EDGE_LABEL_KO any more.
 // ---------------------------------------------------------------------------
-
-const EDGE_LABEL_KO: Record<EdgeType, string> = {
-  supports: '뒷받침',
-  elaborates: '부연',
-  causes: '원인',
-  contradicts: '반박',
-};
 
 // ---------------------------------------------------------------------------
 // B-62-search-legibility — top-left search bar.
@@ -712,71 +703,6 @@ function SearchBar({
   );
 }
 
-function EdgeLegend({ mode }: { mode: StellarSource }) {
-  return (
-    <div
-      data-testid="stellar-edge-legend"
-      style={{
-        position: 'absolute',
-        // B-62-search-legibility — bumped down so the new SearchBar at
-        // top:16 left:16 has clearance. Same column, just stacks below.
-        top: 80,
-        left: 16,
-        zIndex: 10,
-        padding: '10px 12px',
-        borderRadius: 12,
-        background: PANEL_BG,
-        border: `1px solid ${PANEL_BORDER}`,
-        color: TEXT_BODY,
-        fontSize: 11,
-        letterSpacing: '0.04em',
-        fontFamily: 'JetBrains Mono, monospace',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        backdropFilter: 'blur(8px)',
-      }}
-    >
-      <div style={{ color: TEXT_DIM, fontSize: 10, marginBottom: 2 }}>
-        EDGE · 관계
-      </div>
-      {mode === 'synthetic' ? (
-        (Object.keys(EDGE_LABEL_KO) as EdgeType[]).map((t) => (
-          <div
-            key={t}
-            data-testid={`stellar-edge-legend-${t}`}
-            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-          >
-            <span
-              style={{
-                width: 12,
-                height: 2,
-                background: EDGE_COLORS[t],
-                display: 'inline-block',
-                boxShadow: `0 0 6px ${EDGE_COLORS[t]}`,
-              }}
-            />
-            <span>{EDGE_LABEL_KO[t]}</span>
-          </div>
-        ))
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              width: 12,
-              height: 2,
-              background: ACCENT,
-              display: 'inline-block',
-              boxShadow: `0 0 6px ${ACCENT}`,
-            }}
-          />
-          <span>엔티티 링크</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export interface StellarViewProps {
   /** Test-mode override: swap the renderer for a mock component. The
    *  vitest jsdom environment can't run three.js. */
@@ -839,22 +765,15 @@ export function StellarView(props: StellarViewProps = {}) {
   // verified links) is the default surface.
   const [showClaims, setShowClaims] = useState(false);
 
-  // M3-2c — left-panel filters. All four are data-only filters;
-  // none of them touches the renderer's visual style (line style,
-  // opacity, color). This is the 2026-06-28 correction in code form.
+  // fix/stellar-leftpanel-simplify (2026-06-28 PO) — left-panel reduced
+  // to ENTITY only. Old fact_type / as_of / link_status state removed
+  // (the UI no longer surfaces them). Data fields on nodes/links are
+  // preserved untouched — this is a UI-only simplification.
   const [entityBuckets, setEntityBuckets] = useState<Record<EntityBucket, boolean>>({
     who: true,
     what: true,
     where: true,
   });
-  const [factTypes, setFactTypes] = useState<Record<FactTypeFilter, boolean>>({
-    action: true,
-    claim: true,
-    measurement: true,
-  });
-  const [asOfFrom, setAsOfFrom] = useState<string>('');
-  const [asOfTo, setAsOfTo] = useState<string>('');
-  const [linkStatusFilter, setLinkStatusFilter] = useState<LinkStatusFilter>('all');
   // B-62-clear-focus-home-lookat — monotonic counter, bumped whenever
   // the user explicitly leaves a focus subgraph (× close / Esc /
   // source toggle). The renderer reads it as a token to ease the
@@ -937,6 +856,9 @@ export function StellarView(props: StellarViewProps = {}) {
     // CLAIM toggle: OFF → hide claim nodes + 'claimed' links entirely.
     // ★ This is HIDE (filter out), NOT a visual dim — the 2026-06-28
     // PO correction explicitly rejected opacity/blur for the toggle.
+    // ★ link_status / fact_type FIELDS on the data are preserved
+    // (data-layer untouched per fix/stellar-leftpanel-simplify directive);
+    // only the UI filters have been simplified away.
     if (!showClaims) {
       nodes = nodes.filter((n) => (n.fact_type ?? 'action') !== 'claim');
       links = links.filter((l) => (l.link_status ?? 'verified') !== 'claimed');
@@ -944,7 +866,8 @@ export function StellarView(props: StellarViewProps = {}) {
 
     // Entity-type bucket filter (WHO / WHAT / WHERE). undefined
     // entity_type matches every bucket so legacy data survives unless
-    // the user explicitly unchecks every bucket.
+    // the user explicitly unchecks every bucket. ★ 좌패널의 유일하게
+    // 남은 데이터 필터.
     const allBucketsOff =
       !entityBuckets.who && !entityBuckets.what && !entityBuckets.where;
     if (!allBucketsOff && !(entityBuckets.who && entityBuckets.what && entityBuckets.where)) {
@@ -957,36 +880,6 @@ export function StellarView(props: StellarViewProps = {}) {
       });
     } else if (allBucketsOff) {
       nodes = [];
-    }
-
-    // fact_type filter (action / claim / measurement). undefined
-    // fact_type is treated as 'action' (the historical default).
-    const allFactTypesOff = !factTypes.action && !factTypes.claim && !factTypes.measurement;
-    if (allFactTypesOff) {
-      nodes = [];
-    } else if (!(factTypes.action && factTypes.claim && factTypes.measurement)) {
-      nodes = nodes.filter((n) => {
-        const ft = (n.fact_type ?? 'action') as FactTypeFilter;
-        return factTypes[ft] === true;
-      });
-    }
-
-    // as_of date range filter. Only applies to nodes that have an
-    // as_of string (measurement-shaped). Other nodes are kept.
-    if (asOfFrom || asOfTo) {
-      nodes = nodes.filter((n) => {
-        if (!n.as_of) return true;
-        if (asOfFrom && n.as_of < asOfFrom) return false;
-        if (asOfTo && n.as_of > asOfTo) return false;
-        return true;
-      });
-    }
-
-    // link_status filter — ★ DATA FILTER ONLY (★ 2026-06-28 PO correction:
-    // MUST NOT bind to visual style). Drops links whose link_status
-    // doesn't match. Undefined link_status = treated as 'verified'.
-    if (linkStatusFilter !== 'all') {
-      links = links.filter((l) => (l.link_status ?? 'verified') === linkStatusFilter);
     }
 
     // Drop links that point at a node we filtered out.
@@ -1006,7 +899,7 @@ export function StellarView(props: StellarViewProps = {}) {
     }
 
     return { nodes, links, clusters: activeData.clusters };
-  }, [activeData, showClaims, entityBuckets, factTypes, asOfFrom, asOfTo, linkStatusFilter]);
+  }, [activeData, showClaims, entityBuckets]);
 
   const handleToggle = useCallback((next: StellarSource) => {
     setSource(next);
@@ -1331,16 +1224,6 @@ export function StellarView(props: StellarViewProps = {}) {
         onEntityBucketChange={(b, c) =>
           setEntityBuckets((prev) => ({ ...prev, [b]: c }))
         }
-        factTypes={factTypes}
-        onFactTypeChange={(f, c) =>
-          setFactTypes((prev) => ({ ...prev, [f]: c }))
-        }
-        asOfFrom={asOfFrom}
-        asOfTo={asOfTo}
-        onAsOfFromChange={setAsOfFrom}
-        onAsOfToChange={setAsOfTo}
-        linkStatus={linkStatusFilter}
-        onLinkStatusChange={setLinkStatusFilter}
       />
       {/* B-62-search-legibility — search wires straight into handleClick
        *  so selection enters the existing focus mode (camera fly-to from
@@ -1348,9 +1231,9 @@ export function StellarView(props: StellarViewProps = {}) {
       <SearchBar data={filteredData} onSelect={handleClick} />
       {/* fix/stellar-remove-old-edge-panel (PO 2026-06-28):
        *   옛 EdgeLegend ("EDGE · 관계" / "엔티티 링크") 폐기.
-       *   M3-2c StellarLeftPanel 가 (entity/fact_type/as_of/link_status)
-       *   필터를 모두 담당. M3-2b 의 ENTITY_COLORS + edgeStyleFor 가
-       *   시각 어휘 단일 source. 옛 panel 잔존은 PO 화면 confusing. */}
+       *   fix/stellar-leftpanel-simplify (2026-06-28 PO 명령): 좌패널은
+       *   ENTITY 토글 만 담당. fact_type 분기는 우상단 CLAIM 토글이,
+       *   M3-2b 의 ENTITY_COLORS + edgeStyleFor 가 시각 어휘를 담는다. */}
 
       {realIsEmpty ? <ColdStartHint /> : null}
 

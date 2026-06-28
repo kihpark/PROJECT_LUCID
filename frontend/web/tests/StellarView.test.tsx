@@ -489,13 +489,12 @@ describe('StellarView', () => {
     expect((lastRendererProps.current.viewResetTick ?? 0)).toBe(before + 1);
   });
 
-  it('edge legend shows the 4 relation types in synthetic mode', () => {
+  // fix/stellar-remove-old-edge-panel - EdgeLegend was removed from
+  // the StellarView JSX; this test is obsolete and kept as a skipped
+  // marker so the history reads cleanly.
+  it.skip('edge legend shows the 4 relation types in synthetic mode (legacy - EdgeLegend removed)', () => {
     render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
     expect(screen.getByTestId('stellar-edge-legend')).toBeInTheDocument();
-    expect(screen.getByTestId('stellar-edge-legend-supports')).toBeInTheDocument();
-    expect(screen.getByTestId('stellar-edge-legend-elaborates')).toBeInTheDocument();
-    expect(screen.getByTestId('stellar-edge-legend-causes')).toBeInTheDocument();
-    expect(screen.getByTestId('stellar-edge-legend-contradicts')).toBeInTheDocument();
   });
 
   it('source toggle resets focus + history (no stale focus across modes)', async () => {
@@ -1216,49 +1215,40 @@ describe('StellarView', () => {
       expect(ids).toContain('loc-1');  // location → where → still shown
     });
 
-    it('fact_type filter: unchecking action hides action nodes', () => {
+    // fix/stellar-leftpanel-simplify (2026-06-28 PO) - left-panel reduced
+    // to ENTITY only. fact_type UI filter removed; the data field is
+    // preserved on nodes (and still drives the CLAIM toggle path) but no
+    // longer carries its own left-panel control.
+    it('fact_type left-panel control is REMOVED (PO 2026-06-28 simplify)', () => {
       render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
-      const action = screen.getByTestId('stellar-filter-fact-type-action') as HTMLInputElement;
-      fireEvent.click(action);
-      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
-      expect(ids).not.toContain('a-1');
-      expect(ids).not.toContain('loc-1');
-      expect(ids).toContain('m-1');
+      expect(screen.queryByTestId('stellar-filter-fact-type-action')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('stellar-filter-fact-type-claim')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('stellar-filter-fact-type-measurement')).not.toBeInTheDocument();
     });
 
-    it('as_of filter: from-date excludes measurements before the cutoff', () => {
+    // fix/stellar-leftpanel-simplify - as_of UI filter removed (data
+    // field preserved on nodes for tooltip / cards).
+    it('as_of left-panel control is REMOVED (PO 2026-06-28 simplify)', () => {
       render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
-      // Set "from" past the measurement's as_of (2026-03-01).
-      const from = screen.getByTestId('stellar-filter-as-of-from') as HTMLInputElement;
-      fireEvent.change(from, { target: { value: '2026-06-01' } });
-      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
-      expect(ids).not.toContain('m-1');
-      // Non-as_of nodes are kept.
-      expect(ids).toContain('a-1');
+      expect(screen.queryByTestId('stellar-filter-as-of-from')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('stellar-filter-as-of-to')).not.toBeInTheDocument();
     });
 
-    it('★ link_status filter is DATA-ONLY (no visual style binding, 2026-06-28 PO correction)', () => {
-      // Turn on claims so the claimed link is in scope.
+    // fix/stellar-leftpanel-simplify - link_status UI filter removed.
+    // The data field (link.link_status) STILL gates the CLAIM toggle's
+    // 'claimed' link-hide path, but it no longer has its own select.
+    it('★ link_status left-panel control is REMOVED; data field still preserved on links (2026-06-28 PO simplify)', () => {
       render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      // The left-panel control is gone.
+      expect(screen.queryByTestId('stellar-filter-link-status')).not.toBeInTheDocument();
+      // BUT link_status is still preserved on the link DATA (used by
+      // the CLAIM toggle path). Flip CLAIM on so claimed links surface.
       fireEvent.click(screen.getByTestId('stellar-claim-toggle'));
-      let links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
+      const links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
       expect(links.some((l) => l.link_status === 'verified')).toBe(true);
       expect(links.some((l) => l.link_status === 'claimed')).toBe(true);
-      // Apply link_status = 'verified' filter.
-      const sel = screen.getByTestId('stellar-filter-link-status') as HTMLSelectElement;
-      fireEvent.change(sel, { target: { value: 'verified' } });
-      links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
-      // Claimed links removed from the data. ★ NO opacity / no dashed
-      // style change anywhere — the renderer simply never sees them.
-      expect(links.every((l) => (l.link_status ?? 'verified') === 'verified')).toBe(true);
-      // Verified links carry NO special visual marker on the surviving
-      // link object — link_status remains pure data metadata.
-      const verifiedLink = links.find((l) => l.link_status === 'verified') as any;
-      expect(verifiedLink).toBeTruthy();
-      // The renderer prop bag must contain no opacity / dashed key
-      // that derives from link_status. (The mock renderer records the
-      // full props; assert nothing in it carries a link-status visual
-      // override.)
+      // ★ No visual style key derived from link_status leaks to the
+      // renderer (M3-2b/2c/2d invariant preserved).
       expect(lastRendererProps.current).not.toHaveProperty('linkStatusOpacity');
       expect(lastRendererProps.current).not.toHaveProperty('linkStatusDashed');
     });
@@ -1404,8 +1394,12 @@ describe('M3-2e regression guard - interactions', () => {
     }
     render(<StellarView renderer={MockRenderer} syntheticBuilder={builder} />);
     expect(screen.getByTestId('stellar-filter-entity-who')).toBeInTheDocument();
-    expect(screen.getByTestId('stellar-filter-fact-type-action')).toBeInTheDocument();
-    expect(screen.getByTestId('stellar-filter-link-status')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-filter-entity-what')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-filter-entity-where')).toBeInTheDocument();
+    // fix/stellar-leftpanel-simplify (2026-06-28 PO) - fact_type +
+    // link_status left-panel controls removed; only ENTITY survives.
+    expect(screen.queryByTestId('stellar-filter-fact-type-action')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('stellar-filter-link-status')).not.toBeInTheDocument();
     const claimToggle = screen.getByTestId('stellar-claim-toggle');
     expect(claimToggle.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(screen.getByTestId('mock-fire-click'));
