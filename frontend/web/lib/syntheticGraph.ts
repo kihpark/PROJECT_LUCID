@@ -193,6 +193,16 @@ export interface StellarLink {
    *  to any visual style. Legacy links leave it undefined → counted as
    *  verified for the toggle. */
   link_status?: 'verified' | 'claimed' | null;
+  /** fix/m3-2b-wiring — M3-2b visual-vocab kind for the renderer.
+   *  'action' = action / measurement fact (teal); 'claim_related' =
+   *  CLAIM-related edge (amber). Synthetic links leave it undefined →
+   *  the renderer falls back to the EDGE_COLORS[type] path. */
+  kind?: 'action' | 'claim_related';
+  /** fix/m3-2b-wiring — number of underlying facts joining the same
+   *  subject/object pair. Drives edge width (log scale) in the M3-2b
+   *  edgeStyle helper. Synthetic links leave it undefined → renderer
+   *  falls back to the corroboration-driven width path. */
+  fact_count?: number;
 }
 
 export interface StellarGraphData {

@@ -32,6 +32,18 @@ import {
   type StellarLink,
   type StellarNode,
 } from '@/lib/syntheticGraph';
+// fix/m3-2b-wiring — M3-2b visual vocabulary. Until this import the
+// renderer never consumed any of the M3-2b helpers — PO repro: "실제로
+// STELLAR REAL 갔을때 이전 버전과 뭐가 달라진지 하나도 모르겠다". The
+// real-mode branches in nodeColor / nodeSize / linkColor / linkWidth
+// below switch on these so entity_type / kind / fact_count actually
+// drive what the user sees.
+import {
+  CLAIM_NODE_COLOR,
+  STELLAR_ACCENT,
+  colorForEntityType,
+} from '@/lib/stellarColors';
+import { edgeStyle, nodeRadius } from '@/lib/stellarEdgeStyle';
 
 // react-force-graph-3d is a client-only module. Importing it directly from
 // page code makes Next try to evaluate three.js on the server at build time
@@ -1064,10 +1076,19 @@ export function StellarGraph(props: StellarGraphProps) {
       // B-62-demo-clusters-edges — corroboration modulates the alpha
       // channel in synthetic mode. score 0.05 → near-invisible
       // background filament, score 1.0 → bright constellation edge.
-      // Real mode (no score) keeps the flat accent.
+      // fix/m3-2b-wiring — real mode now consults link.kind (action vs
+      // claim_related) so edges visibly distinguish 행위 (teal) from
+      // 발화 (amber). ★ PO 정정 가드: solid color only, opacity 1 —
+      // the edgeStyle helper never returns dashed/translucent for any
+      // link_status value. Legacy links without kind fall back to the
+      // pre-M3-2b flat teal accent.
       let baseColor: string;
       if (mode === 'real') {
-        baseColor = 'rgba(63,224,198,0.55)';
+        if (link.kind) {
+          baseColor = edgeStyle(link.kind, link.fact_count ?? 1).color;
+        } else {
+          baseColor = 'rgba(63,224,198,0.55)';
+        }
       } else {
         const typeColor = EDGE_COLORS[link.type] ?? '#ffffff';
         const score =
@@ -1112,7 +1133,13 @@ export function StellarGraph(props: StellarGraphProps) {
   // bright constellation pops on both colour AND geometry channels.
   const linkWidth = useCallback(
     (link: StellarLink): number => {
-      if (mode === 'real') return 0.6;
+      // fix/m3-2b-wiring — real mode now drives width from the M3-2b
+      // edgeStyle helper (log scale on fact_count, clamped [0.8, 5.0]).
+      // Legacy real-mode links without kind keep the flat 0.6 floor.
+      if (mode === 'real') {
+        if (link.kind) return edgeStyle(link.kind, link.fact_count ?? 1).width;
+        return 0.6;
+      }
       const score =
         typeof link.corroborationScore === 'number'
           ? Math.max(0, Math.min(1, link.corroborationScore))
@@ -1139,8 +1166,26 @@ export function StellarGraph(props: StellarGraphProps) {
   // to (1,1,1) — peaks roll off, peaks stay identifiable.
   const nodeColor = useCallback(
     (node: StellarNode): string => {
-      const base =
-        CLUSTER_PALETTE[(node.cluster ?? 0) % CLUSTER_PALETTE.length] ?? ACCENT;
+      // fix/m3-2b-wiring — real-mode base now derives from the M3-2b
+      // entity-type palette (WHO teal / WHAT amber / EVENT violet /
+      // WHERE slate) instead of the cluster-index palette. CLAIM nodes
+      // (fact_type === 'claim') get the dedicated CLAIM_NODE_COLOR
+      // (또렷 teal, opacity 1 — never dimmed per PO 정정 가드). Legacy
+      // real-mode nodes without an entity_type fall back to STELLAR_ACCENT.
+      // Synthetic mode keeps the cluster palette unchanged.
+      let base: string;
+      if (mode === 'real') {
+        if (node.fact_type === 'claim') {
+          base = CLAIM_NODE_COLOR;
+        } else if (node.entity_type) {
+          base = colorForEntityType(node.entity_type);
+        } else {
+          base = STELLAR_ACCENT;
+        }
+      } else {
+        base =
+          CLUSTER_PALETTE[(node.cluster ?? 0) % CLUSTER_PALETTE.length] ?? ACCENT;
+      }
       const vs = node.validationStrength ?? 0.5;
       // B-62-search-legibility — brightness floor 0.7. PO directive:
       // node luminance should sit clearly above the background-star
@@ -1183,7 +1228,7 @@ export function StellarGraph(props: StellarGraphProps) {
       if (neighborSet.has(node.id)) return lifted;
       return mixToDim(lifted, 0.18);
     },
-    [focusedId, neighborSet, selectedId],
+    [mode, focusedId, neighborSet, selectedId],
   );
 
   // B-62-v1-fix1 — node size derives from graph degree only. Hover scale
@@ -1213,7 +1258,17 @@ export function StellarGraph(props: StellarGraphProps) {
       // and hard to click while orbiting. Small graphs win up to a 5.0
       // floor; once the count crosses ~100 the floor falls back to the
       // established 2.0 so a dense galaxy doesn't smother the layout.
-      const base = Math.max(sizeFloor, 0.9 + Math.sqrt(importance));
+      //
+      // fix/m3-2b-wiring — real mode now drives base size from the
+      // M3-2b nodeRadius helper (log scale on degree, clamped [4, 24]).
+      // This makes "connected hubs" visibly bigger than "leaf" facts
+      // — the PO acceptance signal for the real graph's shape.
+      // ForceGraph3D's nodeVal is a *volume* hint (it sqrt's to a
+      // radius), so we keep parity with the dense-galaxy path by
+      // passing the same magnitude family.
+      const base = mode === 'real'
+        ? nodeRadius(importance)
+        : Math.max(sizeFloor, 0.9 + Math.sqrt(importance));
       // B-62-focus-select-actions — size mirrors the brightness tiers:
       //   focused 1.6 > selected 1.4 > highlighted 1.25 > distant 1.0
       // Selected sits clearly above highlighted on the geometry channel
@@ -1229,7 +1284,7 @@ export function StellarGraph(props: StellarGraphProps) {
       else if (focusedId !== null && neighborSet.has(node.id)) scale = 1.25;
       return base * scale;
     },
-    [focusedId, neighborSet, selectedId, sizeFloor],
+    [mode, focusedId, neighborSet, selectedId, sizeFloor],
   );
 
   // B-62-v1-fix1 — straight forward to the parent. We no longer hold a

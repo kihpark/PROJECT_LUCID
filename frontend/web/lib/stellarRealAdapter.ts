@@ -74,6 +74,21 @@ function pushFactAsNode(acc: NodeAccumulator, fact: RecallFact, clusterHint: num
   const object = displayObject(fact);
   const label = `${subject} · ${predicateLabel(fact.predicate, fact.predicate_label)} · ${object}`;
   const sourceCount = Math.max(1, fact.source_uids?.length ?? 1);
+  // fix/m3-2b-wiring — entity_type pass-through so the StellarGraph
+  // renderer (mode='real') can drive node color from ENTITY_COLORS.
+  // Backend fact rows may carry these optional fields; cast through a
+  // narrow shape so missing fields stay null (renderer falls back to
+  // STELLAR_ACCENT).
+  const factAny = fact as RecallFact & {
+    subject_entity_type?: string | null;
+    object_entity_type?: string | null;
+    entity_type?: string | null;
+  };
+  const subjectEntityType = factAny.subject_entity_type ?? null;
+  const objectEntityType = factAny.object_entity_type ?? null;
+  // Prefer the explicit subject_entity_type (the fact subject is what
+  // the node "stands for"); fall back to a generic entity_type field.
+  const entityType = subjectEntityType ?? factAny.entity_type ?? null;
   // B-62-v1 — "검증된 팩트일수록 빛난다" — source count drives the
   // emissive strength. 1 source ≈ 0.35 (visible but quiet), 3+ sources
   // saturate at 1.0 (full glow).
@@ -110,6 +125,13 @@ function pushFactAsNode(acc: NodeAccumulator, fact: RecallFact, clusterHint: num
     // cluster-focus path silently falls back to most_active.
     subject_uid: fact.subject_uid ?? null,
     object_uid: fact.object_value && UUID4_RE.test(fact.object_value) ? fact.object_value : null,
+    // fix/m3-2b-wiring — entity-type bucket for the visual vocabulary.
+    // ENTITY_COLORS keys: person / organization / group / product / resource
+    // / concept / knowledge / event / place. Lookup helper falls back to
+    // STELLAR_ACCENT for unknowns.
+    entity_type: entityType,
+    subject_entity_type: subjectEntityType,
+    object_entity_type: objectEntityType,
   });
 }
 
@@ -119,6 +141,14 @@ function linkBySubjectOverlap(acc: NodeAccumulator): void {
   // real backend, B-49 facets / B-48 entity-link expansion will replace
   // this stub. The spike's goal is "the user sees clusters", not
   // "the user sees the canonical graph topology".
+  //
+  // fix/m3-2b-wiring — each link carries the M3-2b visual-vocab metadata:
+  //   * kind       — 'action' (default) | 'claim_related' (when either
+  //                  endpoint is a CLAIM fact).
+  //   * fact_count — number of underlying facts joining the pair. The
+  //                  chain currently emits at most one edge per pair,
+  //                  so the count starts at 1; left in place for the
+  //                  log-scale width formula in edgeStyle.
   const bySubject = new Map<string, string[]>();
   for (const node of acc.byId.values()) {
     const arr = bySubject.get(node.subject) ?? [];
@@ -127,10 +157,19 @@ function linkBySubjectOverlap(acc: NodeAccumulator): void {
   }
   for (const ids of bySubject.values()) {
     for (let i = 1; i < ids.length; i += 1) {
+      const sourceId = ids[i - 1] as string;
+      const targetId = ids[i] as string;
+      const srcNode = acc.byId.get(sourceId);
+      const tgtNode = acc.byId.get(targetId);
+      // ★ M3-2b kind: CLAIM ↔ anything → 'claim_related'; otherwise 'action'.
+      const isClaimEdge =
+        (srcNode?.fact_type === 'claim') || (tgtNode?.fact_type === 'claim');
       acc.links.push({
-        source: ids[i - 1] as string,
-        target: ids[i] as string,
+        source: sourceId,
+        target: targetId,
         type: 'supports',
+        kind: isClaimEdge ? 'claim_related' : 'action',
+        fact_count: 1,
       });
     }
   }
