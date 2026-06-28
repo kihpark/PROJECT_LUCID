@@ -1078,7 +1078,7 @@ export function StellarGraph(props: StellarGraphProps) {
       // background filament, score 1.0 → bright constellation edge.
       // fix/m3-2b-wiring — real mode now consults link.kind (action vs
       // claim_related) so edges visibly distinguish 행위 (teal) from
-      // 발화 (amber). ★ PO 정정 가드: solid color only, opacity 1 —
+      // 발언 (amber). ★ PO 정정 가드: solid color only, opacity 1 —
       // the edgeStyle helper never returns dashed/translucent for any
       // link_status value. Legacy links without kind fall back to the
       // pre-M3-2b flat teal accent.

@@ -4,7 +4,7 @@
  * ★ 점선 폐기: 모든 fact (action/claim/measurement) = 실선.
  *   "누가 무엇을 주장했다" 도 검증된 fact. 점선·미검증·흐림 개념 0.
  *
- * 구분 = "행위 vs 발화" 성격 → 색·스타일로만.
+ * 구분 = "행위 vs 발언" 성격 → 색·스타일로만.
  *
  * Mapping table (entity type → display color):
  *   WHO    — person / organization / group               → teal/cyan

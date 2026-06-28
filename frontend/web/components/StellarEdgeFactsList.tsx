@@ -222,7 +222,7 @@ export function StellarEdgeFactsList({
                       textTransform: 'uppercase',
                     }}
                   >
-                    발화 · {MODALITY_KO[modality]}
+                    발언 · {MODALITY_KO[modality]}
                   </div>
                 ) : null}
                 {ft === 'claim' && !modality && f.speech_act ? (
@@ -235,7 +235,7 @@ export function StellarEdgeFactsList({
                       letterSpacing: '0.08em',
                     }}
                   >
-                    발화 · {f.speech_act}
+                    발언 · {f.speech_act}
                   </div>
                 ) : null}
 

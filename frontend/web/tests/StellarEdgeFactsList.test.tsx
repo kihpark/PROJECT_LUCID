@@ -152,6 +152,60 @@ describe('StellarEdgeFactsList render', () => {
     expect(styleV).toBe(styleC);
   });
 
+  // fix/terminology-unify-balhwa-balhweon — 용어 통일 회귀 가드.
+  // CLAIM row 의 modality / speech_act 라벨은 '발언' 으로 표기한다.
+  // 과거 '발화' 잔재가 되돌아오면 즉시 fail.
+  it('CLAIM modality row labels speech as 발언 (not 발화)', () => {
+    const a = makeNode({ id: 'A', subject: 'A' });
+    const b = makeNode({ id: 'B', subject: 'B' });
+    const facts: StellarNode[] = [
+      makeNode({
+        id: 'fc',
+        subject: 'A',
+        object: 'B',
+        fact_type: 'claim',
+        speech_act: 'assertion',
+      }),
+    ];
+    render(
+      <StellarEdgeFactsList
+        endpoints={{ a, b }}
+        allFacts={facts}
+        onClose={() => {}}
+      />,
+    );
+    const modalityRow = screen.getByTestId('stellar-edge-facts-row-modality');
+    expect(modalityRow.textContent).toContain('발언');
+    expect(modalityRow.textContent).toContain('단정');
+    // ★ 과거 표기 잔재 0.
+    expect(modalityRow.textContent).not.toContain('발화');
+  });
+
+  it('CLAIM speech_act fallback row labels speech as 발언 (not 발화)', () => {
+    const a = makeNode({ id: 'A', subject: 'A' });
+    const b = makeNode({ id: 'B', subject: 'B' });
+    const facts: StellarNode[] = [
+      makeNode({
+        id: 'fc',
+        subject: 'A',
+        object: 'B',
+        fact_type: 'claim',
+        // unknown modality keyword → falls through to raw speech_act row.
+        speech_act: 'declare',
+      }),
+    ];
+    render(
+      <StellarEdgeFactsList
+        endpoints={{ a, b }}
+        allFacts={facts}
+        onClose={() => {}}
+      />,
+    );
+    const row = screen.getByTestId('stellar-edge-facts-row-speech-act');
+    expect(row.textContent).toContain('발언');
+    expect(row.textContent).not.toContain('발화');
+  });
+
   it('close button fires onClose', () => {
     const a = makeNode({ id: 'A', subject: 'A' });
     const b = makeNode({ id: 'B', subject: 'B' });
