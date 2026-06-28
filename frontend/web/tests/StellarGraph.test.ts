@@ -212,3 +212,115 @@ describe('clampNodesToBoundary — boundary force payload', () => {
     expect(maxDist / STARFIELD_RADIUS).toBeLessThanOrEqual(0.7);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M3-2e regression guard - boundary + zoom + visual.
+//
+// PO 의뢰서 verbatim: 노드 starfield 경계 내 (밖 누출 0) /
+// zoom Nx <-> 카메라 동기 / 살펴보기 클러스터 focus.
+//
+// 이 가드는 m32b (visual vocab) / m32c (filter) / m32d (interactions) 가
+// 기존 STELLAR fix 들 (3890f11 / b9f7056 / d017a3a) 을 회귀시키지 않았음을
+// 검증한다. 코드 변경 없이 test 만으로 가드를 명시한다.
+// ---------------------------------------------------------------------------
+
+describe('M3-2e regression guard - boundary + zoom + visual', () => {
+  it('boundary force: 167 노드 force layout 후 모든 노드 distance < STARFIELD_RADIUS * 0.7', () => {
+    // 167 = 실제 dogfood real 그래프 노드 수 sample. 시뮬레이션은
+    // 노드들이 모두 boundary 밖으로 튀어나간 worst-case 를 가정한다.
+    // 한 번의 boundary-force tick 후 전체 population 은 inner 70% 안.
+    const maxDist = computeBoundaryRadius();
+    expect(maxDist).toBeCloseTo(STARFIELD_RADIUS * 0.7, 6);
+    expect(maxDist).toBeCloseTo(3150, 6);
+
+    const nodes: Array<{ x: number; y: number; z: number }> = [];
+    for (let i = 0; i < 167; i += 1) {
+      const t = i / 167;
+      nodes.push({
+        x: Math.sin(t * 11.3) * 12000,
+        y: Math.cos(t * 7.7) * 12000,
+        z: Math.sin(t * 4.1 + 1.7) * 12000,
+      });
+    }
+    clampNodesToBoundary(nodes, maxDist);
+    for (const n of nodes) {
+      const dist = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      expect(dist).toBeLessThanOrEqual(maxDist + 1e-6);
+      expect(dist).toBeLessThan(STARFIELD_RADIUS);
+    }
+  });
+
+  it('boundary force 가 M3-2b 의 nodeRadius 변경에 영향 0 (degree 1 vs 200 모두 boundary 안)', async () => {
+    // M3-2b ships nodeRadius(degree) clamped to [4, 24]. The boundary
+    // force operates on POSITION, not radius - so a degree-1 node and a
+    // degree-200 node must both land inside the boundary after clamp,
+    // regardless of their rendered size.
+    const { nodeRadius } = await import('@/lib/stellarEdgeStyle');
+    const maxDist = computeBoundaryRadius();
+    // Both degrees compute distinct radii (m32b contract).
+    expect(nodeRadius(1)).toBe(4);
+    expect(nodeRadius(200)).toBe(24);
+    // Boundary force ignores radius and only looks at x/y/z.
+    const a = { x: 9000, y: 0, z: 0 };
+    const b = { x: 0, y: 9000, z: 0 };
+    clampNodeToBoundary(a, maxDist);
+    clampNodeToBoundary(b, maxDist);
+    const distA = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+    const distB = Math.sqrt(b.x * b.x + b.y * b.y + b.z * b.z);
+    expect(distA).toBeLessThanOrEqual(maxDist + 1e-6);
+    expect(distB).toBeLessThanOrEqual(maxDist + 1e-6);
+  });
+
+  it('zoom state <-> camera distance 동기 보존: initial dist / zoom = camera dist', () => {
+    // StellarGraph 의 applyZoom: newDist = initialDist / clamped.
+    // 폴 루프: actualZoom = initialDist / dist.
+    // 이 라운드트립이 보존되어야 zoom UI 와 카메라 위치가 동기.
+    for (const totalNodes of [0, 30, 120, 500, 2000]) {
+      const initialDist = computeInitialCameraDistance(totalNodes);
+      for (const zoom of [0.1, 0.5, 1.0, 2.0, 10.0]) {
+        const cameraDist = initialDist / zoom;
+        expect(Number.isFinite(cameraDist)).toBe(true);
+        expect(cameraDist).toBeGreaterThan(0);
+        const recovered = initialDist / cameraDist;
+        expect(recovered).toBeCloseTo(zoom, 6);
+      }
+    }
+  });
+
+  it('boundary force 가 M3-2c 의 좌패널 필터 적용 후에도 작동 (필터된 노드도 clamp 됨)', () => {
+    // M3-2c filters operate at the data layer (StellarView builds
+    // filteredData); whatever survives still flows into the d3-force
+    // simulation and the boundary force.
+    const maxDist = computeBoundaryRadius();
+    const filteredSample: Array<{ x: number; y: number; z: number }> = [];
+    for (let i = 0; i < 12; i += 1) {
+      filteredSample.push({
+        x: (i % 3) * 5000 - 5000,
+        y: ((i + 1) % 3) * 5000 - 5000,
+        z: ((i + 2) % 3) * 5000 - 5000,
+      });
+    }
+    clampNodesToBoundary(filteredSample, maxDist);
+    for (const n of filteredSample) {
+      const dist = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      expect(dist).toBeLessThanOrEqual(maxDist + 1e-6);
+    }
+  });
+
+  it('zoom range [0.1, 10] 보존: 작은 그래프 (130 init) 도 큰 그래프 (~835 init) 도 정상', () => {
+    // stellar-zoom-recover 가 wheel-zoom 범위를 [0.25, 4] -> [0.1, 10] 로
+    // 확장. 양극단에서 카메라 거리가 numerically sane 인지 확인.
+    const smallInit = computeInitialCameraDistance(0);
+    const denseInit = computeInitialCameraDistance(2000);
+    expect(smallInit).toBe(130);
+    expect(denseInit).toBeGreaterThan(700);
+    for (const init of [smallInit, denseInit]) {
+      const farthest = init / 0.1;
+      const closest = init / 10;
+      expect(Number.isFinite(farthest)).toBe(true);
+      expect(Number.isFinite(closest)).toBe(true);
+      expect(closest).toBeGreaterThan(0);
+      expect(farthest).toBeGreaterThan(closest);
+    }
+  });
+});

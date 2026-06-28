@@ -1322,3 +1322,192 @@ describe('StellarView', () => {
   });
 
 });
+
+// ---------------------------------------------------------------------------
+// M3-2e regression guard - interactions (PO request verbatim).
+//
+// Guards specified:
+//   - cluster focus matches entity_uid (after M3-2d EntityCard)
+//   - single SPO card (no duplicate overlay)
+//   - M3-2b visual + M3-2c filters + M3-2d cards all work together
+//   - dashed/dim/grey regression guard (PO 2026-06-28 correction)
+//   - localStorage v2 migration preserved (no synthetic default leak)
+// ---------------------------------------------------------------------------
+
+describe('M3-2e regression guard - interactions', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem('lucid.stellar.source:migrated:v2', '1');
+    window.localStorage.setItem('lucid.stellar.source', 'synthetic');
+    lastRendererProps.current = null;
+    searchParamsRef.current = new URLSearchParams();
+  });
+
+  it('cluster focus matches entity_uid (after M3-2d EntityCard)', async () => {
+    const ENTITY = 'reg-uid-m32e-001';
+    searchParamsRef.current = new URLSearchParams('cluster=' + ENTITY);
+    function builder(): StellarGraphData {
+      return {
+        nodes: [
+          { id: 'fact-spine', label: 'spine', cluster: 0, weight: 1, degree: 12,
+            x: 0, y: 0, z: 0,
+            subject: 'X', predicate: 'states', object: 'Y',
+            subject_uid: ENTITY },
+          { id: 'fact-low', label: 'low', cluster: 0, weight: 1, degree: 1,
+            x: 0, y: 0, z: 0,
+            subject: 'X', predicate: 'states', object: 'Z',
+            subject_uid: ENTITY },
+          { id: 'unrelated', label: 'unrelated', cluster: 1, weight: 1, degree: 99,
+            x: 0, y: 0, z: 0,
+            subject: 'other', predicate: 'states', object: 'Q',
+            subject_uid: 'different-uid' },
+        ],
+        links: [],
+        clusters: ['c0', 'c1'],
+      };
+    }
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={builder} />);
+    await waitFor(() => {
+      expect(lastRendererProps.current.focusedId).toBe('fact-spine');
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('stellar-entity-card')).toBeInTheDocument();
+    });
+  });
+
+  it('single SPO card (no duplicate overlay): hover -> StellarHoverCard 1 element', () => {
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={fakeSyntheticBuilder} />);
+    fireEvent.click(screen.getByTestId('mock-fire-hover'));
+    const hoverCards = document.querySelectorAll('[data-testid="stellar-hover-card"]');
+    expect(hoverCards.length).toBe(1);
+    expect(screen.queryByTestId('stellar-hover-tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('stellar-node-label-pill')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('stellar-focus-panel')).not.toBeInTheDocument();
+  });
+
+  it('M3-2b visual vocab + M3-2c toggle + M3-2d card all work together', () => {
+    function builder(): StellarGraphData {
+      return {
+        nodes: [
+          { id: 'a-1', label: 'A', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+            subject: 'A', predicate: 'supports', object: 'X',
+            fact_type: 'action', entity_type: 'person' },
+          { id: 'a-2', label: 'A2', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+            subject: 'B', predicate: 'supports', object: 'Y',
+            fact_type: 'action', entity_type: 'person' },
+        ],
+        links: [
+          { source: 'a-1', target: 'a-2', type: 'supports', link_status: 'verified' },
+        ],
+        clusters: ['mixed'],
+      };
+    }
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={builder} />);
+    expect(screen.getByTestId('stellar-filter-entity-who')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-filter-fact-type-action')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-filter-link-status')).toBeInTheDocument();
+    const claimToggle = screen.getByTestId('stellar-claim-toggle');
+    expect(claimToggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    expect(screen.getByTestId('stellar-entity-card')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-fire-link-click'));
+    expect(screen.getByTestId('stellar-edge-facts-list')).toBeInTheDocument();
+    expect(screen.queryByTestId('stellar-entity-card')).not.toBeInTheDocument();
+  });
+
+  it('dashed/dim/grey regression guard (PO 2026-06-28 correction)', () => {
+    function builder(): StellarGraphData {
+      return {
+        nodes: [
+          { id: 'n1', label: 'N1', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+            subject: 'X', predicate: 'supports', object: 'Y',
+            fact_type: 'action' },
+          { id: 'n2', label: 'N2', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+            subject: 'X', predicate: 'states', object: 'Z',
+            fact_type: 'claim',
+            speaker_label: 'X', speech_act: 'assertion', content_claim: 'Z' },
+        ],
+        links: [
+          { source: 'n1', target: 'n2', type: 'supports', link_status: 'verified' },
+          { source: 'n2', target: 'n1', type: 'elaborates', link_status: 'claimed' },
+        ],
+        clusters: ['mixed'],
+      };
+    }
+    render(<StellarView renderer={MockRenderer} syntheticBuilder={builder} />);
+    fireEvent.click(screen.getByTestId('stellar-claim-toggle'));
+    const props = lastRendererProps.current as any;
+    expect(props).not.toHaveProperty('linkStatusOpacity');
+    expect(props).not.toHaveProperty('linkStatusDashed');
+    expect(props).not.toHaveProperty('linkStatusGrey');
+    expect(props).not.toHaveProperty('linkStatusColor');
+    expect(props).not.toHaveProperty('claimOpacity');
+    expect(props).not.toHaveProperty('hideClaimsViaOpacity');
+    const links = (props.data.links as Array<Record<string, unknown>>);
+    for (const l of links) {
+      expect(l).not.toHaveProperty('dashed');
+      expect(l).not.toHaveProperty('opacity');
+      expect(l).not.toHaveProperty('greyOut');
+      if ('link_status' in l) {
+        expect(['verified', 'claimed', null, undefined]).toContain(l.link_status);
+      }
+    }
+  });
+
+  it('localStorage v2 migration preserved (no synthetic default leak)', () => {
+    window.localStorage.removeItem('lucid.stellar.source');
+    window.localStorage.removeItem('lucid.stellar.source:migrated:v2');
+    window.localStorage.setItem('lucid.stellar.source', 'synthetic');
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [], links: [], clusters: [],
+    } satisfies StellarGraphData);
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    expect(window.localStorage.getItem('lucid.stellar.source:migrated:v2')).toBe('1');
+    expect(window.localStorage.getItem('lucid.stellar.source')).toBeNull();
+    expect(
+      screen.getByTestId('stellar-source-real').getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it('mode-switch resets focusedId (b9f7056 preserved)', async () => {
+    const realLoader = vi.fn().mockResolvedValue({
+      nodes: [], links: [], clusters: [],
+    } satisfies StellarGraphData);
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('mock-fire-click'));
+    expect(lastRendererProps.current.focusedId).toBe('fake-1');
+    expect(screen.getByTestId('stellar-entity-card')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('stellar-source-real'));
+    await waitFor(() => expect(realLoader).toHaveBeenCalled());
+    expect(lastRendererProps.current.focusedId).toBeNull();
+    expect(screen.queryByTestId('stellar-entity-card')).not.toBeInTheDocument();
+  });
+
+  it('pickClusterFocusNode 6-path resolver preserved (after M3-2d)', () => {
+    expect(typeof pickClusterFocusNode).toBe('function');
+    const data: StellarGraphData = {
+      nodes: [
+        { id: 'spine', label: 'spine', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+          subject: 'X', predicate: 'states', object: 'Y',
+          subject_uid: 'entity-A', degree: 12 },
+      ],
+      links: [],
+      clusters: ['c'],
+    };
+    expect(pickClusterFocusNode(data, 'entity-A')?.id).toBe('spine');
+    expect(pickClusterFocusNode(data, 'spine')?.id).toBe('spine');
+    expect(pickClusterFocusNode(data, 'most_active')?.id).toBe('spine');
+  });
+});
