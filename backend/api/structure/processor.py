@@ -491,6 +491,15 @@ def _serialize_struct_fact(
             and obj_val in uid_map
         ):
             d["object_value"] = uid_map[obj_val]
+        # m32a-stage1-speaker-uid-hotfix: speaker_uid is a CLAIM-only
+        # entity reference using the same LLM placeholder shape (obj-N)
+        # as subject_uid. Without this remap it leaks through to ES
+        # raw, breaking entity-graph fusion for CLAIM facts (the
+        # M3-2a discovery report measured 99/100 placeholder leak on
+        # live KS 4a3a8bb7). Mirror the subject_uid rewrite path.
+        speaker = d.get("speaker_uid")
+        if isinstance(speaker, str) and speaker in uid_map:
+            d["speaker_uid"] = uid_map[speaker]
     # B-62 structure-resolve + natural-spo-display: enrich the JSONB
     # fact with canonical fields so validate.py persists them via
     # insert_or_dedup_fact. The new map_predicate_to_type_and_label
