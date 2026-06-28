@@ -134,6 +134,42 @@ export interface StellarNode {
    *  hidden by accident. The renderer never reads this field — it is
    *  data-only, per the 2026-06-28 PO correction (no visual style). */
   entity_type?: string | null;
+  // M3-2d interactions — additional surface fields consumed by the
+  // single-SPO hover card + entity / edge fact-list panels.
+  //
+  // ★ Data-model v2 (PO 2026-06-28): CLAIM speech_act modality 3종
+  // (assertion / judgment / opinion). speech_act 값이 그대로 양태로
+  // 분류된다 — 단정 (assertion) / 판단 (judgment) / 의견 (opinion).
+  //
+  // ★ Stage 2 다항관계 (m32a-stage2-role-channel): action facts can
+  // attach additional participants as roles (recipient / instrument /
+  // location / etc.). Optional.
+  //
+  // ★ Stage 3 related-entity (m32a-stage3-claim-related-entities):
+  // CLAIM facts can name additional entities inside the content. Their
+  // uids land here; the StellarHoverCard / StellarEdgeFactsList render
+  // them as "관련:" chips.
+  /** Stage 2 — additional participants beyond subject/object. */
+  roles?: Record<string, string> | null;
+  /** Stage 3 — related entity uids referenced inside a CLAIM's content. */
+  related_entity_uids?: string[] | null;
+  /** Stage 3 — display labels for related_entity_uids, when resolved. */
+  related_entity_labels?: string[] | null;
+  /** Entity type for the SUBJECT (person/organization/place/concept/…). */
+  subject_entity_type?: string | null;
+  /** Entity type for the OBJECT (when the object is an entity ref). */
+  object_entity_type?: string | null;
+  /** Surface text — the raw sentence the fact was extracted from. */
+  surface_text?: string | null;
+  /** Source URL (provenance). */
+  source_url?: string | null;
+  /** Capture timestamp for the source (provenance). */
+  extracted_at?: string | null;
+  /** ★ M3-2d link_status (verified / claimed) on the NODE — DATA-ONLY
+   *  meta surfaced in the EdgeFactsList row label. The visual layer MUST
+   *  NOT bind to this. (Note: StellarLink also carries link_status for
+   *  the M3-2c CLAIM toggle; that is a separate field on the LINK.) */
+  link_status?: 'verified' | 'claimed' | string | null;
 }
 
 export interface StellarLink {
