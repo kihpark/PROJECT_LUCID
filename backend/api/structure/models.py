@@ -166,6 +166,19 @@ class StructureFact(LucidBaseModel):
     # 모두 빈 dict 라서 부가 참여자가 lost in translation. 이 필드는
     # 그 데이터 손실을 막는다.
     roles: dict[str, str] | None = None
+    # m32a-stage3-claim-related-entities (PO 2026-06-28 결정 6):
+    # CLAIM 의 내용 속 entity 들 (예: "모스 탄이 aweb 이 6·3선거와
+    # 관련있다 주장" → related=[aweb, 6·3선거]).
+    # ★ 같은 fact 안 array — 별도 doc 아님 (성능 + 단순성).
+    # ★ provenance 게이트 (P2 가 구조에 박힘): 이 link 들은 검증된
+    # 사실이 아니라 claim 노드를 경유한 "주장된 연결" — AI/시스템이
+    # 미검증 entity 관계를 실선으로 못 그음 = 점선 related-to.
+    # 의뢰서 example: [모스 탄] ─speaker─> claim ─related-to─>
+    # [6·3선거][aweb].
+    # CLAIM 이외 fact_type 에서는 None / [] — 평탄 null-safe.
+    # 값은 obj-N placeholder (objects 배열의 그 entity 들). uid_map
+    # 으로 canonical UID 로 변환되어 ES 에 저장됨.
+    related_entity_uids: list[str] | None = None
 
 
 class StructureFactObjectLink(LucidBaseModel):

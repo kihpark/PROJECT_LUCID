@@ -190,6 +190,27 @@ Run these IN ORDER on the input text:
                 - speech_act:    발화 행위 (원문 동사 그대로 — 강제 enum 없음)
                 - content_claim: 발화 내용 (한국어 문장)
                 - stance:        supportive | critical | neutral | mixed | unknown
+                - related_entity_uids: ★ content_claim 안에 등장한
+                                 entity 들의 obj-N placeholder 배열.
+                                 (m32a-stage3, PO 2026-06-28 결정 6)
+
+              ★ CLAIM 의 related_entity_uids (의뢰서 verbatim):
+                내용 속 entity 들 = claim 노드에서 dotted related-to.
+                예: "모스 탄이 aweb 이 6·3선거와 관련있다고 주장했다."
+                    → speaker_uid=obj-1 (모스 탄)
+                      content_claim="aweb 이 6·3선거와 관련있다"
+                      related_entity_uids=[obj-2 (aweb), obj-3 (6·3선거)]
+
+                ★ 별도 fact 만들지 마세요. 같은 claim fact 안 array.
+                ★ provenance 게이트: 이 link 들은 검증된 사실이 아니라
+                  주장된 연결입니다. AI/시스템이 그 entity 들 간 직접
+                  실선 엣지를 만들지 않음 = 점선 related-to.
+                ★ 값은 obj-N placeholder (objects 배열에 있는 entity).
+                  실제 canonical UID 변환은 downstream 이 처리.
+                ★ speaker 본인 (obj-1 같은) 은 related_entity_uids 에
+                  넣지 마세요 — speaker_uid 에 이미 있음.
+                ★ content_claim 에 entity 가 0 명이면 빈 배열 또는
+                  필드 생략.
 
             - measurement: 시점에 매인 수치값 —
                 "X 의 metric 은 시점에 value unit 이다/이었다"
@@ -390,6 +411,10 @@ If fact_type == "claim", these ADDITIONAL fields are MANDATORY:
   - "speech_act":    <발화 동사 그대로, e.g. "밝혔다", "주장했다">
   - "content_claim": <발화 내용 문장>
   - "stance":        "supportive" | "critical" | "neutral" | "mixed" | "unknown"
+  - "related_entity_uids": [<obj-N>, ...]  ← content_claim 안 entity 의
+                              obj-N placeholder 배열 (m32a-stage3,
+                              ★ 같은 fact 안 array, 별도 doc 아님).
+                              비어 있으면 [] 또는 생략.
 
 If fact_type == "measurement", these ADDITIONAL fields are MANDATORY:
   - "metric":            <측정 대상, 한정어 포함>
@@ -447,6 +472,14 @@ it in markdown fences. Do NOT include any prose outside the JSON.
   //   "content_claim": "디지털자산기본법 제정에 속도를 낼 것",
   //   "stance": "neutral"   // supportive | critical | neutral | mixed | unknown
   // speech_act is open natural-language — DO NOT force into an enum.
+  //
+  // m32a-stage3-claim-related-entities (PO 2026-06-28 결정 6) —
+  // CLAIM 의 내용 속 entity 들. ★ 같은 fact 안 array, 별도 doc 아님.
+  //   "related_entity_uids": ["obj-2", "obj-3"]
+  // ★ provenance 게이트: 점선 related-to 의 데이터 표현. AI/시스템이
+  // 미검증 entity 관계를 실선으로 만들지 않는다.
+  // 예 verbatim: "모스 탄이 aweb 이 6·3선거와 관련있다고 주장했다."
+  //   → speaker_uid=obj-1, related_entity_uids=[obj-2, obj-3]
   //
   // v0.2.0 step 2 — when fact_type == "measurement", emit these extra
   // fields (omit them entirely for action / claim facts):
@@ -789,6 +822,43 @@ FEW_SHOT_EXAMPLES = [
             'fact_object_links': [
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # m32a-stage3-claim-related-entities (PO 2026-06-28 결정 6):
+    # CLAIM 의 내용 속 entity 배열. ★ 같은 fact 안 array, 별도 doc
+    # 아님. ★ provenance 게이트 — content_claim 안 aweb / 6·3선거
+    # 가 진짜 "관련있다"는 보장 X, 모스 탄이 "주장"한 것일 뿐.
+    # related_entity_uids = 점선 related-to 의 데이터 표현. PO 의뢰서
+    # acceptance case verbatim.
+    {
+        'input': '모스 탄이 aweb 이 6·3선거와 관련있다고 주장했다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'person', 'name': '모스 탄', 'name_en': 'Morse Tan', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'organization', 'name': 'aweb', 'name_en': 'aweb', 'properties': {}},
+                {'uid': 'obj-3', 'class': 'event', 'name': '6·3선거', 'name_en': 'June 3 election', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '모스 탄이 aweb 이 6·3선거와 관련있다고 주장했다.',
+                 'subject_uid': 'obj-1', 'predicate': '주장했다',
+                 'object_value': 'aweb 이 6·3선거와 관련있다',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR'],
+                 'fact_type': 'claim',
+                 'speaker_uid': 'obj-1', 'speaker_label': '모스 탄',
+                 'speech_act': '주장했다',
+                 'content_claim': 'aweb 이 6·3선거와 관련있다',
+                 'stance': 'neutral',
+                 'related_entity_uids': ['obj-2', 'obj-3']},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'addresses', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-3', 'link_type': 'addresses', 'properties': {}},
             ],
             'fact_fact_links': [], 'disambiguation_candidates': [],
             'extraction_status': 'success', 'failure_reason': None,

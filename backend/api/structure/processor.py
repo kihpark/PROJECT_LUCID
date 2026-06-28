@@ -481,6 +481,61 @@ def _extract_roles(
     return resolved
 
 
+def _extract_related_entity_uids(
+    fact: StructureFact,
+    uid_map: dict[str, str] | None,
+) -> list[str]:
+    """m32a-stage3-claim-related-entities (PO 2026-06-28 결정 6).
+
+    CLAIM 의 내용 속 entity uid 들을 추출 + canonical UUID 매핑.
+
+    ★ PO 결정 6 — 같은 fact 안 array, 별도 doc 아님 (성능 + 단순성).
+    ★ provenance 게이트 (P2 가 구조에 박힘): 이 array 는 검증된 사실이
+    아니라 claim 노드를 경유한 "주장된 연결" 만 담는다. AI/시스템이
+    미검증 entity 관계를 실선으로 못 그음 — 의뢰서 점선 related-to 의
+    데이터 표현. Stage 4 (link_status verified/claimed) 가 이 array
+    위에 얹혀 점/실선을 결정한다.
+
+    의뢰서 example verbatim:
+        "모스 탄이 aweb 이 6·3선거와 관련있다고 주장했다."
+            -> related_entity_uids=[<aweb canonical UID>,
+                                    <6·3선거 canonical UID>]
+
+    값 정규화:
+        - LLM placeholder (obj-N) -> uid_map 으로 canonical UID 변환,
+          subject_uid / speaker_uid 와 같은 fusion 경로.
+        - 빈 array / non-list / non-string ref -> 안전 무시.
+        - 빈 문자열 / whitespace -> drop.
+
+    Returns:
+        list[str] — canonical UID 또는 (uid_map 미적중) 원본 ref.
+        empty list 가 기본 — caller 는 fact_type=='claim' 일 때만
+        의미를 부여하지만, 평탄 처리 위해 helper 는 fact_type 분기
+        없이 결정한다.
+    """
+    raw = getattr(fact, "related_entity_uids", None) or []
+    if not isinstance(raw, list):
+        return []
+    um = uid_map or {}
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for ref in raw:
+        if not isinstance(ref, str):
+            continue
+        bare = ref.strip()
+        if not bare:
+            continue
+        mapped = um.get(bare, bare)
+        if not mapped or not isinstance(mapped, str):
+            continue
+        # dedup while preserving order — LLM occasionally repeats refs.
+        if mapped in seen:
+            continue
+        seen.add(mapped)
+        resolved.append(mapped)
+    return resolved
+
+
 def _serialize_struct_fact(
     f: StructureFact,
     uid_map: dict[str, str] | None = None,
@@ -629,6 +684,21 @@ def _serialize_struct_fact(
     # SPO facts) lands as {} so the ES mapping always sees an object,
     # never a null, which keeps the dynamic-mapping gate predictable.
     d["fact_object_role"] = _extract_roles(f, uid_map)
+    # m32a-stage3-claim-related-entities (PO 2026-06-28 결정 6):
+    # CLAIM 의 내용 속 entity 들을 같은 fact 안 array 로 보존. ★ 별도
+    # doc 아님. _extract_related_entity_uids 가 uid_map 으로 placeholder
+    # (obj-N) 를 canonical UID 로 매핑 — subject_uid / speaker_uid /
+    # fact_object_role 의 fusion 경로와 동일.
+    #
+    # ★ provenance 게이트: 이 array 는 검증된 사실이 아니라 claim 노드
+    # 를 경유한 "주장된 연결" 만 담는다 (의뢰서 점선 related-to).
+    # Stage 4 (link_status) 가 이 위에 얹혀 점/실선을 결정.
+    #
+    # 비-CLAIM fact 에서는 LLM 이 보통 emit 하지 않음 — 그 경우 helper
+    # 가 [] 를 돌려주므로 ES 의 keyword array 는 missing 으로 처리되어
+    # recall facet / count 에 영향 없음. fact_type 분기 없이 동일하게
+    # 직렬화한다 (단순성 — 분기 = 미래 버그).
+    d["related_entity_uids"] = _extract_related_entity_uids(f, uid_map)
     # feat/spo-decide-payload-wire (PO 2026-06-23): propagate the
     # corrected canonical surface from `match_per_object` so the
     # Decide UI sees the brand-canonical / claim-recovered form (not

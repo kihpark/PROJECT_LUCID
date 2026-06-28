@@ -201,6 +201,25 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
                     "location": {"type": "keyword"},
                 },
             },
+            # m32a-stage3-claim-related-entities (PO 2026-06-28 결정 6):
+            # CLAIM 의 내용 속 entity 들 (예: "모스 탄이 aweb이 6·3선거와
+            # 관련있다 주장" → related=[aweb, 6·3선거]).
+            # 같은 fact 안 array — ★ 별도 doc 아님 (성능 + 단순성).
+            #
+            # ★ provenance 게이트 (P2 가 구조에 박힘): 이 link 들은
+            # 검증된 사실이 아니라 claim 노드를 경유한 "주장된 연결".
+            # AI/시스템이 미검증 entity 관계를 실선으로 못 그음 —
+            # 점선 related-to 의 데이터 표현. Stage 4 의 link_status
+            # (verified/claimed) 가 이 array 위에 얹혀 점/실선을 결정.
+            #
+            # 의뢰서 acceptance: "aweb 관련 주장" = claim 노드
+            # (점선 related-to). 의뢰서 example: [모스 탄] ─speaker─>
+            # claim ─related-to─> [6·3선거][aweb].
+            #
+            # 비-claim fact (action / measurement) 에서는 비어 있거나
+            # 누락 — recall facet 은 keyword null 을 missing 으로
+            # 처리하므로 별도 분기 없이 OK.
+            "related_entity_uids": {"type": "keyword"},
             # M3-1 canonical-layer apply — fact provenance after entity merge.
             # When a fact's subject_uid/object was rewritten to point at a
             # canonical target, this records the original object_uid + merge
