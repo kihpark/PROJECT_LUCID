@@ -154,6 +154,18 @@ class StructureFact(LucidBaseModel):
     measurement_value: float | None = None
     measurement_unit: str | None = None
     as_of: str | None = None
+    # m32a-stage2-role-channel (PO 2026-06-28 decision 4): 다항관계 의
+    # 부가 참여자를 fact 속성으로 보존하는 channel. 1차 도입 = 3종
+    # (recipient / instrument / location) 이지만 ★ enum 경직 금지 —
+    # LLM 이 새 role 키 (예: "witness", "topic") 를 emit 하면 그대로
+    # 통과시켜 ES dynamic mapping 이 자동 인덱싱하도록 한다.
+    # 의뢰서 acceptance: "모스 탄이 6·3선거를 트럼프에게 알렸다" =
+    # action 엣지 + roles={recipient: 트럼프}.
+    #
+    # PO discovery report C.2: 현재 `involves` link 의 properties 가
+    # 모두 빈 dict 라서 부가 참여자가 lost in translation. 이 필드는
+    # 그 데이터 손실을 막는다.
+    roles: dict[str, str] | None = None
 
 
 class StructureFactObjectLink(LucidBaseModel):

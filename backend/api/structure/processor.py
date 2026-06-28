@@ -438,6 +438,49 @@ def _remap_links(
 _OBJ_PLACEHOLDER_RE = re.compile(r"^obj-\d+$", re.IGNORECASE)
 
 
+def _extract_roles(
+    fact: StructureFact,
+    uid_map: dict[str, str] | None,
+) -> dict[str, str]:
+    """m32a-stage2-role-channel (PO 2026-06-28 decision 4).
+
+    Pull the LLM-emitted `roles` map off the fact, apply uid_map to each
+    value when the value is an obj-N placeholder so role targets land
+    on canonical Object UIDs (the same fusion path subject_uid takes
+    in `_serialize_struct_fact`).
+
+    ★ Enum 경직 금지: the PO directive says recipient/instrument/
+    location are the SEED roles, not the exhaustive set. Any role key
+    the LLM emits (e.g. "witness", "topic", "co-actor") passes through
+    untouched. ES dynamic mapping on `fact_object_role` then auto-
+    indexes it without a migration.
+
+    Empty / non-string / blank role values are silently dropped so a
+    sparse LLM payload (only one role present) doesn't pollute the
+    fact doc with empty strings.
+
+    Returns an empty dict when the LLM emitted no roles — caller can
+    write it through to the fact doc unconditionally without a null-
+    branch.
+    """
+    raw = fact.roles or {}
+    if not isinstance(raw, dict):
+        return {}
+    um = uid_map or {}
+    resolved: dict[str, str] = {}
+    for role_name, role_value in raw.items():
+        if not isinstance(role_name, str) or not role_name.strip():
+            continue
+        if not isinstance(role_value, str) or not role_value.strip():
+            continue
+        # obj-N placeholder -> canonical UID. Non-placeholders (literal
+        # entity names like "트럼프" before the matcher created an
+        # object for it, or when the LLM keeps a raw surface) pass
+        # through unchanged - same fall-through as subject_uid.
+        resolved[role_name] = um.get(role_value, role_value)
+    return resolved
+
+
 def _serialize_struct_fact(
     f: StructureFact,
     uid_map: dict[str, str] | None = None,
@@ -578,6 +621,14 @@ def _serialize_struct_fact(
     d.setdefault("measurement_value", d.get("measurement_value"))
     d.setdefault("measurement_unit", d.get("measurement_unit"))
     d.setdefault("as_of", d.get("as_of"))
+    # m32a-stage2-role-channel (PO 2026-06-28 decision 4): write the
+    # multi-participant role channel onto the fact doc. The helper
+    # applies uid_map so placeholder targets resolve to canonical
+    # Object UIDs — the same entity-graph fusion path subject_uid /
+    # speaker_uid use. Empty roles dict (the common case for simple
+    # SPO facts) lands as {} so the ES mapping always sees an object,
+    # never a null, which keeps the dynamic-mapping gate predictable.
+    d["fact_object_role"] = _extract_roles(f, uid_map)
     # feat/spo-decide-payload-wire (PO 2026-06-23): propagate the
     # corrected canonical surface from `match_per_object` so the
     # Decide UI sees the brand-canonical / claim-recovered form (not

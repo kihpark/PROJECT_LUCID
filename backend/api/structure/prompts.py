@@ -315,6 +315,36 @@ Run these IN ORDER on the input text:
             These speculative or rhetorical negations are NOT decomposable
             facts; emit failure_reason="negation_ambiguous" with no facts.
   Step 5. Extract Fact <-> Object relations using the 5 link types.
+  Step 5a. MULTI-PARTICIPANT ROLE CHANNEL (m32a-stage2, PO 2026-06-28):
+
+          When a claim has participants beyond (subject, object) — a
+          recipient, instrument, location, or other auxiliary actor —
+          emit a `roles` map on the fact so the auxiliary participant
+          is preserved on the graph edge.
+
+          예 1: "모스 탄이 6·3선거를 트럼프에게 알렸다"
+                → fact_type=action, S=모스 탄, P=알렸다,
+                  O=6·3선거, roles={"recipient": "obj-K"}
+                  (obj-K = 트럼프 의 LLM uid)
+          예 2: "정부가 칼슘 보조제로 골다공증을 치료한다"
+                → S=정부, P=치료한다, O=골다공증,
+                  roles={"instrument": "obj-K"}  (obj-K = 칼슘 보조제)
+          예 3: "회담은 제네바에서 열렸다"
+                → S=회담, P=열렸다, O=null|literal,
+                  roles={"location": "obj-K"}    (obj-K = 제네바)
+
+          시작 role 집합 = recipient / instrument / location 3종.
+          ★ 그러나 이것은 강제 enum 이 아닙니다. 의미상 새 role 이
+          필요하면 (예: "witness", "topic", "co-actor") 그대로
+          emit 하세요. 다운스트림 인덱스가 dynamic mapping 으로
+          새 role 키를 자동 수용합니다.
+
+          role 의 value 는 obj-N placeholder (그 entity 가
+          objects 배열에 있을 때) 또는 literal Korean surface
+          ("트럼프", "제네바") 모두 OK. placeholder 가 권장 —
+          canonical entity 와 fusion 됩니다.
+
+          `roles` 가 비어 있으면 (단순 SPO) 필드 자체를 생략 OK.
   Step 6. Extract Fact <-> Fact relations using the 7 link types.
           NEGATES is directional (the negating party carries
           negation_flag=true and points TO the affirmed statement
@@ -396,9 +426,18 @@ it in markdown fences. Do NOT include any prose outside the JSON.
       "negation_flag": false,
       "negation_scope": null,
       "tags_suggested": ["behavioral_economics", "1979"],
-      "fact_type": "action"
+      "fact_type": "action",
+      "roles": {}
     }
   ],
+  // m32a-stage2-role-channel (PO 2026-06-28 decision 4): when a fact
+  // has multi-participant structure beyond (subject, object), emit
+  // `roles` as a map of role_name -> obj-N (or literal surface).
+  // Seed roles = recipient / instrument / location, but new role
+  // keys (witness / topic / co-actor / ...) are accepted as-is —
+  // NOT a strict enum. Omit or use {} for plain SPO facts.
+  // 예: "모스 탄이 6·3선거를 트럼프에게 알렸다"
+  //    → "roles": {"recipient": "obj-3"}   // obj-3 = 트럼프
   // v0.2.0 step 1 — when fact_type == "claim", emit these extra fields
   // on the fact object (omitted entirely for action facts):
   //   "fact_type": "claim",
@@ -750,6 +789,42 @@ FEW_SHOT_EXAMPLES = [
             'fact_object_links': [
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'asserts_property', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # m32a-stage2-role-channel (PO 2026-06-28 decision 4): multi-
+    # participant fact with a recipient role. The PO's acceptance
+    # case verbatim — "모스 탄이 6·3선거를 트럼프에게 알렸다".
+    # The fact stays an ACTION (S=모스탄 P=알렸다 O=6·3선거); the
+    # auxiliary participant 트럼프 is preserved on `roles.recipient`
+    # as an obj-N placeholder so the uid_map resolves it to a
+    # canonical Object UID downstream. Seed roles = recipient /
+    # instrument / location, but the channel is intentionally NOT a
+    # strict enum — new role keys pass through.
+    {
+        'input': '모스 탄이 6·3선거를 트럼프에게 알렸다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'person', 'name': '모스 탄', 'name_en': 'Morse Tan', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'event', 'name': '6·3선거', 'name_en': 'June 3 election', 'properties': {}},
+                {'uid': 'obj-3', 'class': 'person', 'name': '트럼프', 'name_en': 'Trump', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '모스 탄이 6·3선거를 트럼프에게 알렸다.',
+                 'subject_uid': 'obj-1', 'predicate': '알렸다',
+                 'object_value': 'obj-2',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR'],
+                 'fact_type': 'action',
+                 'roles': {'recipient': 'obj-3'}},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'addresses', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-3', 'link_type': 'involves', 'properties': {'role': 'recipient'}},
             ],
             'fact_fact_links': [], 'disambiguation_candidates': [],
             'extraction_status': 'success', 'failure_reason': None,
