@@ -30,6 +30,11 @@ import {
   type FactTypeFilter,
   type LinkStatusFilter,
 } from './StellarLeftPanel';
+// M3-2d interactions — single SPO hover card + entity card + edge facts list.
+// ★ PO 의뢰서 verbatim. 중복 오버레이 0.
+import { StellarHoverCard } from './StellarHoverCard';
+import { StellarEntityCard } from './StellarEntityCard';
+import { StellarEdgeFactsList } from './StellarEdgeFactsList';
 
 // ---------------------------------------------------------------------------
 // fix/stellar-cleanup #9 — predicate / fact-type theme color.
@@ -106,12 +111,6 @@ const StellarGraphLazy = dynamic(
 export type StellarSource = 'synthetic' | 'real';
 const LS_KEY = 'lucid.stellar.source';
 
-// B-62-v1 — relation row shape used by the focus panel.
-interface FocusRelation {
-  type: EdgeType;
-  direction: 'out' | 'in';
-  other: StellarNode;
-}
 
 // fix/stellar-cluster-focus-race-fix (2026-06-26): one-shot migration of
 // stale 'synthetic' localStorage values written by the pre-d017a3a
@@ -482,71 +481,6 @@ export function tooltipLinesForNode(node: StellarNode): TooltipLines {
   };
 }
 
-function HoverTooltip({ state }: { state: HoverState | null }) {
-  if (!state) return null;
-  const { node, x, y } = state;
-  const lines = tooltipLinesForNode(node);
-  const ft = node.fact_type ?? 'action';
-  // fix/stellar-cleanup #9 — predicate-driven theme color for the
-  // mid/divider segment of the SPO card and the tooltip's left-border
-  // accent. Claim/measurement keep the neutral dim accent (they aren't
-  // relation-typed, so their predicate would be misleading).
-  const themeColor = ft === 'action' ? predicateThemeColor(node.predicate) : '#9db0b5';
-  return (
-    <div
-      data-testid="stellar-hover-tooltip"
-      data-fact-type={ft}
-      data-theme-color={themeColor}
-      style={{
-        position: 'fixed',
-        top: y + 14,
-        left: x + 14,
-        zIndex: 30,
-        maxWidth: 340,
-        padding: '10px 12px',
-        background: PANEL_BG,
-        border: `1px solid ${PANEL_BORDER}`,
-        borderLeft: `3px solid ${themeColor}`,
-        borderRadius: 10,
-        color: TEXT_PRIMARY,
-        pointerEvents: 'none',
-        fontSize: 12,
-        lineHeight: 1.45,
-        boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
-      }}
-    >
-      <div
-        data-testid="stellar-hover-tooltip-head"
-        style={{ color: ACCENT, fontWeight: 600 }}
-      >
-        {lines.head}
-      </div>
-      <div
-        data-testid="stellar-hover-tooltip-mid"
-        style={{ color: themeColor, fontSize: 11, marginTop: 2, fontWeight: 600 }}
-      >
-        {lines.mid}
-      </div>
-      <div
-        data-testid="stellar-hover-tooltip-body"
-        style={{ color: TEXT_BODY, marginTop: 4 }}
-      >
-        {lines.body}
-      </div>
-      {lines.foot ? (
-        <div
-          data-testid="stellar-hover-tooltip-foot"
-          style={{ color: TEXT_DIM, fontSize: 10, marginTop: 6 }}
-        >
-          {lines.foot}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-
-
 // B-62-v1 — the old FactDrawer (click-to-open detail) has been replaced
 // by FocusPanel (click → focus + 1-hop + relation list + chain-navigate).
 // See FocusPanel further down.
@@ -843,320 +777,6 @@ function EdgeLegend({ mode }: { mode: StellarSource }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// B-62-v1 — focus panel. Replaces the old FactDrawer. Shows the focused
-// fact, its 1-hop relations (clickable to chain-navigate), a back button
-// (pops history), and a close button (clears focus entirely). The relation
-// rows are colour-coded by edge type and labeled with the Korean relation
-// name, mirroring the legend.
-// ---------------------------------------------------------------------------
-
-function FocusPanel({
-  focused,
-  relations,
-  historyDepth,
-  selected,
-  onBack,
-  onSelect,
-  onExpand,
-  onCenter,
-  onClose,
-}: {
-  focused: StellarNode | null;
-  relations: FocusRelation[];
-  historyDepth: number;
-  /** B-62-focus-select-actions — currently inspected sub-node. Drives
-   *  the row highlight + the action footer. */
-  selected: StellarNode | null;
-  onBack: () => void;
-  /** Row click — sets selected, NO camera re-centre. */
-  onSelect: (node: StellarNode) => void;
-  /** 펼치기 action — add the node's 1-hop to the highlight ring. */
-  onExpand: (node: StellarNode) => void;
-  /** 중심으로 action — promote selected to a new focus (history push). */
-  onCenter: (node: StellarNode) => void;
-  onClose: () => void;
-}) {
-  if (!focused) return null;
-  return (
-    <aside
-      data-testid="stellar-fact-drawer"
-      role="dialog"
-      aria-label="fact detail"
-      style={{
-        position: 'absolute',
-        top: 16,
-        right: 18,
-        zIndex: 20,
-        width: 380,
-        maxHeight: 'calc(100% - 32px)',
-        overflowY: 'auto',
-        background: PANEL_BG,
-        border: `1px solid ${PANEL_BORDER}`,
-        borderRadius: 14,
-        padding: 18,
-        marginTop: 56,
-        color: TEXT_PRIMARY,
-        boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
-        backdropFilter: 'blur(10px)',
-      }}
-    >
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <span
-          style={{ color: ACCENT, fontSize: 11, letterSpacing: '0.08em', fontWeight: 600 }}
-        >
-          STELLAR · FOCUS
-        </span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            type="button"
-            data-testid="stellar-focus-back"
-            onClick={onBack}
-            disabled={historyDepth === 0}
-            aria-label="back"
-            style={{
-              background: historyDepth === 0 ? 'transparent' : 'rgba(63,224,198,0.08)',
-              border: `1px solid ${historyDepth === 0 ? '#1a2528' : '#244448'}`,
-              color: historyDepth === 0 ? TEXT_DIM : ACCENT,
-              borderRadius: 6,
-              padding: '2px 8px',
-              fontSize: 11,
-              cursor: historyDepth === 0 ? 'not-allowed' : 'pointer',
-              opacity: historyDepth === 0 ? 0.4 : 1,
-              fontFamily: 'JetBrains Mono, monospace',
-            }}
-          >
-            ← back{historyDepth > 0 ? ` (${historyDepth})` : ''}
-          </button>
-          <button
-            type="button"
-            data-testid="stellar-drawer-close"
-            onClick={onClose}
-            aria-label="close"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: TEXT_DIM,
-              fontSize: 18,
-              cursor: 'pointer',
-              lineHeight: 1,
-              padding: 4,
-            }}
-          >
-            ×
-          </button>
-        </div>
-      </header>
-      <div style={{ fontSize: 14, fontWeight: 600, color: TEXT_PRIMARY, lineHeight: 1.5 }}>
-        {focused.subject}
-      </div>
-      <div style={{ marginTop: 4, fontSize: 12, color: TEXT_DIM }}>
-        {predicateLabel(focused.predicate)}
-      </div>
-      <div style={{ marginTop: 10, fontSize: 13, color: TEXT_BODY, lineHeight: 1.6 }}>
-        {focused.object}
-      </div>
-      <div style={{ marginTop: 16, fontSize: 11, color: TEXT_DIM, display: 'flex', gap: 10 }}>
-        <span>cluster #{focused.cluster}</span>
-        <span>·</span>
-        <span>deg {focused.degree ?? '·'}</span>
-        <span>·</span>
-        <span>vs {(focused.validationStrength ?? 0).toFixed(2)}</span>
-      </div>
-      {relations.length > 0 ? (
-        <div
-          data-testid="stellar-focus-relations"
-          style={{
-            marginTop: 18,
-            borderTop: `1px solid ${PANEL_BORDER}`,
-            paddingTop: 14,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: TEXT_DIM,
-              letterSpacing: '0.08em',
-              marginBottom: 8,
-            }}
-          >
-            관계 · {relations.length}
-          </div>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {relations.slice(0, 50).map((rel, i) => {
-              const isRowSelected =
-                selected?.id === rel.other.id && selected.id !== focused?.id;
-              return (
-              <li key={`${rel.other.id}-${i}`}>
-                <button
-                  type="button"
-                  data-testid="stellar-focus-relation-row"
-                  data-row-selected={isRowSelected ? 'true' : 'false'}
-                  onClick={() => onSelect(rel.other)}
-                  style={{
-                    display: 'flex',
-                    width: '100%',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '6px 8px',
-                    background: isRowSelected
-                      ? 'rgba(63,224,198,0.14)'
-                      : 'transparent',
-                    border: `1px solid ${
-                      isRowSelected ? '#3fe0c6' : 'transparent'
-                    }`,
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    color: TEXT_BODY,
-                    fontSize: 12,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (isRowSelected) return;
-                    e.currentTarget.style.background = 'rgba(63,224,198,0.06)';
-                    e.currentTarget.style.borderColor = '#244448';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (isRowSelected) return;
-                    e.currentTarget.style.background = 'transparent';
-                    e.currentTarget.style.borderColor = 'transparent';
-                  }}
-                >
-                  <span
-                    title={EDGE_LABEL_KO[rel.type]}
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 999,
-                      background: EDGE_COLORS[rel.type],
-                      boxShadow: `0 0 6px ${EDGE_COLORS[rel.type]}`,
-                      flex: 'none',
-                    }}
-                  />
-                  <span style={{ color: TEXT_DIM, fontSize: 10, width: 24 }}>
-                    {rel.direction === 'out' ? '→' : '←'}
-                  </span>
-                  {/* B-62-search-legibility — show subject → object so
-                   *  "국방부 → 국방부" rows become distinguishable (each
-                   *  fact's object_value is different). Display-only
-                   *  (canonicalization tracked separately under DR-086). */}
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {rel.other.subject}
-                    <span style={{ color: TEXT_DIM, margin: '0 4px' }}>→</span>
-                    {rel.other.object}
-                  </span>
-                </button>
-              </li>
-              );
-            })}
-            {relations.length > 50 ? (
-              <li style={{ color: TEXT_DIM, fontSize: 11, padding: '4px 8px' }}>
-                +{relations.length - 50}개 더 (스크롤)
-              </li>
-            ) : null}
-          </ul>
-        </div>
-      ) : (
-        <div style={{ marginTop: 18, color: TEXT_DIM, fontSize: 12 }}>
-          이 사실은 다른 사실과 연결되지 않았습니다.
-        </div>
-      )}
-      {/* B-62-focus-select-actions — action footer. Only renders when
-       *  selected is set AND is distinct from focused; otherwise the
-       *  "selected" concept is collapsed into "focused" and the user
-       *  doesn't need separate verbs. */}
-      {selected && selected.id !== focused.id ? (
-        <div
-          data-testid="stellar-focus-actions"
-          style={{
-            marginTop: 14,
-            paddingTop: 12,
-            borderTop: `1px solid ${PANEL_BORDER}`,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: TEXT_DIM,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-            }}
-          >
-            선택됨
-          </div>
-          <div
-            data-testid="stellar-focus-selected-summary"
-            style={{
-              fontSize: 12,
-              color: TEXT_PRIMARY,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {selected.subject}
-            <span style={{ color: TEXT_DIM, margin: '0 4px' }}>→</span>
-            {selected.object}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              type="button"
-              data-testid="stellar-focus-expand"
-              onClick={() => onExpand(selected)}
-              style={{
-                flex: 1,
-                background: 'rgba(63,224,198,0.08)',
-                border: '1px solid #244448',
-                color: ACCENT,
-                borderRadius: 8,
-                padding: '8px 10px',
-                fontSize: 12,
-                cursor: 'pointer',
-                fontFamily: 'Pretendard, sans-serif',
-              }}
-            >
-              펼치기
-            </button>
-            <button
-              type="button"
-              data-testid="stellar-focus-center"
-              onClick={() => onCenter(selected)}
-              style={{
-                flex: 1,
-                background: ACCENT,
-                border: `1px solid ${ACCENT}`,
-                color: '#06080b',
-                borderRadius: 8,
-                padding: '8px 10px',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'Pretendard, sans-serif',
-              }}
-            >
-              중심으로
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </aside>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Main component.
-// ---------------------------------------------------------------------------
-
 export interface StellarViewProps {
   /** Test-mode override: swap the renderer for a mock component. The
    *  vitest jsdom environment can't run three.js. */
@@ -1165,6 +785,8 @@ export interface StellarViewProps {
     mode: StellarSource;
     onNodeHover?: (n: StellarNode | null) => void;
     onNodeClick?: (n: StellarNode) => void;
+    /** M3-2d — edge-click handler. Receives the two endpoint nodes. */
+    onLinkClick?: (endpoints: { a: StellarNode; b: StellarNode }) => void;
     focusedId?: string | null;
     focusedNeighborIds?: Set<string>;
     selectedId?: string | null;
@@ -1202,7 +824,6 @@ export function StellarView(props: StellarViewProps = {}) {
   //      that the user can click to chain-navigate,
   //   3. pushes the previous focus onto a history stack so "back" works.
   const [focused, setFocused] = useState<StellarNode | null>(null);
-  const [focusHistory, setFocusHistory] = useState<StellarNode[]>([]);
   // B-62-focus-select-actions — sub-selection inside the focus subgraph.
   // Relation-row click sets selected (NOT focused); the camera eases
   // lookAt without re-centring. Selected can be promoted to a new
@@ -1240,6 +861,8 @@ export function StellarView(props: StellarViewProps = {}) {
   // camera's lookAt target back to the scene origin while preserving
   // the user's eye position + orbit + zoom.
   const [viewResetTick, setViewResetTick] = useState(0);
+  // M3-2d — 엣지 클릭 상태. null 이면 entity 카드 (focused) 가 보인다.
+  const [edgeClick, setEdgeClick] = useState<{ a: StellarNode; b: StellarNode } | null>(null);
   const [realData, setRealData] = useState<StellarGraphData | null>(null);
   const [realLoading, setRealLoading] = useState(false);
   const realLoadedRef = useRef(false);
@@ -1390,9 +1013,9 @@ export function StellarView(props: StellarViewProps = {}) {
     persistSource(next);
     setHovered(null);
     setFocused(null);
-    setFocusHistory([]);
     setSelected(null);
     setExpandedIds(new Set());
+    setEdgeClick(null);
     // B-62-clear-focus-home-lookat — mode flip is a hard "back to
     // overview" event, so restore the home lookAt too.
     setViewResetTick((t) => t + 1);
@@ -1417,14 +1040,11 @@ export function StellarView(props: StellarViewProps = {}) {
   // matches the new anchor's 1-hop ring exactly.
   const handleClick = useCallback(
     (node: StellarNode) => {
-      setFocused((prev) => {
-        if (prev && prev.id !== node.id) {
-          setFocusHistory((h) => [...h, prev]);
-        }
-        return node;
-      });
+      setFocused(node);
       setSelected(node);
       setExpandedIds(new Set());
+      // M3-2d — 노드 클릭은 엣지 카드를 닫는다 (둘 중 하나만 활성).
+      setEdgeClick(null);
     },
     [],
   );
@@ -1492,7 +1112,6 @@ export function StellarView(props: StellarViewProps = {}) {
     prevSourceRef.current = source;
     clusterAutoFocusedRef.current = false;
     setFocused(null);
-    setFocusHistory([]);
     setSelected(null);
     setExpandedIds(new Set());
   }, [source]);
@@ -1570,39 +1189,13 @@ export function StellarView(props: StellarViewProps = {}) {
     sourceHydrated,
   ]);
 
-  // B-62-focus-select-actions — relation-row click: set selected only.
-  // The camera eases lookAt in StellarGraph; nothing else moves.
-  const handleSelect = useCallback((node: StellarNode) => {
-    setSelected(node);
-  }, []);
 
-  // B-62-focus-select-actions — 펼치기. Adds the given node's 1-hop
-  // ring to the expanded set. Held in closure to access the live
-  // neighbor index lazily (declared below via useMemo).
-  const expandRef = useRef<(node: StellarNode) => void>(() => {});
-  const handleExpand = useCallback((node: StellarNode) => {
-    expandRef.current(node);
-  }, []);
 
-  // B-62-v1 — focus pop / clear handlers.
-  const handleBack = useCallback(() => {
-    setFocusHistory((h) => {
-      if (h.length === 0) {
-        setFocused(null);
-        return h;
-      }
-      const next = h.slice(0, -1);
-      setFocused(h[h.length - 1] ?? null);
-      setSelected(h[h.length - 1] ?? null);
-      setExpandedIds(new Set());
-      return next;
-    });
-  }, []);
   const handleClearFocus = useCallback(() => {
     setFocused(null);
-    setFocusHistory([]);
     setSelected(null);
     setExpandedIds(new Set());
+    setEdgeClick(null);
     // B-62-clear-focus-home-lookat — bump the reset tick so the
     // renderer eases lookAt back to the home origin while keeping
     // the user's eye position + orbit + wheel zoom intact. Fires for
@@ -1670,52 +1263,6 @@ export function StellarView(props: StellarViewProps = {}) {
     return out;
   }, [focused, neighborIndex, expandedIds]);
 
-  // B-62-focus-select-actions — bind the lazy expand closure now that
-  // we have the live neighborIndex. The 펼치기 button calls handleExpand
-  // → expandRef.current → this, which unions the node's 1-hop into the
-  // expanded set without disturbing focus.
-  useEffect(() => {
-    expandRef.current = (node: StellarNode) => {
-      const ring = neighborIndex.get(node.id);
-      if (!ring || ring.size === 0) return;
-      setExpandedIds((prev) => {
-        const next = new Set(prev);
-        next.add(node.id);
-        for (const id of ring) next.add(id);
-        return next;
-      });
-    };
-  }, [neighborIndex]);
-  const focusRelations = useMemo<FocusRelation[]>(() => {
-    if (!focused) return [];
-    const out: FocusRelation[] = [];
-    const byId = new Map(filteredData.nodes.map((n) => [n.id, n] as const));
-    for (const link of filteredData.links) {
-      const src =
-        typeof link.source === 'string'
-          ? link.source
-          : (link.source as { id?: string } | null)?.id ?? '';
-      const tgt =
-        typeof link.target === 'string'
-          ? link.target
-          : (link.target as { id?: string } | null)?.id ?? '';
-      let other: string | null = null;
-      let direction: 'out' | 'in' | null = null;
-      if (src === focused.id) {
-        other = tgt;
-        direction = 'out';
-      } else if (tgt === focused.id) {
-        other = src;
-        direction = 'in';
-      } else {
-        continue;
-      }
-      const otherNode = other ? byId.get(other) : null;
-      if (!otherNode) continue;
-      out.push({ type: link.type, direction: direction!, other: otherNode });
-    }
-    return out;
-  }, [focused, filteredData]);
 
   return (
     <div
@@ -1735,6 +1282,11 @@ export function StellarView(props: StellarViewProps = {}) {
           mode={source}
           onNodeHover={handleHover}
           onNodeClick={handleClick}
+          onLinkClick={(endpoints) => {
+            // M3-2d — 엣지 클릭. focus 는 그대로 두고 edgeClick state 만 set.
+            // (focused 와 edgeClick 이 둘 다 truthy 일 때 EdgeFactsList 가 우선.)
+            setEdgeClick(endpoints);
+          }}
           focusedId={focused?.id ?? null}
           focusedNeighborIds={focusedNeighborIds}
           selectedId={selected?.id ?? null}
@@ -1805,18 +1357,27 @@ export function StellarView(props: StellarViewProps = {}) {
         focused={focused}
       />
 
-      <HoverTooltip state={hovered} />
-      <FocusPanel
-        focused={focused}
-        relations={focusRelations}
-        historyDepth={focusHistory.length}
-        selected={selected}
-        onBack={handleBack}
-        onSelect={handleSelect}
-        onExpand={handleExpand}
-        onCenter={handleClick}
-        onClose={handleClearFocus}
-      />
+      {hovered ? (
+        <StellarHoverCard fact={hovered.node} position={{ x: hovered.x, y: hovered.y }} />
+      ) : null}
+      {/* M3-2d — 노드 클릭 → entity 카드 (의뢰서 verbatim). FocusPanel
+       *  로직 (relations, expand, history) 은 highlight ring 을 위해
+       *  state 로 보존하되, 시각 surface 는 EntityCard 로 교체. */}
+      {focused && !edgeClick ? (
+        <StellarEntityCard
+          entity={focused}
+          allFacts={activeData.nodes}
+          onClose={handleClearFocus}
+        />
+      ) : null}
+      {/* M3-2d — 엣지 클릭 → fact 리스트. */}
+      {edgeClick ? (
+        <StellarEdgeFactsList
+          endpoints={edgeClick}
+          allFacts={activeData.nodes}
+          onClose={() => setEdgeClick(null)}
+        />
+      ) : null}
     </div>
   );
 }
