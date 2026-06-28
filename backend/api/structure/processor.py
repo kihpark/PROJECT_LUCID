@@ -1263,6 +1263,16 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
             link_result.fact_object_count + link_result.fact_fact_count,
         )
 
+        # m32a-canonical-auto-apply (PO 2026-06-29): 새 캡처 후 자동 정리
+        try:
+            import asyncio
+            from api.services.canonical_auto_apply import auto_apply_after_capture
+            ks_id_for_apply = str(job.knowledge_space_id)
+            auto_result = asyncio.run(auto_apply_after_capture(ks_id_for_apply))
+            logger.info("canonical auto-apply after %s: %s", job_id, auto_result)
+        except Exception as auto_exc:  # noqa: BLE001 — non-fatal
+            logger.warning("canonical auto-apply failed (non-fatal): %s", auto_exc)
+
     finally:
         session.close()
 
