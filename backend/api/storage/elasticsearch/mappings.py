@@ -175,6 +175,32 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             },
             "created_at": {"type": "date"},
             "updated_at": {"type": "date"},
+            # m32a-stage2-role-channel (PO 2026-06-28 decision 4):
+            # multi-participant fact role channel. The outer LUCID_FACTS
+            # mapping is dynamic='strict', so this field must be declared
+            # explicitly — but the nested `dynamic: True` opens the gate
+            # so new role keys (beyond the seed recipient/instrument/
+            # location) get auto-indexed as keyword. ★ Enum 경직 금지:
+            # the LLM is allowed to emit "witness", "topic", "co-actor"
+            # etc and the field carries them through without a mapping
+            # migration. Seed 3 roles are declared so facet queries on
+            # the common cases keep their explicit type.
+            #
+            # The discovery report (docs/m3-2a-discovery.md C.2) measured
+            # that 100% of current `involves` links carry properties={}
+            # — multi-participant facts (e.g. "모스 탄이 6·3선거를
+            # 트럼프에게 알렸다", trump=recipient) lose the auxiliary
+            # participant entirely. This field plugs that gap by
+            # storing roles directly on the fact doc.
+            "fact_object_role": {
+                "type": "object",
+                "dynamic": True,
+                "properties": {
+                    "recipient": {"type": "keyword"},
+                    "instrument": {"type": "keyword"},
+                    "location": {"type": "keyword"},
+                },
+            },
             # M3-1 canonical-layer apply — fact provenance after entity merge.
             # When a fact's subject_uid/object was rewritten to point at a
             # canonical target, this records the original object_uid + merge

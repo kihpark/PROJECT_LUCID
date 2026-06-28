@@ -13,8 +13,10 @@ def test_nine_few_shot_examples_total():
     Measurement bucket (MAU + 실업률) → 11.
     v0.2.0 step 2.5 (feat/measurement-completeness) appends 2 more for
     rich-metric completeness (노사) + as_of-disambiguation (적용) → 13.
+    m32a-stage2-role-channel (PO 2026-06-28) appends 1 more for the
+    multi-participant role-channel anchor (모스 탄 / 트럼프) → 14.
     """
-    assert len(FEW_SHOT_EXAMPLES) == 13
+    assert len(FEW_SHOT_EXAMPLES) == 14
 
 
 def test_ko_statistic_example_present():
