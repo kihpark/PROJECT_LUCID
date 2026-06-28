@@ -47,6 +47,23 @@ class RecallFact(LucidBaseModel):
     # back to the raw object_value, which is the literal).
     subject_label: str | None = None
     object_label: str | None = None
+    # fix/m32b-entity-type-degree-actual-wiring (PO 2026-06-28): server-
+    # resolved entity_type for the subject / entity-shape object. Drives
+    # the M3-2b STELLAR visual-vocabulary palette in the FE renderer
+    # (ENTITY_COLORS: person/organization/group => WHO teal,
+    # product/resource/concept/knowledge => WHAT amber, event => violet,
+    # place => WHERE slate). Resolved from lucid_objects.class via a
+    # batch mget enrichment pass — same round-trip as the label lookup
+    # so the cost stays at O(1) ES calls per recall response.
+    # None when:
+    #   - the uid is not found in lucid_objects
+    #   - object_value is a literal (number / date / Korean string)
+    #   - the doc is legacy and has no `class` field
+    # The FE colorForEntityType helper falls back to STELLAR_ACCENT for
+    # any null/unknown entity_type so missing values never break the
+    # render.
+    subject_entity_type: str | None = None
+    object_entity_type: str | None = None
     # B-62 natural-spo-display: natural-English predicate gloss for
     # the recall card. None on legacy facts captured before the OPL
     # layer landed; the frontend falls back to the canonical predicate

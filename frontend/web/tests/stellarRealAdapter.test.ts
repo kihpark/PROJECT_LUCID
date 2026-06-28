@@ -197,3 +197,107 @@ describe('loadRealStellarGraph — claim ↔ action edge kind', () => {
     expect(link?.kind).toBe('claim_related');
   });
 });
+
+describe('loadRealStellarGraph - fix/m32b-entity-type-degree-actual-wiring degree', () => {
+  it('populates node.degree from the link set so size = sqrt(degree)', async () => {
+    // The previous describe ends with a vi.doMock override (mix-1/mix-2).
+    // We need to restore the default mock so fact-a / fact-b / fact-c are
+    // present in the graph; otherwise node.find(fact-a) is undefined and
+    // a?.degree is undefined regardless of attachGraphMetrics behavior.
+    vi.resetModules();
+    vi.doMock('@/lib/api', () => ({
+      getHomeBrief: vi.fn().mockResolvedValue(null),
+      listSpaceFacts: vi.fn().mockResolvedValue({
+        facts: [
+          {
+            fact_uid: 'fact-a',
+            subject_uid: '00000000-0000-4000-8000-000000000001',
+            subject_label: '서울시',
+            predicate: 'develops',
+            object_value: '한강 르네상스',
+            source_uids: ['src-1'],
+            fact_type: 'action',
+            subject_entity_type: 'organization',
+          },
+          {
+            fact_uid: 'fact-b',
+            subject_uid: '00000000-0000-4000-8000-000000000001',
+            subject_label: '서울시',
+            predicate: 'launches',
+            object_value: '청계천 복원',
+            source_uids: ['src-2', 'src-3'],
+            fact_type: 'action',
+            subject_entity_type: 'organization',
+          },
+          {
+            fact_uid: 'fact-c',
+            subject_uid: '00000000-0000-4000-8000-000000000002',
+            subject_label: '대니얼 카너먼',
+            predicate: 'said',
+            object_value: '손실 회피 계수 2.25',
+            source_uids: ['src-4'],
+            fact_type: 'claim',
+            subject_entity_type: 'person',
+          },
+        ],
+      }),
+      recall: vi.fn(),
+    }));
+    vi.doMock('@/lib/auth', () => ({
+      getCurrentSpace: vi.fn().mockReturnValue('ks-test'),
+    }));
+    vi.doMock('@/lib/predicateLabels', () => ({
+      predicateLabel: (predicate: string, label?: string | null) =>
+        label ?? predicate,
+    }));
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const a = data.nodes.find((n) => n.id === 'fact-a');
+    const b = data.nodes.find((n) => n.id === 'fact-b');
+    const c = data.nodes.find((n) => n.id === 'fact-c');
+    expect(a?.degree).toBe(1);
+    expect(b?.degree).toBe(1);
+    expect(c?.degree).toBe(0);
+  });
+
+  it('exposes object_entity_type as a pass-through when the fact carries it', async () => {
+    // Reload with a mock where one fact has an entity-shape object_value
+    // and the backend has already resolved object_entity_type. The adapter
+    // must surface that as node.object_entity_type so callers can read it.
+    vi.resetModules();
+    vi.doMock('@/lib/api', () => ({
+      getHomeBrief: vi.fn().mockResolvedValue(null),
+      listSpaceFacts: vi.fn().mockResolvedValue({
+        facts: [
+          {
+            fact_uid: 'ot-1',
+            subject_uid: '00000000-0000-4000-8000-000000000010',
+            subject_label: '직원',
+            predicate: 'works_at',
+            object_value: '00000000-0000-4000-8000-000000000011',
+            object_label: '한국은행',
+            source_uids: ['s10'],
+            fact_type: 'action',
+            subject_entity_type: 'person',
+            object_entity_type: 'organization',
+          },
+        ],
+      }),
+      recall: vi.fn(),
+    }));
+    vi.doMock('@/lib/auth', () => ({
+      getCurrentSpace: vi.fn().mockReturnValue('ks-test'),
+    }));
+    vi.doMock('@/lib/predicateLabels', () => ({
+      predicateLabel: (predicate: string, label?: string | null) =>
+        label ?? predicate,
+    }));
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const node = data.nodes.find((n) => n.id === 'ot-1');
+    expect(node?.subject_entity_type).toBe('person');
+    expect(node?.object_entity_type).toBe('organization');
+    // entity_type falls through to subject_entity_type by default.
+    expect(node?.entity_type).toBe('person');
+  });
+});

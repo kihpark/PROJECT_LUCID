@@ -372,14 +372,26 @@ def _hit_to_fact(hit: dict[str, Any]) -> RecallFact | None:
 def _enrich_with_labels(
     facts: list[RecallFact], knowledge_space_id: str,
 ) -> list[RecallFact]:
-    """Look up the human-readable name for every entity uid the facts
-    reference, then return a new list with subject_label / object_label
-    populated. Uses a single ES mget so the cost is one round-trip
-    regardless of how many facts we resolve.
+    """Look up the human-readable name AND entity_type for every entity
+    uid the facts reference, then return a new list with subject_label /
+    object_label / subject_entity_type / object_entity_type populated.
+
+    Uses a single ES mget so the cost is one round-trip regardless of
+    how many facts we resolve.
 
     Literals on `object_value` (anything that doesn't look like an
-    entity ref) are left untouched — object_label is None and the
-    client renders the literal as-is.
+    entity ref) are left untouched — object_label / object_entity_type
+    are None and the client renders the literal as-is.
+
+    fix/m32b-entity-type-degree-actual-wiring (PO 2026-06-28): the same
+    mget pass now also surfaces `class` (the v0.2 entity classifier
+    output: person / organization / group / product / resource / concept
+    / knowledge / event / place) as `subject_entity_type` /
+    `object_entity_type`. The FE StellarGraph renderer's nodeColor
+    callback branches on these to drive the M3-2b visual-vocabulary
+    palette. Without this enrichment every node falls back to
+    STELLAR_ACCENT and the PO's "entity별 구분이 제일 먼저 필요" gate
+    stays unfulfilled.
     """
     if not facts:
         return facts
@@ -394,6 +406,12 @@ def _enrich_with_labels(
         return facts
 
     name_by_uid: dict[str, str] = {}
+    # fix/m32b-entity-type-degree-actual-wiring: parallel dict mapping
+    # entity uid -> classifier `class`. Populated from the same mget
+    # response, so no extra ES round-trip. Missing/legacy docs simply
+    # never land here -> downstream `.get(uid)` returns None and the
+    # FE falls back to STELLAR_ACCENT.
+    entity_type_by_uid: dict[str, str] = {}
     try:
         from api.storage.elasticsearch.client import LUCID_OBJECTS
         client = get_client()
@@ -411,6 +429,16 @@ def _enrich_with_labels(
             name = src.get("name")
             if uid and name:
                 name_by_uid[uid] = name
+            # fix/m32b-entity-type-degree-actual-wiring: pull `class`
+            # alongside `name`. `class` is the v0.2 entity classifier
+            # output (person / organization / group / product / resource
+            # / concept / knowledge / event / place) — exact match for
+            # the FE ENTITY_COLORS keys in stellarColors.ts. We do NOT
+            # gate on `name` here because an unnamed-but-classified doc
+            # should still drive node color.
+            entity_class = src.get("class")
+            if uid and entity_class:
+                entity_type_by_uid[uid] = entity_class
     except Exception as exc:  # noqa: BLE001 - degrade quietly
         logger.warning("recall: label lookup failed: %s", exc)
         return facts
@@ -423,10 +451,23 @@ def _enrich_with_labels(
             if f.object_value and _is_entity_ref(f.object_value)
             else None
         )
+        # fix/m32b-entity-type-degree-actual-wiring: same shape as the
+        # label resolution above — entity-type is only meaningful for
+        # actual entity refs; literals leave the field as None.
+        subject_entity_type = (
+            entity_type_by_uid.get(f.subject_uid) if f.subject_uid else None
+        )
+        object_entity_type = (
+            entity_type_by_uid.get(f.object_value)
+            if f.object_value and _is_entity_ref(f.object_value)
+            else None
+        )
         out.append(
             f.model_copy(update={
                 "subject_label": subject_label,
                 "object_label": object_label,
+                "subject_entity_type": subject_entity_type,
+                "object_entity_type": object_entity_type,
             })
         )
     return out
