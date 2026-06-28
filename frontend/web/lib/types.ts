@@ -202,6 +202,18 @@ export interface RecallFact {
   // Null when the uid isn't in lucid_objects or when object_value is a literal.
   subject_label?: string | null;
   object_label?: string | null;
+  // fix/m32b-entity-type-degree-actual-wiring (PO 2026-06-28): server-
+  // resolved entity_type for the subject / entity-shape object. The
+  // backend resolves lucid_objects.class on the same mget pass that
+  // produces the labels above and surfaces it here. Drives node color
+  // in StellarGraph via colorForEntityType() — without these fields
+  // the renderer falls back to STELLAR_ACCENT for every node and PO's
+  // "entity별 구분이 제일 먼저 필요" gate fails.
+  // Valid values match ENTITY_COLORS keys in stellarColors.ts:
+  //   person / organization / group / product / resource / concept /
+  //   knowledge / event / place. Unknown / null -> STELLAR_ACCENT.
+  subject_entity_type?: string | null;
+  object_entity_type?: string | null;
   // B-62 natural-spo-display: server-resolved natural-English predicate
   // gloss. Null on legacy facts captured before the OPL layer landed;
   // the predicateLabel() helper falls back to the curated KO map / the
