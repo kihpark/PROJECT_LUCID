@@ -24,6 +24,12 @@ import {
 import type { StellarGraphData, StellarNode } from '@/lib/syntheticGraph';
 import { emptyStellarGraph, loadRealStellarGraph } from '@/lib/stellarRealAdapter';
 import { predicateLabel } from '@/lib/predicateLabels';
+import {
+  StellarLeftPanel,
+  type EntityBucket,
+  type FactTypeFilter,
+  type LinkStatusFilter,
+} from './StellarLeftPanel';
 
 // ---------------------------------------------------------------------------
 // fix/stellar-cleanup #9 — predicate / fact-type theme color.
@@ -63,6 +69,23 @@ export function predicateThemeColor(predicate: string | null | undefined): strin
     return '#39d3ec';
   }
   return '#9db0b5';
+}
+
+/** M3-2c — map a node's entity_type string onto the WHO/WHAT/WHERE
+ *  buckets used by the left-panel filter. Undefined / unknown
+ *  entity_type matches every bucket (legacy guard). Pure for tests. */
+export function entityBucketFor(entityType: string | null | undefined): Set<EntityBucket> {
+  if (!entityType) {
+    return new Set(['who', 'what', 'where']);
+  }
+  const t = entityType.toLowerCase();
+  if (t === 'person' || t === 'organization' || t === 'group') {
+    return new Set(['who']);
+  }
+  if (t === 'location' || t === 'region' || t === 'venue' || t === 'place') {
+    return new Set(['where']);
+  }
+  return new Set(['what']);
 }
 
 const ACCENT = '#3fe0c6';
@@ -1189,6 +1212,28 @@ export function StellarView(props: StellarViewProps = {}) {
   // the focus subgraph growing as the user explores without losing
   // the anchor. Reset on focus change / focus clear / mode toggle.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  // M3-2c — "발언(CLAIM) 보기" toggle. Default OFF → claim nodes
+  // and 'claimed' links are HIDDEN (NOT blurred — per 2026-06-28 PO
+  // correction). The skeleton view (action + measurement nodes,
+  // verified links) is the default surface.
+  const [showClaims, setShowClaims] = useState(false);
+
+  // M3-2c — left-panel filters. All four are data-only filters;
+  // none of them touches the renderer's visual style (line style,
+  // opacity, color). This is the 2026-06-28 correction in code form.
+  const [entityBuckets, setEntityBuckets] = useState<Record<EntityBucket, boolean>>({
+    who: true,
+    what: true,
+    where: true,
+  });
+  const [factTypes, setFactTypes] = useState<Record<FactTypeFilter, boolean>>({
+    action: true,
+    claim: true,
+    measurement: true,
+  });
+  const [asOfFrom, setAsOfFrom] = useState<string>('');
+  const [asOfTo, setAsOfTo] = useState<string>('');
+  const [linkStatusFilter, setLinkStatusFilter] = useState<LinkStatusFilter>('all');
   // B-62-clear-focus-home-lookat — monotonic counter, bumped whenever
   // the user explicitly leaves a focus subgraph (× close / Esc /
   // source toggle). The renderer reads it as a token to ease the
@@ -1256,6 +1301,89 @@ export function StellarView(props: StellarViewProps = {}) {
   }, [source, props.realLoader]);
 
   const activeData = source === 'synthetic' ? syntheticData : (realData ?? emptyStellarGraph());
+
+  // M3-2c — apply layer toggle + left-panel filters to activeData.
+  // All filters are pure data filters (★ no visual style binding).
+  // Order matters only for the link-side filters: we collect the set
+  // of surviving node ids first, then drop links that point at a
+  // removed node (so the renderer never receives dangling edges).
+  const filteredData = useMemo<StellarGraphData>(() => {
+    let nodes = activeData.nodes;
+    let links = activeData.links;
+
+    // CLAIM toggle: OFF → hide claim nodes + 'claimed' links entirely.
+    // ★ This is HIDE (filter out), NOT a visual dim — the 2026-06-28
+    // PO correction explicitly rejected opacity/blur for the toggle.
+    if (!showClaims) {
+      nodes = nodes.filter((n) => (n.fact_type ?? 'action') !== 'claim');
+      links = links.filter((l) => (l.link_status ?? 'verified') !== 'claimed');
+    }
+
+    // Entity-type bucket filter (WHO / WHAT / WHERE). undefined
+    // entity_type matches every bucket so legacy data survives unless
+    // the user explicitly unchecks every bucket.
+    const allBucketsOff =
+      !entityBuckets.who && !entityBuckets.what && !entityBuckets.where;
+    if (!allBucketsOff && !(entityBuckets.who && entityBuckets.what && entityBuckets.where)) {
+      nodes = nodes.filter((n) => {
+        const node_buckets = entityBucketFor(n.entity_type);
+        for (const b of node_buckets) {
+          if (entityBuckets[b]) return true;
+        }
+        return false;
+      });
+    } else if (allBucketsOff) {
+      nodes = [];
+    }
+
+    // fact_type filter (action / claim / measurement). undefined
+    // fact_type is treated as 'action' (the historical default).
+    const allFactTypesOff = !factTypes.action && !factTypes.claim && !factTypes.measurement;
+    if (allFactTypesOff) {
+      nodes = [];
+    } else if (!(factTypes.action && factTypes.claim && factTypes.measurement)) {
+      nodes = nodes.filter((n) => {
+        const ft = (n.fact_type ?? 'action') as FactTypeFilter;
+        return factTypes[ft] === true;
+      });
+    }
+
+    // as_of date range filter. Only applies to nodes that have an
+    // as_of string (measurement-shaped). Other nodes are kept.
+    if (asOfFrom || asOfTo) {
+      nodes = nodes.filter((n) => {
+        if (!n.as_of) return true;
+        if (asOfFrom && n.as_of < asOfFrom) return false;
+        if (asOfTo && n.as_of > asOfTo) return false;
+        return true;
+      });
+    }
+
+    // link_status filter — ★ DATA FILTER ONLY (★ 2026-06-28 PO correction:
+    // MUST NOT bind to visual style). Drops links whose link_status
+    // doesn't match. Undefined link_status = treated as 'verified'.
+    if (linkStatusFilter !== 'all') {
+      links = links.filter((l) => (l.link_status ?? 'verified') === linkStatusFilter);
+    }
+
+    // Drop links that point at a node we filtered out.
+    if (nodes.length !== activeData.nodes.length) {
+      const ids = new Set(nodes.map((n) => n.id));
+      links = links.filter((l) => {
+        const src =
+          typeof l.source === 'string'
+            ? l.source
+            : (l.source as { id?: string } | null)?.id ?? '';
+        const tgt =
+          typeof l.target === 'string'
+            ? l.target
+            : (l.target as { id?: string } | null)?.id ?? '';
+        return ids.has(src) && ids.has(tgt);
+      });
+    }
+
+    return { nodes, links, clusters: activeData.clusters };
+  }, [activeData, showClaims, entityBuckets, factTypes, asOfFrom, asOfTo, linkStatusFilter]);
 
   const handleToggle = useCallback((next: StellarSource) => {
     setSource(next);
@@ -1512,7 +1640,7 @@ export function StellarView(props: StellarViewProps = {}) {
       }
       s.add(b);
     };
-    for (const link of activeData.links) {
+    for (const link of filteredData.links) {
       const src =
         typeof link.source === 'string'
           ? link.source
@@ -1526,7 +1654,7 @@ export function StellarView(props: StellarViewProps = {}) {
       push(tgt, src);
     }
     return idx;
-  }, [activeData]);
+  }, [filteredData]);
 
   // B-62-v1 — 1-hop relations for the focused node, materialised for the
   // side panel. Each relation carries the edge type (colour) + the other-
@@ -1561,8 +1689,8 @@ export function StellarView(props: StellarViewProps = {}) {
   const focusRelations = useMemo<FocusRelation[]>(() => {
     if (!focused) return [];
     const out: FocusRelation[] = [];
-    const byId = new Map(activeData.nodes.map((n) => [n.id, n] as const));
-    for (const link of activeData.links) {
+    const byId = new Map(filteredData.nodes.map((n) => [n.id, n] as const));
+    for (const link of filteredData.links) {
       const src =
         typeof link.source === 'string'
           ? link.source
@@ -1587,7 +1715,7 @@ export function StellarView(props: StellarViewProps = {}) {
       out.push({ type: link.type, direction: direction!, other: otherNode });
     }
     return out;
-  }, [focused, activeData]);
+  }, [focused, filteredData]);
 
   return (
     <div
@@ -1603,7 +1731,7 @@ export function StellarView(props: StellarViewProps = {}) {
     >
       <div style={{ position: 'absolute', inset: 0 }}>
         <Renderer
-          data={activeData}
+          data={filteredData}
           mode={source}
           onNodeHover={handleHover}
           onNodeClick={handleClick}
@@ -1615,18 +1743,65 @@ export function StellarView(props: StellarViewProps = {}) {
       </div>
 
       <SourceToggle source={source} onChange={handleToggle} />
+      {/* M3-2c — "발언(CLAIM) 보기" toggle. Off by default → skeleton
+        * view (entity + action edges). ★ Off = HIDE claim nodes
+        * (filter out), NOT a visual dim (per 2026-06-28 PO correction). */}
+      <button
+        type="button"
+        data-testid="stellar-claim-toggle"
+        aria-pressed={showClaims}
+        onClick={() => setShowClaims((v) => !v)}
+        style={{
+          position: 'absolute',
+          top: 60,
+          right: 18,
+          zIndex: 10,
+          padding: '6px 14px',
+          borderRadius: 999,
+          border: `1px solid ${showClaims ? '#3fe0c6' : '#1c272b'}`,
+          background: showClaims
+            ? 'color-mix(in oklab, #3fe0c6 18%, transparent)'
+            : 'rgba(12,19,22,0.92)',
+          color: showClaims ? '#3fe0c6' : '#cdd9da',
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: 'pointer',
+          letterSpacing: '0.04em',
+          backdropFilter: 'blur(8px)',
+          fontFamily: 'Pretendard, sans-serif',
+        }}
+      >
+        발언(CLAIM) {showClaims ? '숨김' : '보기'}
+      </button>
+
+      <StellarLeftPanel
+        entityBuckets={entityBuckets}
+        onEntityBucketChange={(b, c) =>
+          setEntityBuckets((prev) => ({ ...prev, [b]: c }))
+        }
+        factTypes={factTypes}
+        onFactTypeChange={(f, c) =>
+          setFactTypes((prev) => ({ ...prev, [f]: c }))
+        }
+        asOfFrom={asOfFrom}
+        asOfTo={asOfTo}
+        onAsOfFromChange={setAsOfFrom}
+        onAsOfToChange={setAsOfTo}
+        linkStatus={linkStatusFilter}
+        onLinkStatusChange={setLinkStatusFilter}
+      />
       {/* B-62-search-legibility — search wires straight into handleClick
        *  so selection enters the existing focus mode (camera fly-to from
        *  StellarGraph + 1-hop dim + side panel + relations chain). */}
-      <SearchBar data={activeData} onSelect={handleClick} />
+      <SearchBar data={filteredData} onSelect={handleClick} />
       <EdgeLegend mode={source} />
 
       {realIsEmpty ? <ColdStartHint /> : null}
 
       <StatusPill
         source={source}
-        nodes={activeData.nodes.length}
-        links={activeData.links.length}
+        nodes={filteredData.nodes.length}
+        links={filteredData.links.length}
         focused={focused}
       />
 

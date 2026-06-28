@@ -265,6 +265,10 @@ describe('StellarView', () => {
       };
     }
     render(<StellarView renderer={MockRenderer} syntheticBuilder={claimBuilder} />);
+    // M3-2c — CLAIM toggle defaults OFF, so claim nodes are filtered
+    // out by default. This test specifically inspects the claim-shaped
+    // tooltip, so we surface the claim node by flipping the toggle ON.
+    fireEvent.click(screen.getByTestId('stellar-claim-toggle'));
     fireEvent.click(screen.getByTestId('mock-fire-hover'));
     const tip = screen.getByTestId('stellar-hover-tooltip');
     expect(tip.getAttribute('data-fact-type')).toBe('claim');
@@ -1118,6 +1122,138 @@ describe('StellarView', () => {
     // Subject_uid match - spine fact (deg 12), NOT unrelated-hot (deg 99).
     await waitFor(() => {
       expect(lastRendererProps.current.focusedId).toBe('fact-spine');
+    });
+  });
+
+  describe('M3-2c layer toggle + filters', () => {
+    function mixedBuilder(): StellarGraphData {
+      return {
+        nodes: [
+          { id: 'a-1', label: 'A', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+            subject: 'A', predicate: 'supports', object: 'X',
+            fact_type: 'action', entity_type: 'person' },
+          { id: 'c-1', label: 'C', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+            subject: 'A', predicate: 'states', object: 'Y',
+            fact_type: 'claim', entity_type: 'person',
+            speaker_label: 'A', speech_act: '말함', content_claim: 'Y' },
+          { id: 'm-1', label: 'M', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+            subject: 'B', predicate: 'has_metric', object: '5 명',
+            fact_type: 'measurement', entity_type: 'concept',
+            metric: 'MAU', measurement_value: 5, measurement_unit: '명',
+            as_of: '2026-03-01' },
+          { id: 'loc-1', label: 'L', cluster: 0, weight: 1, x: 0, y: 0, z: 0,
+            subject: '서울', predicate: 'supports', object: 'V',
+            fact_type: 'action', entity_type: 'location' },
+        ],
+        links: [
+          { source: 'a-1', target: 'm-1', type: 'supports', link_status: 'verified' },
+          { source: 'c-1', target: 'a-1', type: 'supports', link_status: 'claimed' },
+        ],
+        clusters: ['mixed'],
+      };
+    }
+
+    it('default view: claim nodes are HIDDEN (skeleton only), not blurred', () => {
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
+      expect(ids).not.toContain('c-1');
+      expect(ids).toContain('a-1');
+      expect(ids).toContain('m-1');
+      // ★ HIDE check: filtered OUT of the renderer's data, not opacity.
+      // There is no opacity prop to inspect; the contract is that the
+      // renderer simply doesn't see the node.
+    });
+
+    it('CLAIM toggle ON: claim nodes and claimed links surface (★ both solid, no dim)', () => {
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      const toggle = screen.getByTestId('stellar-claim-toggle');
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
+      expect(ids).toContain('c-1');
+      // The claimed link is also surfaced.
+      const links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
+      expect(links.some((l) => l.link_status === 'claimed')).toBe(true);
+    });
+
+    it('CLAIM toggle label flips between 보기 and 숨김', () => {
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      const toggle = screen.getByTestId('stellar-claim-toggle');
+      expect(toggle.textContent).toContain('보기');
+      fireEvent.click(toggle);
+      expect(toggle.textContent).toContain('숨김');
+    });
+
+    it('entity-bucket filter: unchecking WHO hides person/organization/group nodes', () => {
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      // a-1 (person) survives by default.
+      let ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
+      expect(ids).toContain('a-1');
+      // Uncheck WHO.
+      const who = screen.getByTestId('stellar-filter-entity-who') as HTMLInputElement;
+      fireEvent.click(who);
+      ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
+      expect(ids).not.toContain('a-1');  // person → who → hidden
+      expect(ids).toContain('m-1');  // concept → what → still shown
+      expect(ids).toContain('loc-1');  // location → where → still shown
+    });
+
+    it('fact_type filter: unchecking action hides action nodes', () => {
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      const action = screen.getByTestId('stellar-filter-fact-type-action') as HTMLInputElement;
+      fireEvent.click(action);
+      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
+      expect(ids).not.toContain('a-1');
+      expect(ids).not.toContain('loc-1');
+      expect(ids).toContain('m-1');
+    });
+
+    it('as_of filter: from-date excludes measurements before the cutoff', () => {
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      // Set "from" past the measurement's as_of (2026-03-01).
+      const from = screen.getByTestId('stellar-filter-as-of-from') as HTMLInputElement;
+      fireEvent.change(from, { target: { value: '2026-06-01' } });
+      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
+      expect(ids).not.toContain('m-1');
+      // Non-as_of nodes are kept.
+      expect(ids).toContain('a-1');
+    });
+
+    it('★ link_status filter is DATA-ONLY (no visual style binding, 2026-06-28 PO correction)', () => {
+      // Turn on claims so the claimed link is in scope.
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      fireEvent.click(screen.getByTestId('stellar-claim-toggle'));
+      let links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
+      expect(links.some((l) => l.link_status === 'verified')).toBe(true);
+      expect(links.some((l) => l.link_status === 'claimed')).toBe(true);
+      // Apply link_status = 'verified' filter.
+      const sel = screen.getByTestId('stellar-filter-link-status') as HTMLSelectElement;
+      fireEvent.change(sel, { target: { value: 'verified' } });
+      links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
+      // Claimed links removed from the data. ★ NO opacity / no dashed
+      // style change anywhere — the renderer simply never sees them.
+      expect(links.every((l) => (l.link_status ?? 'verified') === 'verified')).toBe(true);
+      // Verified links carry NO special visual marker on the surviving
+      // link object — link_status remains pure data metadata.
+      const verifiedLink = links.find((l) => l.link_status === 'verified') as any;
+      expect(verifiedLink).toBeTruthy();
+      // The renderer prop bag must contain no opacity / dashed key
+      // that derives from link_status. (The mock renderer records the
+      // full props; assert nothing in it carries a link-status visual
+      // override.)
+      expect(lastRendererProps.current).not.toHaveProperty('linkStatusOpacity');
+      expect(lastRendererProps.current).not.toHaveProperty('linkStatusDashed');
+    });
+
+    it('★ regression: CLAIM toggle off filters OUT, never sets opacity (2026-06-28 PO correction)', () => {
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
+      // The claim node MUST be absent from the data — not present-with-opacity.
+      expect(ids).not.toContain('c-1');
+      // And no opacity-related prop leaked to the renderer.
+      expect(lastRendererProps.current).not.toHaveProperty('claimOpacity');
+      expect(lastRendererProps.current).not.toHaveProperty('hideClaimsViaOpacity');
     });
   });
 });
