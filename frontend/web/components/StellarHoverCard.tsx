@@ -22,6 +22,14 @@
  *   - kind === 'claim'  → ClaimEntityBody (speaker_label + speech_act + content_claim).
  *   - kind === undefined → 기존 ActionBody/ClaimBody/MeasurementBody (synthetic/legacy).
  *   ★ '(주체 없음)' 문자열 제거. 모든 주체-이름 fallback 은 pickEntityName 으로 통합.
+ *
+ * ★ V3b (STELLAR 발언 truncate 가시화, 2026-06-29):
+ *   ClaimBody / ClaimEntityBody 는 hover 비용을 위해 content 를 100자
+ *   까지 truncate. truncate 일 때 '더 보기' hint 를 노출.
+ *
+ * ★ V4 (hover/click 일관성, 2026-06-29):
+ *   EntityBody 가 fact_counts 가 있으면 행동/발언/수치 breakdown 노출.
+ *   click 카드 (StellarEntityCard) 와 동일한 source.
  */
 'use client';
 
@@ -196,7 +204,9 @@ function ClaimBody({ fact }: { fact: StellarNode }) {
   const speechAct = fact.speech_act?.trim() || '말함';
   const modality = classifyClaimModality(fact.speech_act);
   const verbLine = modality ? MODALITY_LABEL[modality] : speechAct;
-  const content = fact.content_claim?.trim() || fact.object || '';
+  const fullContent = fact.content_claim?.trim() || fact.object || '';
+  // ★ V3b — truncate hint when over 100 chars.
+  const isTruncated = fullContent.length > 100;
   const relatedLabels =
     fact.related_entity_labels && fact.related_entity_labels.length > 0
       ? fact.related_entity_labels
@@ -220,7 +230,15 @@ function ClaimBody({ fact }: { fact: StellarNode }) {
         data-testid="stellar-hover-card-content"
         style={{ color: TEXT_BODY, marginTop: 4, fontStyle: 'italic' }}
       >
-        “{truncate(content, 100)}”
+        “{truncate(fullContent, 100)}”
+        {isTruncated ? (
+          <span
+            data-testid="stellar-hover-card-more-hint"
+            style={{ color: ACCENT, fontStyle: 'normal', marginLeft: 4, fontSize: 10, fontWeight: 600 }}
+          >
+            더 보기
+          </span>
+        ) : null}
       </div>
       {relatedLabels ? (
         <div
@@ -273,6 +291,8 @@ function EntityBody({ fact }: { fact: StellarNode }) {
   const measurementsCount = Array.isArray(fact.measurements)
     ? fact.measurements.length
     : 0;
+  // ★ V4 — fact_counts is the same source the click card uses.
+  const factCounts = fact.fact_counts ?? null;
   return (
     <div>
       <div
@@ -286,18 +306,30 @@ function EntityBody({ fact }: { fact: StellarNode }) {
         style={{ color: TEXT_BODY, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}
       >
         {entityType ? <span>{entityType}</span> : null}
-        {entityType && degree !== null ? (
-          <span style={{ color: TEXT_DIM, margin: '0 6px' }}>·</span>
-        ) : null}
-        {degree !== null ? <span>연결 {degree}</span> : null}
-        {measurementsCount > 0 ? (
+        {factCounts ? (
           <>
-            <span style={{ color: TEXT_DIM, margin: '0 6px' }}>·</span>
-            <span data-testid="stellar-hover-card-entity-measurements-count">
-              수치 {measurementsCount}건
-            </span>
+            {entityType && degree !== null ? <br /> : null}
+            {degree !== null ? <span>연결 {degree}</span> : null}
+            <div data-testid="stellar-hover-card-entity-fact-counts">
+              행동 {factCounts.action} · 발언 {factCounts.claim} · 수치 {factCounts.measurement}
+            </div>
           </>
-        ) : null}
+        ) : (
+          <>
+            {entityType && degree !== null ? (
+              <span style={{ color: TEXT_DIM, margin: '0 6px' }}>·</span>
+            ) : null}
+            {degree !== null ? <span>연결 {degree}</span> : null}
+            {measurementsCount > 0 ? (
+              <>
+                <span style={{ color: TEXT_DIM, margin: '0 6px' }}>·</span>
+                <span data-testid="stellar-hover-card-entity-measurements-count">
+                  수치 {measurementsCount}건
+                </span>
+              </>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );
@@ -311,7 +343,9 @@ function ClaimEntityBody({ fact }: { fact: StellarNode }) {
   const speechAct = fact.speech_act?.trim() || '말함';
   const modality = classifyClaimModality(fact.speech_act);
   const verbLine = modality ? MODALITY_LABEL[modality] : speechAct;
-  const content = fact.content_claim?.trim() || fact.object || '';
+  const fullContent = fact.content_claim?.trim() || fact.object || '';
+  // ★ V3b — truncate hint when over 100 chars.
+  const isTruncated = fullContent.length > 100;
   const relatedLabels =
     fact.related_entity_labels && fact.related_entity_labels.length > 0
       ? fact.related_entity_labels
@@ -335,7 +369,15 @@ function ClaimEntityBody({ fact }: { fact: StellarNode }) {
         data-testid="stellar-hover-card-content"
         style={{ color: TEXT_BODY, marginTop: 4, fontStyle: 'italic' }}
       >
-        “{truncate(content, 100)}”
+        “{truncate(fullContent, 100)}”
+        {isTruncated ? (
+          <span
+            data-testid="stellar-hover-card-more-hint"
+            style={{ color: ACCENT, fontStyle: 'normal', marginLeft: 4, fontSize: 10, fontWeight: 600 }}
+          >
+            더 보기
+          </span>
+        ) : null}
       </div>
       {relatedLabels ? (
         <div

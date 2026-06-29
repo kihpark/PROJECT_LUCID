@@ -5,6 +5,12 @@
  *
  * Fail-soft: if the endpoint isn't wired (404) or the request rejects,
  * brief stays null and pendingCount is 0 so the nav badge collapses.
+ *
+ * ★ V1 (HOME sync 위반 클래스, 2026-06-29) — also re-fetches on tab
+ *   `visibilitychange` (→ visible) and `window` `focus`. PO principle:
+ *   "사용자 행위 후 페이지 stale 0" — when the user captures/validates
+ *   in another tab and returns to HOME, the brief must auto-refresh
+ *   without a manual Ctrl+Shift+R.
  */
 'use client';
 
@@ -69,6 +75,41 @@ export function useHomeBrief(): UseHomeBriefResult {
       [refetch],
     ),
   );
+
+  // ★ V1 — visibilitychange refetch. When the user returns to this tab
+  // after acting elsewhere (capture/validate in another tab, browser
+  // window minimised then restored), the brief is auto-refreshed so
+  // they never see stale numbers.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handler = () => {
+      if (document.visibilityState === 'visible') {
+        // eslint-disable-next-line no-console
+        console.debug('[useHomeBrief] visibility refetch');
+        refetch();
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => {
+      document.removeEventListener('visibilitychange', handler);
+    };
+  }, [refetch]);
+
+  // ★ V1 — window focus refetch. Covers the case where the OS-level
+  // window regains focus (alt-tab back to the browser) — some browsers
+  // only fire 'focus', not 'visibilitychange', in that path.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => {
+      // eslint-disable-next-line no-console
+      console.debug('[useHomeBrief] focus refetch');
+      refetch();
+    };
+    window.addEventListener('focus', handler);
+    return () => {
+      window.removeEventListener('focus', handler);
+    };
+  }, [refetch]);
 
   const pendingCount = brief?.pending_validation ?? 0;
   return { brief, pendingCount, refetch };
