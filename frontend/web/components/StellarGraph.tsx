@@ -44,6 +44,10 @@ import {
   colorForEntityType,
 } from '@/lib/stellarColors';
 import { edgeStyle, nodeRadius } from '@/lib/stellarEdgeStyle';
+// ★ L2 (PO 2026-06-29) — entity_type 별 형태 분리 (sphere / cube / diamond /
+//   roundedSquare / pin). nodeThreeObject 로 ForceGraph3D 의 default sphere
+//   geometry 를 entity_type 에 맞는 mesh 로 교체.
+import { shapeForEntityType, type StellarShape } from '@/lib/stellarShapes';
 
 // react-force-graph-3d is a client-only module. Importing it directly from
 // page code makes Next try to evaluate three.js on the server at build time
@@ -251,6 +255,11 @@ export interface StellarGraphProps {
     endpoints: { a: StellarNode; b: StellarNode },
     link?: StellarLink,
   ) => void;
+  /** ★ L4 (STELLAR legend/shape/hover, PO 2026-06-29) — edge-hover callback.
+   *  Fires when the cursor enters / leaves a link. The parent (StellarView)
+   *  renders a tiny floating tooltip showing the link's predicate only —
+   *  click stays the EdgeFactsList path (W1). null = hover left the edge. */
+  onLinkHover?: (link: StellarLink | null) => void;
   /** B-62-v1 — id of the currently focused node (set by parent on click).
    *  When non-null, distant nodes dim and only focus-incident edges keep
    *  their typed colour. */
@@ -477,6 +486,7 @@ export function StellarGraph(props: StellarGraphProps) {
     onNodeHover,
     onNodeClick,
     onLinkClick,
+    onLinkHover,
     focusedId = null,
     focusedNeighborIds,
     selectedId = null,
@@ -1308,6 +1318,69 @@ export function StellarGraph(props: StellarGraphProps) {
   // HoverTooltip reacts to onNodeHover events.
   const handleHoverInternal = onNodeHover ?? undefined;
 
+  // ★ L2 (STELLAR legend/shape/hover, PO 2026-06-29) — entity_type 별
+  //   mesh geometry 분리. ForceGraph3D 는 default 로 모든 노드를 sphere 로
+  //   그리는데, 그러면 person / organization / group 의 시각 구분이
+  //   불가능. nodeThreeObject 를 주면 그 콜백이 노드 mesh 를 직접 만든다.
+  //
+  //   real 모드 에서만 활성 — synthetic 은 cluster 색 위주의 view 라서
+  //   geometry 분기로 형태가 늘면 시각이 시끄러워진다.
+  //
+  //   각 geometry 의 효과적 시각 반경은 nodeSize 와 비슷한 크기로 맞춰
+  //   '같은 fact 가 형태만 다른' 인상을 유지.
+  const buildNodeMesh = useCallback(
+    (rawNode: unknown): THREE.Object3D | undefined => {
+      if (mode !== 'real') return undefined; // synthetic = default sphere
+      const node = rawNode as StellarNode;
+      // CLAIM 노드는 형태 분리 대상 X — 점은 그대로 sphere 유지.
+      if (node.kind === 'claim' || node.fact_type === 'claim') return undefined;
+      const shape: StellarShape = shapeForEntityType(node.entity_type ?? null);
+      const color = nodeColor(node);
+      const size = Math.max(2, nodeSize(node));
+      const radius = Math.sqrt(size); // ForceGraph3D treats nodeVal as a volume hint
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(color),
+        transparent: true,
+        opacity: 0.92,
+      });
+      let geometry: THREE.BufferGeometry;
+      switch (shape) {
+        case 'cube':
+          geometry = new THREE.BoxGeometry(radius * 1.6, radius * 1.6, radius * 1.6);
+          break;
+        case 'diamond': {
+          // ★ diamond = octahedron (마름모의 3D 형태)
+          geometry = new THREE.OctahedronGeometry(radius * 1.1, 0);
+          break;
+        }
+        case 'roundedSquare': {
+          // Tetrahedron — distinct from sphere/cube/diamond, evokes "사건".
+          geometry = new THREE.TetrahedronGeometry(radius * 1.2, 0);
+          break;
+        }
+        case 'pin': {
+          // Cone evoking a map pin — point downward.
+          geometry = new THREE.ConeGeometry(radius * 0.9, radius * 2.2, 12);
+          break;
+        }
+        case 'sphere':
+        case 'circle':
+        case 'dot':
+        default:
+          geometry = new THREE.SphereGeometry(radius, 16, 16);
+          break;
+      }
+      const mesh = new THREE.Mesh(geometry, material);
+      // diamond / roundedSquare 가 random orientation 보다 정직한 표지가
+      // 되도록 살짝 회전 — 동일 entity_type 끼리는 같은 방향을 유지하므로
+      // 사용자가 형태를 학습하기 쉽다.
+      if (shape === 'diamond') mesh.rotation.y = Math.PI / 4;
+      if (shape === 'pin') mesh.rotation.z = Math.PI; // cone tip down
+      return mesh;
+    },
+    [mode, nodeColor, nodeSize],
+  );
+
   // fix/stellar-cleanup #9 — the `labelOf` callback (and its `nodeLabel`
   // prop on ForceGraph3D) used to feed react-force-graph-3d's default
   // hover hint — the small pill that rendered "subject · object" next
@@ -1359,6 +1432,12 @@ export function StellarGraph(props: StellarGraphProps) {
            * the only hover surface. */
           nodeColor={nodeColor}
           nodeVal={nodeSize}
+          /* ★ L2 (PO 2026-06-29) — entity_type 별 형태 분리. real 모드만
+           * 활성 (synthetic 은 cluster 색 위주의 view). buildNodeMesh 가
+           * undefined 를 돌려주면 ForceGraph3D 는 default sphere geometry
+           * 를 쓰기 때문에 호환이 깨지지 않는다. */
+          nodeThreeObject={buildNodeMesh}
+          nodeThreeObjectExtend={false}
           /* B-62-fix3 — small reductions across the lighting surfaces
            * so SYNTHETIC density (2000 nodes) does not pile per-pixel
            * bloom contributions into whiteout: node opacity slightly
@@ -1394,6 +1473,20 @@ export function StellarGraph(props: StellarGraphProps) {
           showNavInfo={false}
           onNodeHover={handleHoverInternal}
           onNodeClick={onNodeClick}
+          /* ★ L4 (STELLAR legend/shape/hover, PO 2026-06-29) — link hover
+           * callback. ForceGraph3D fires onLinkHover with the raw link
+           * object (or null on leave). We forward the StellarLink directly
+           * so the parent's StellarEdgeHoverTooltip can read .predicate /
+           * .predicates. Cursor coords are tracked at the StellarView layer
+           * via the existing global mousemove listener. */
+          onLinkHover={(link: unknown) => {
+            if (!onLinkHover) return;
+            if (!link) {
+              onLinkHover(null);
+              return;
+            }
+            onLinkHover(link as StellarLink);
+          }}
           /* ★ W1 (STELLAR 6-class fix, 2026-06-29) — edge click wired.
            * After d3-force pass `link.source`/`link.target` are full
            * NodeObject references (not just string ids). Defensively

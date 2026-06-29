@@ -7,11 +7,20 @@ import {
   colorForEntityType,
 } from '@/lib/stellarColors';
 
-describe('ENTITY_COLORS (M3-2b mapping)', () => {
-  it('maps WHO entity types to teal', () => {
+describe('ENTITY_COLORS (M3-2b + ★ L2 PO 2026-06-29 mapping)', () => {
+  // ★ L2 (PO 2026-06-29): WHO 묶음 안에서 person / organization / group
+  //   의 색을 미세하게 분리. shape 채널은 stellarShapes 가 담당하지만 색도
+  //   sub-channel 로 추가 — 정상 시각 사용자에게도 인지 부담을 더 줄인다.
+  it('★ L2 — WHO subtype colors are distinct (person / org / group)', () => {
     expect(ENTITY_COLORS.person).toBe('#5EEAD4');
-    expect(ENTITY_COLORS.organization).toBe('#5EEAD4');
-    expect(ENTITY_COLORS.group).toBe('#5EEAD4');
+    expect(ENTITY_COLORS.organization).toBe('#22D3EE');
+    expect(ENTITY_COLORS.group).toBe('#A3E635');
+    const whoSet = new Set<string>([
+      ENTITY_COLORS.person,
+      ENTITY_COLORS.organization,
+      ENTITY_COLORS.group,
+    ]);
+    expect(whoSet.size).toBe(3);
   });
 
   it('maps WHAT entity types to amber/gold', () => {
@@ -33,12 +42,15 @@ describe('ENTITY_COLORS (M3-2b mapping)', () => {
 describe('colorForEntityType (lookup helper)', () => {
   it('returns the mapped color when type is known', () => {
     expect(colorForEntityType('person')).toBe('#5EEAD4');
+    expect(colorForEntityType('organization')).toBe('#22D3EE');
+    expect(colorForEntityType('group')).toBe('#A3E635');
     expect(colorForEntityType('event')).toBe('#A78BFA');
     expect(colorForEntityType('place')).toBe('#7A8CA3');
   });
 
   it('is case-insensitive', () => {
     expect(colorForEntityType('Person')).toBe('#5EEAD4');
+    expect(colorForEntityType('ORGANIZATION')).toBe('#22D3EE');
     expect(colorForEntityType('EVENT')).toBe('#A78BFA');
   });
 

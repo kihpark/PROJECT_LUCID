@@ -346,6 +346,45 @@ describe('claim hover full content (★ no 더 보기 — PO 2026-06-29)', () =>
   });
 });
 
+// ★ L3 (STELLAR legend/shape/hover, PO 2026-06-29) — 발언 내용 부각.
+//   원칙: 사용자가 가장 알고 싶은 것 = 발언 내용 자체. content 의 font-size
+//   가 speaker / speech-act font-size 보다 명백히 커야 한다.
+describe('claim hover content emphasis (★ L3 — content > speaker)', () => {
+  it('claim content font-size > speaker font-size', () => {
+    const fact = makeNode({
+      fact_type: 'claim',
+      speaker_label: '강재호',
+      speech_act: 'assertion',
+      content_claim: '본 분기 매출이 작년 동기 대비 크게 증가했다.',
+    });
+    render(<StellarHoverCard fact={fact} position={POS} />);
+    const content = screen.getByTestId('stellar-hover-card-content') as HTMLElement;
+    const speaker = screen.getByTestId('stellar-hover-card-speaker') as HTMLElement;
+    const contentFs = parseFloat(content.style.fontSize);
+    const speakerFs = parseFloat(speaker.style.fontSize);
+    expect(contentFs).toBeGreaterThan(speakerFs);
+  });
+
+  it('★ L3 — v2 claim node also has content font-size > speaker font-size', () => {
+    const fact = makeNode({
+      id: 'claim-1',
+      kind: 'claim',
+      speaker_label: '강재호',
+      speech_act: 'judgment',
+      content_claim: 'X 가 옳다',
+      subject: undefined,
+      predicate: undefined,
+      object: undefined,
+    });
+    render(<StellarHoverCard fact={fact} position={POS} />);
+    const content = screen.getByTestId('stellar-hover-card-content') as HTMLElement;
+    const speaker = screen.getByTestId('stellar-hover-card-speaker') as HTMLElement;
+    const contentFs = parseFloat(content.style.fontSize);
+    const speakerFs = parseFloat(speaker.style.fontSize);
+    expect(contentFs).toBeGreaterThan(speakerFs);
+  });
+});
+
 // ★ V4 (hover/click 일관성 위반 클래스, 2026-06-29) — fact_counts unified.
 import { StellarEntityCard } from '@/components/StellarEntityCard';
 

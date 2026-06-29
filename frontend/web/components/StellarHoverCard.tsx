@@ -213,37 +213,53 @@ function ClaimBody({ fact }: { fact: StellarNode }) {
     fact.related_entity_labels && fact.related_entity_labels.length > 0
       ? fact.related_entity_labels
       : null;
+  // ★ L3 (STELLAR legend/shape/hover, PO 2026-06-29) — 발언 내용 부각.
+  //   사용자가 가장 알고 싶은 것 = 발언 내용 자체. 화자/양태는 sub-info.
+  //   - content : 큰 font (14), 가장 위, 본문 굵기 600.
+  //   - speaker / verb : sub line, fontSize 11, dim color.
   return (
     <div>
       <div
-        data-testid="stellar-hover-card-speaker"
-        style={{ color: WHO_COLOR, fontWeight: 600 }}
-      >
-        {speaker}
-      </div>
-      <div
-        data-testid="stellar-hover-card-speech-act"
-        data-modality={modality ?? ''}
-        style={{ color: ACCENT, fontSize: 11, marginTop: 2, fontWeight: 600 }}
-      >
-        {verbLine}
-      </div>
-      <div
         data-testid="stellar-hover-card-content"
         style={{
-          color: TEXT_BODY,
-          marginTop: 4,
-          fontStyle: 'italic',
+          color: TEXT_PRIMARY,
+          fontSize: 14,
+          fontWeight: 600,
+          lineHeight: 1.5,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
       >
         “{fullContent}”
       </div>
+      <div
+        style={{
+          marginTop: 8,
+          display: 'flex',
+          gap: 6,
+          alignItems: 'baseline',
+          flexWrap: 'wrap',
+        }}
+      >
+        <span
+          data-testid="stellar-hover-card-speaker"
+          style={{ color: WHO_COLOR, fontSize: 11, fontWeight: 500 }}
+        >
+          {speaker}
+        </span>
+        <span style={{ color: TEXT_DIM, fontSize: 11 }}>·</span>
+        <span
+          data-testid="stellar-hover-card-speech-act"
+          data-modality={modality ?? ''}
+          style={{ color: TEXT_DIM, fontWeight: 400, fontSize: 11 }}
+        >
+          {verbLine}
+        </span>
+      </div>
       {relatedLabels ? (
         <div
           data-testid="stellar-hover-card-related"
-          style={{ color: TEXT_DIM, fontSize: 10, marginTop: 6, lineHeight: 1.5 }}
+          style={{ color: TEXT_DIM, fontSize: 10, marginTop: 4, lineHeight: 1.5 }}
         >
           관련: {relatedLabels.join(', ')}
         </div>
@@ -337,7 +353,9 @@ function EntityBody({ fact }: { fact: StellarNode }) {
 
 /** fix/stellar-cards-entity-node-compat — v2 claim-node body.
  *  Hover over a claim node → speaker_label + speech_act + content_claim
- *  (+ related entity labels). */
+ *  (+ related entity labels).
+ *  ★ L3 (PO 2026-06-29) — content 가 가장 큰 폰트 + 가장 위 (사용자가 가장
+ *  알고 싶은 것 = 발언 내용). speaker / 양태는 sub-info. */
 function ClaimEntityBody({ fact }: { fact: StellarNode }) {
   const speaker = fact.speaker_label?.trim() || '(화자 미상)';
   const speechAct = fact.speech_act?.trim() || '말함';
@@ -355,34 +373,46 @@ function ClaimEntityBody({ fact }: { fact: StellarNode }) {
   return (
     <div>
       <div
-        data-testid="stellar-hover-card-speaker"
-        style={{ color: WHO_COLOR, fontWeight: 600 }}
-      >
-        {speaker}
-      </div>
-      <div
-        data-testid="stellar-hover-card-speech-act"
-        data-modality={modality ?? ''}
-        style={{ color: ACCENT, fontSize: 11, marginTop: 2, fontWeight: 600 }}
-      >
-        {verbLine}
-      </div>
-      <div
         data-testid="stellar-hover-card-content"
         style={{
-          color: TEXT_BODY,
-          marginTop: 4,
-          fontStyle: 'italic',
+          color: TEXT_PRIMARY,
+          fontSize: 14,
+          fontWeight: 600,
+          lineHeight: 1.5,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
       >
         “{fullContent}”
       </div>
+      <div
+        style={{
+          marginTop: 8,
+          display: 'flex',
+          gap: 6,
+          alignItems: 'baseline',
+          flexWrap: 'wrap',
+        }}
+      >
+        <span
+          data-testid="stellar-hover-card-speaker"
+          style={{ color: WHO_COLOR, fontSize: 11, fontWeight: 500 }}
+        >
+          {speaker}
+        </span>
+        <span style={{ color: TEXT_DIM, fontSize: 11 }}>·</span>
+        <span
+          data-testid="stellar-hover-card-speech-act"
+          data-modality={modality ?? ''}
+          style={{ color: TEXT_DIM, fontWeight: 400, fontSize: 11 }}
+        >
+          {verbLine}
+        </span>
+      </div>
       {relatedLabels ? (
         <div
           data-testid="stellar-hover-card-related"
-          style={{ color: TEXT_DIM, fontSize: 10, marginTop: 6, lineHeight: 1.5 }}
+          style={{ color: TEXT_DIM, fontSize: 10, marginTop: 4, lineHeight: 1.5 }}
         >
           관련: {relatedLabels.join(', ')}
         </div>
