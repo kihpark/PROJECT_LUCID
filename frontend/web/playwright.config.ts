@@ -1,5 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// ★ fix/stellar-6-class-with-screenshots — STELLAR_E2E_PORT lets the dev
+// PC route Playwright off the default port if another process (eg.
+// docker-compose lucid-web) is already bound to :3000. CI keeps :3000.
+const PORT = process.env.STELLAR_E2E_PORT
+  ? Number(process.env.STELLAR_E2E_PORT)
+  : 3000;
+const BASE_URL = `http://localhost:${PORT}`;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -11,7 +19,7 @@ export default defineConfig({
     ['html', { outputFolder: 'playwright-report', open: 'never' }],
   ],
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: BASE_URL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -26,8 +34,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'corepack pnpm dev',
-    url: 'http://localhost:3000',
+    command: `corepack pnpm exec next dev -p ${PORT}`,
+    url: BASE_URL,
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,
   },

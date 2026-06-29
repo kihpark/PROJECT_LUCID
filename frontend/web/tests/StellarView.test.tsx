@@ -277,10 +277,8 @@ describe('StellarView', () => {
       };
     }
     render(<StellarView renderer={MockRenderer} syntheticBuilder={claimBuilder} />);
-    // M3-2c — CLAIM toggle defaults OFF, so claim nodes are filtered
-    // out by default. This test specifically inspects the claim-shaped
-    // tooltip, so we surface the claim node by flipping the toggle ON.
-    fireEvent.click(screen.getByTestId('stellar-claim-toggle'));
+    // ★ N1 (2026-06-29) — CLAIM toggle defaults ON now, so claim nodes
+    // are visible by default; no extra click required.
     fireEvent.click(screen.getByTestId('mock-fire-hover'));
     const tip = screen.getByTestId('stellar-hover-card');
     expect(tip.getAttribute('data-fact-type')).toBe('claim');
@@ -1169,36 +1167,35 @@ describe('StellarView', () => {
       };
     }
 
-    it('default view: claim nodes are HIDDEN (skeleton only), not blurred', () => {
+    it('★ N1 default view: claim nodes are SHOWN (default ON, 2026-06-29)', () => {
       render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
-      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
-      expect(ids).not.toContain('c-1');
-      expect(ids).toContain('a-1');
-      expect(ids).toContain('m-1');
-      // ★ HIDE check: filtered OUT of the renderer's data, not opacity.
-      // There is no opacity prop to inspect; the contract is that the
-      // renderer simply doesn't see the node.
-    });
-
-    it('CLAIM toggle ON: claim nodes and claimed links surface (★ both solid, no dim)', () => {
-      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
-      const toggle = screen.getByTestId('stellar-claim-toggle');
-      expect(toggle.getAttribute('aria-pressed')).toBe('false');
-      fireEvent.click(toggle);
-      expect(toggle.getAttribute('aria-pressed')).toBe('true');
       const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
       expect(ids).toContain('c-1');
-      // The claimed link is also surfaced.
-      const links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
-      expect(links.some((l) => l.link_status === 'claimed')).toBe(true);
+      expect(ids).toContain('a-1');
+      expect(ids).toContain('m-1');
     });
 
-    it('CLAIM toggle label flips between 보기 and 숨김', () => {
+    it('★ N1 CLAIM toggle OFF: claim nodes and claimed links HIDDEN', () => {
       render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
       const toggle = screen.getByTestId('stellar-claim-toggle');
-      expect(toggle.textContent).toContain('보기');
+      // ★ N1 (2026-06-29) — default ON. aria-pressed starts 'true'.
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
       fireEvent.click(toggle);
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
+      expect(ids).not.toContain('c-1');
+      // Claimed link is gone too.
+      const links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
+      expect(links.some((l) => l.link_status === 'claimed')).toBe(false);
+    });
+
+    it('CLAIM toggle label flips between 숨김 (default ON) and 보기 (OFF)', () => {
+      render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      const toggle = screen.getByTestId('stellar-claim-toggle');
+      // ★ N1 (2026-06-29) — default ON → label '숨김'.
       expect(toggle.textContent).toContain('숨김');
+      fireEvent.click(toggle);
+      expect(toggle.textContent).toContain('보기');
     });
 
     it('entity-bucket filter: unchecking WHO hides person/organization/group nodes', () => {
@@ -1242,8 +1239,8 @@ describe('StellarView', () => {
       // The left-panel control is gone.
       expect(screen.queryByTestId('stellar-filter-link-status')).not.toBeInTheDocument();
       // BUT link_status is still preserved on the link DATA (used by
-      // the CLAIM toggle path). Flip CLAIM on so claimed links surface.
-      fireEvent.click(screen.getByTestId('stellar-claim-toggle'));
+      // the CLAIM toggle path). ★ N1 (2026-06-29) — CLAIM toggle is now
+      // ON by default → claimed links already surface, no click needed.
       const links = lastRendererProps.current.data.links as Array<{ link_status?: string }>;
       expect(links.some((l) => l.link_status === 'verified')).toBe(true);
       expect(links.some((l) => l.link_status === 'claimed')).toBe(true);
@@ -1255,6 +1252,9 @@ describe('StellarView', () => {
 
     it('★ regression: CLAIM toggle off filters OUT, never sets opacity (2026-06-28 PO correction)', () => {
       render(<StellarView renderer={MockRenderer} syntheticBuilder={mixedBuilder} />);
+      // ★ N1 (2026-06-29) — toggle defaults ON. Flip it OFF first to
+      //   exercise the hide path, then assert the claim is filtered out.
+      fireEvent.click(screen.getByTestId('stellar-claim-toggle'));
       const ids = (lastRendererProps.current.data.nodes as StellarNode[]).map((n) => n.id);
       // The claim node MUST be absent from the data — not present-with-opacity.
       expect(ids).not.toContain('c-1');
@@ -1401,7 +1401,8 @@ describe('M3-2e regression guard - interactions', () => {
     expect(screen.queryByTestId('stellar-filter-fact-type-action')).not.toBeInTheDocument();
     expect(screen.queryByTestId('stellar-filter-link-status')).not.toBeInTheDocument();
     const claimToggle = screen.getByTestId('stellar-claim-toggle');
-    expect(claimToggle.getAttribute('aria-pressed')).toBe('false');
+    // ★ N1 (2026-06-29) — default flipped to ON.
+    expect(claimToggle.getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(screen.getByTestId('mock-fire-click'));
     expect(screen.getByTestId('stellar-entity-card')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('mock-fire-link-click'));
@@ -1429,6 +1430,8 @@ describe('M3-2e regression guard - interactions', () => {
       };
     }
     render(<StellarView renderer={MockRenderer} syntheticBuilder={builder} />);
+    // ★ N1 (2026-06-29) — toggle defaults ON now. Flipping once exercises
+    //   the OFF→ON→OFF cycle so the invariant holds across both states.
     fireEvent.click(screen.getByTestId('stellar-claim-toggle'));
     const props = lastRendererProps.current as any;
     expect(props).not.toHaveProperty('linkStatusOpacity');

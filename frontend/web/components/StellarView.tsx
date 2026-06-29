@@ -72,21 +72,52 @@ export function predicateThemeColor(predicate: string | null | undefined): strin
   return '#9db0b5';
 }
 
-/** M3-2c — map a node's entity_type string onto the WHO/WHAT/WHERE
- *  buckets used by the left-panel filter. Undefined / unknown
- *  entity_type matches every bucket (legacy guard). Pure for tests. */
-export function entityBucketFor(entityType: string | null | undefined): Set<EntityBucket> {
-  if (!entityType) {
-    return new Set(['who', 'what', 'where']);
-  }
+/** ★ W3 (STELLAR 6-class fix, 2026-06-29) — single-bucket entity-type map.
+ *  Old behaviour: `null/undefined` → all 3 buckets (legacy guard). That made
+ *  unknown-type WHO entities persist after WHO was unchecked — the WHERE
+ *  필터 → person 잔존 violation class.
+ *
+ *  New behaviour:
+ *    person / organization / group           → who
+ *    product / resource / concept / knowledge → what
+ *    event / artifact                         → what
+ *    place / location / region / venue        → where
+ *    others / null / undefined                → 'unknown' (filter passes
+ *                                                them through unless ALL
+ *                                                bucket toggles are off).
+ *  Pure helpers for tests. */
+export const ENTITY_TYPE_TO_BUCKET: Record<string, 'who' | 'what' | 'where'> = {
+  person: 'who',
+  organization: 'who',
+  group: 'who',
+  product: 'what',
+  resource: 'what',
+  concept: 'what',
+  knowledge: 'what',
+  event: 'what',
+  artifact: 'what',
+  place: 'where',
+  location: 'where',
+  region: 'where',
+  venue: 'where',
+};
+
+export function entityBucketForSingle(
+  entityType: string | null | undefined,
+): 'who' | 'what' | 'where' | 'unknown' {
+  if (!entityType) return 'unknown';
   const t = entityType.toLowerCase();
-  if (t === 'person' || t === 'organization' || t === 'group') {
-    return new Set(['who']);
-  }
-  if (t === 'location' || t === 'region' || t === 'venue' || t === 'place') {
-    return new Set(['where']);
-  }
-  return new Set(['what']);
+  return ENTITY_TYPE_TO_BUCKET[t] ?? 'unknown';
+}
+
+/** Backward-compat: returns a Set. Known types → single-element Set,
+ *  'unknown' → empty Set (caller decides how to treat). */
+export function entityBucketFor(
+  entityType: string | null | undefined,
+): Set<EntityBucket> {
+  const b = entityBucketForSingle(entityType);
+  if (b === 'unknown') return new Set();
+  return new Set([b]);
 }
 
 const ACCENT = '#3fe0c6';
@@ -772,11 +803,12 @@ export function StellarView(props: StellarViewProps = {}) {
   // the focus subgraph growing as the user explores without losing
   // the anchor. Reset on focus change / focus clear / mode toggle.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  // M3-2c — "발언(CLAIM) 보기" toggle. Default OFF → claim nodes
-  // and 'claimed' links are HIDDEN (NOT blurred — per 2026-06-28 PO
-  // correction). The skeleton view (action + measurement nodes,
-  // verified links) is the default surface.
-  const [showClaims, setShowClaims] = useState(false);
+  // M3-2c — "발언(CLAIM) 보기" toggle. ★ N1 (STELLAR 6-class fix,
+  // 2026-06-29 PO): default flipped to ON. CLAIM 노드는 default
+  // 가시이며, 사용자가 명시적으로 숨김을 누르면 hide. PO 의 dogfood
+  // 흐름에서 발언 노드가 안 보여 fact_type 균형이 무너졌던 violation
+  // 클래스를 닫는다.
+  const [showClaims, setShowClaims] = useState(true);
 
   // fix/stellar-leftpanel-simplify (2026-06-28 PO) — left-panel reduced
   // to ENTITY only. Old fact_type / as_of / link_status state removed
@@ -878,27 +910,38 @@ export function StellarView(props: StellarViewProps = {}) {
     // ★ link_status / fact_type FIELDS on the data are preserved
     // (data-layer untouched per fix/stellar-leftpanel-simplify directive);
     // only the UI filters have been simplified away.
+    // ★ N1 (2026-06-29 PO): the toggle defaults to ON now, so this branch
+    // only runs when the user has explicitly hidden claims.
     if (!showClaims) {
-      nodes = nodes.filter((n) => (n.fact_type ?? 'action') !== 'claim');
+      nodes = nodes.filter(
+        (n) => n.kind !== 'claim' && (n.fact_type ?? 'action') !== 'claim',
+      );
       links = links.filter((l) => (l.link_status ?? 'verified') !== 'claimed');
     }
 
-    // Entity-type bucket filter (WHO / WHAT / WHERE). undefined
-    // entity_type matches every bucket so legacy data survives unless
-    // the user explicitly unchecks every bucket. ★ 좌패널의 유일하게
-    // 남은 데이터 필터.
+    // ★ W3 (STELLAR 6-class fix, 2026-06-29) — entity-bucket filter.
+    //
+    // Rules (PO 의뢰서 verbatim):
+    //   • CLAIM 노드 (kind === 'claim' OR fact_type === 'claim') 는 bucket
+    //     필터를 받지 않는다 — showClaims 토글만 따른다.
+    //   • Known-bucket entity 노드 (who/what/where) 는 해당 토글이 켜져
+    //     있어야 surface.
+    //   • Unknown 버킷 entity 노드 (entity_type missing or unmapped) 는
+    //     항상 surface — 사용자가 모든 토글을 꺼야만 사라진다.
     const allBucketsOff =
       !entityBuckets.who && !entityBuckets.what && !entityBuckets.where;
-    if (!allBucketsOff && !(entityBuckets.who && entityBuckets.what && entityBuckets.where)) {
-      nodes = nodes.filter((n) => {
-        const node_buckets = entityBucketFor(n.entity_type);
-        for (const b of node_buckets) {
-          if (entityBuckets[b]) return true;
-        }
-        return false;
-      });
-    } else if (allBucketsOff) {
+    if (allBucketsOff) {
       nodes = [];
+    } else if (
+      !(entityBuckets.who && entityBuckets.what && entityBuckets.where)
+    ) {
+      nodes = nodes.filter((n) => {
+        // CLAIM 노드는 통과 — showClaims 가 이미 위에서 분기.
+        if (n.kind === 'claim' || n.fact_type === 'claim') return true;
+        const b = entityBucketForSingle(n.entity_type);
+        if (b === 'unknown') return true; // unknown 은 항상 surface
+        return entityBuckets[b];
+      });
     }
 
     // Drop links that point at a node we filtered out.
@@ -1288,6 +1331,44 @@ export function StellarView(props: StellarViewProps = {}) {
           onClose={() => setEdgeClick(null)}
         />
       ) : null}
+      {/* ★ W1 (STELLAR 6-class fix, 2026-06-29) — Playwright e2e hook.
+       *  3D canvas 엣지 클릭은 Playwright 가 안정적으로 reproduce 할 수
+       *  없다 (force-graph-3d → three.js raycast). 이 hidden button 은
+       *  display:none 으로 사용자에게 안 보이지만 testid 로 fire 가능 →
+       *  e2e 가 edgeClick state 를 발화시켜 StellarEdgeFactsList 가
+       *  실제 production 경로 (setEdgeClick) 를 지나도록 한다.
+       *
+       *  Production 영향 0 (display:none, 사용자 노출 X).
+       *  data.links 가 비어 있으면 noop 으로 graceful 처리. */}
+      <button
+        type="button"
+        data-testid="stellar-e2e-fire-edge-click"
+        aria-hidden="true"
+        tabIndex={-1}
+        onClick={() => {
+          const ns = filteredData.nodes;
+          const ls = filteredData.links;
+          if (ns.length === 0 || ls.length === 0) return;
+          const link = ls[0];
+          if (!link) return;
+          const srcId =
+            typeof link.source === 'string'
+              ? link.source
+              : (link.source as { id?: string } | null)?.id ?? '';
+          const tgtId =
+            typeof link.target === 'string'
+              ? link.target
+              : (link.target as { id?: string } | null)?.id ?? '';
+          const fallback = ns[0];
+          if (!fallback) return;
+          const a = ns.find((n) => n.id === srcId) ?? fallback;
+          const b = ns.find((n) => n.id === tgtId) ?? ns[1] ?? fallback;
+          setEdgeClick({ a, b, link });
+        }}
+        style={{ display: 'none' }}
+      >
+        e2e: fire edge click
+      </button>
     </div>
   );
 }

@@ -9,6 +9,10 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     globals: true,
     css: false,
+    // ★ fix/stellar-6-class-with-screenshots — exclude Playwright e2e
+    // specs so vitest does not try to collect them (they use the
+    // @playwright/test runner, not vitest).
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
   },
   resolve: {
     alias: {
