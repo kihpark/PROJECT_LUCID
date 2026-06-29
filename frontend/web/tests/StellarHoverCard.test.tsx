@@ -260,9 +260,11 @@ describe('v2 entity-node branch (★ fix/stellar-cards-entity-node-compat)', () 
   });
 });
 
-// ★ V3b (STELLAR 발언 truncate 가시화, 2026-06-29) — '더 보기' hint.
-describe('claim hover truncate hint (★ V3b)', () => {
-  it('claim hover card shows "더 보기" hint when content > 100 chars', () => {
+// ★ fix/hover-full-content-no-deobogi (PO 2026-06-29):
+//   옛 V3b 의 '더 보기' hint = UX 거짓 약속 (사용자가 hover 위치 마우스
+//   가면 tooltip 사라져 클릭 불가능). hover 도 full content 표시 + hint 제거.
+describe('claim hover full content (★ no 더 보기 — PO 2026-06-29)', () => {
+  it('claim hover card shows FULL content (no truncate)', () => {
     const longText = 'X'.repeat(150);
     const fact = makeNode({
       fact_type: 'claim',
@@ -271,22 +273,14 @@ describe('claim hover truncate hint (★ V3b)', () => {
       content_claim: longText,
     });
     render(<StellarHoverCard fact={fact} position={POS} />);
-    expect(screen.getByTestId('stellar-hover-card-more-hint')).toBeTruthy();
-    expect(screen.getByTestId('stellar-hover-card-more-hint').textContent).toBe('더 보기');
-  });
-
-  it('claim hover card omits "더 보기" hint when content fits', () => {
-    const fact = makeNode({
-      fact_type: 'claim',
-      speaker_label: 'A',
-      speech_act: 'assertion',
-      content_claim: 'short content',
-    });
-    render(<StellarHoverCard fact={fact} position={POS} />);
+    const content = screen.getByTestId('stellar-hover-card-content');
+    expect(content.textContent).toContain(longText);
+    // ★ "더 보기" hint 0 (★ 거짓 약속 제거)
     expect(screen.queryByTestId('stellar-hover-card-more-hint')).toBeNull();
+    expect(content.textContent).not.toContain('더 보기');
   });
 
-  it('v2 claim node also shows "더 보기" hint when truncated', () => {
+  it('v2 claim node also shows FULL content', () => {
     const longText = 'Y'.repeat(150);
     const fact = makeNode({
       id: 'claim-1',
@@ -299,7 +293,9 @@ describe('claim hover truncate hint (★ V3b)', () => {
       object: undefined,
     });
     render(<StellarHoverCard fact={fact} position={POS} />);
-    expect(screen.getByTestId('stellar-hover-card-more-hint')).toBeTruthy();
+    const content = screen.getByTestId('stellar-hover-card-content');
+    expect(content.textContent).toContain(longText);
+    expect(screen.queryByTestId('stellar-hover-card-more-hint')).toBeNull();
   });
 });
 

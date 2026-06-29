@@ -205,8 +205,10 @@ function ClaimBody({ fact }: { fact: StellarNode }) {
   const modality = classifyClaimModality(fact.speech_act);
   const verbLine = modality ? MODALITY_LABEL[modality] : speechAct;
   const fullContent = fact.content_claim?.trim() || fact.object || '';
-  // ★ V3b — truncate hint when over 100 chars.
-  const isTruncated = fullContent.length > 100;
+  // ★ fix/hover-full-content-no-deobogi (PO 2026-06-29):
+  //   옛 V3b truncate + '더 보기' hint = UX 거짓 약속.
+  //   사용자 마우스가 tooltip 위치로 가면 hover state 끝나 tooltip 사라짐
+  //   → '더 보기' 클릭 불가능. 거짓 약속 제거하고 hover 도 full 표시.
   const relatedLabels =
     fact.related_entity_labels && fact.related_entity_labels.length > 0
       ? fact.related_entity_labels
@@ -228,17 +230,15 @@ function ClaimBody({ fact }: { fact: StellarNode }) {
       </div>
       <div
         data-testid="stellar-hover-card-content"
-        style={{ color: TEXT_BODY, marginTop: 4, fontStyle: 'italic' }}
+        style={{
+          color: TEXT_BODY,
+          marginTop: 4,
+          fontStyle: 'italic',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
       >
-        “{truncate(fullContent, 100)}”
-        {isTruncated ? (
-          <span
-            data-testid="stellar-hover-card-more-hint"
-            style={{ color: ACCENT, fontStyle: 'normal', marginLeft: 4, fontSize: 10, fontWeight: 600 }}
-          >
-            더 보기
-          </span>
-        ) : null}
+        “{fullContent}”
       </div>
       {relatedLabels ? (
         <div
@@ -344,8 +344,10 @@ function ClaimEntityBody({ fact }: { fact: StellarNode }) {
   const modality = classifyClaimModality(fact.speech_act);
   const verbLine = modality ? MODALITY_LABEL[modality] : speechAct;
   const fullContent = fact.content_claim?.trim() || fact.object || '';
-  // ★ V3b — truncate hint when over 100 chars.
-  const isTruncated = fullContent.length > 100;
+  // ★ fix/hover-full-content-no-deobogi (PO 2026-06-29):
+  //   옛 V3b truncate + '더 보기' hint = UX 거짓 약속.
+  //   사용자 마우스가 tooltip 위치로 가면 hover state 끝나 tooltip 사라짐
+  //   → '더 보기' 클릭 불가능. 거짓 약속 제거하고 hover 도 full 표시.
   const relatedLabels =
     fact.related_entity_labels && fact.related_entity_labels.length > 0
       ? fact.related_entity_labels
@@ -367,17 +369,15 @@ function ClaimEntityBody({ fact }: { fact: StellarNode }) {
       </div>
       <div
         data-testid="stellar-hover-card-content"
-        style={{ color: TEXT_BODY, marginTop: 4, fontStyle: 'italic' }}
+        style={{
+          color: TEXT_BODY,
+          marginTop: 4,
+          fontStyle: 'italic',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
       >
-        “{truncate(fullContent, 100)}”
-        {isTruncated ? (
-          <span
-            data-testid="stellar-hover-card-more-hint"
-            style={{ color: ACCENT, fontStyle: 'normal', marginLeft: 4, fontSize: 10, fontWeight: 600 }}
-          >
-            더 보기
-          </span>
-        ) : null}
+        “{fullContent}”
       </div>
       {relatedLabels ? (
         <div
