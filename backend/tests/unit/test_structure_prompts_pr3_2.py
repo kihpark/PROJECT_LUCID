@@ -15,8 +15,13 @@ def test_nine_few_shot_examples_total():
     rich-metric completeness (노사) + as_of-disambiguation (적용) → 13.
     m32a-stage2-role-channel (PO 2026-06-28) appends 1 more for the
     multi-participant role-channel anchor (모스 탄 / 트럼프) → 14.
+    m32a-stage3-claim-related-entities (PO 2026-06-28) appends 1
+    more for the aweb / 6·3선거 related_entity_uids anchor → 15.
+    feat/v2-action-entity-edge-class-fix (PO 2026-06-29) appends 3
+    more for the ACTION-object-must-be-entity-uid rule (강재호 /
+    한국은행 / Apple) → 18.
     """
-    assert len(FEW_SHOT_EXAMPLES) == 14
+    assert len(FEW_SHOT_EXAMPLES) == 18
 
 
 def test_ko_statistic_example_present():

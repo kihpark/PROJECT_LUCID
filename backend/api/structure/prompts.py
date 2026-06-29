@@ -291,6 +291,73 @@ Run these IN ORDER on the input text:
               (action 으로 fallback OK)
             - 한 문장에서 둘 이상 나오면 별도 fact 두 개 이상
 
+  Step 2d. RULE — ACTION 의 object_value 는 entity uid 강제
+          (v0.2.1 step 2d, action-entity-edge-class, PO 2026-06-29):
+
+          ★ 원칙 (STELLAR v2 원칙 1):
+            "모든 ACTION fact = 두 entity 사이의 엣지" — ACTION 의
+            의미는 어떤 entity 가 어떤 entity 에게 무엇을 했다 이다.
+            그러므로 ACTION 의 subject 와 object 는 **둘 다 entity** 여야
+            한다. object 가 자연어 명사구 (literal) 라면 ACTION 이 아니다.
+
+          출력 규칙:
+            - fact_type='action' 의 subject_uid : entity 의 obj-N (필수).
+            - fact_type='action' 의 object_value :
+                * 우선 obj-N placeholder (objects 배열의 entity 가리키).
+                * literal 자연어 명사구 ("기준금리", "흑자", "1938년")
+                  은 entity 가 아니므로 ACTION object 에 두지 않는다.
+                  두 갈래 중 하나:
+                    (i) 진짜로 두 entity 사이의 행위면 → object 명사구
+                        에 해당하는 entity 를 objects 배열에 만들고
+                        object_value = "obj-N" 으로 가리킨다.
+                    (ii) 두 entity 행위가 아니라 entity 의 상태/속성/
+                         수치이면 → fact_type 을 measurement 또는
+                         claim 으로 분류, action 아님.
+
+          예 1 (★ entity 간 ACTION — object 는 obj-N):
+            source: "강재호가 이로운몰 설립에 참여했다."
+              objects:
+                obj-1 person       "강재호"
+                obj-2 organization "이로운몰"
+              fact:
+                fact_type="action"
+                subject_uid="obj-1"
+                predicate="설립에 참여했다"
+                object_value="obj-2"        ★ obj-N — NOT "이로운몰"
+                roles={"role": "설립_참여자"}   (선택 — 다항관계 채널)
+
+          예 2 (★ entity 간 ACTION 인데 object 가 명사구 형태로 등장):
+            source: "한국은행이 기준금리를 동결했다."
+              objects:
+                obj-1 organization "한국은행"
+                obj-2 metric       "기준금리"
+              fact:
+                fact_type="action"
+                subject_uid="obj-1"
+                predicate="동결했다"
+                object_value="obj-2"        ★ "기준금리" 도 entity 로
+                                              objects 배열에 만들고 obj-N
+
+          예 3 (반례 — object 가 entity 아니면 ACTION 자체가 부적합):
+            source: "ChatGPT 의 MAU 는 2026년 3월 8억 명이다."
+              → fact_type="measurement"  (NOT action — 수치 + 시점)
+              object_value="8억 명" 은 literal 이지만 그래서 ACTION 이 아님
+
+            source: "트럼프 대통령은 관세 인하 가능성을 부인했다."
+              → fact_type="claim"  (NOT action — 발화)
+              speaker_uid=obj-1 (트럼프), content_claim="관세 인하 가능성"
+              object_value 는 발화 내용 literal — claim 이라 OK.
+
+          체크리스트:
+            ACTION 이면서 object_value 가 literal 자연어 → 자기검열.
+            "이 object 는 entity 인가? 아니면 수치/시점/추상명사인가?"
+              entity 다       → objects 배열에 추가 + object_value=obj-N
+              수치/시점이다   → fact_type=measurement, 위 필드 강제
+              발화 내용이다   → fact_type=claim, speaker/content 강제
+              그 외 명사구다  → ACTION 으로 두되 object_value=obj-N
+                              (그 명사구도 entity 로 objects 배열에
+                              올림 — class=concept / event / knowledge 등)
+
   Step 3. Decompose every assertion into one or more AtomicFact
           candidates (proposition or procedure). Each fact must be a
           SINGLE falsifiable statement.
@@ -895,6 +962,103 @@ FEW_SHOT_EXAMPLES = [
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-1', 'link_type': 'involves', 'properties': {}},
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-2', 'link_type': 'addresses', 'properties': {}},
                 {'fact_uid': 'fn-1', 'object_uid': 'obj-3', 'link_type': 'involves', 'properties': {'role': 'recipient'}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # feat/v2-action-entity-edge-class-fix (PO 2026-06-29):
+    # ACTION 의 object_value = entity uid (obj-N) 강제. 의뢰서
+    # acceptance 케이스 verbatim — "강재호가 이로운몰 설립에 참여"
+    # 패턴. object 가 자연어 명사구처럼 보여도, 그것이 entity 이면
+    # objects 배열에 올리고 object_value=obj-N 으로 가리켜야 한다.
+    # ★ 하드코딩 금지 (원칙 단위) — 같은 패턴이 임의의 (person, org)
+    # 쌍에 적용됨.
+    {
+        'input': '강재호가 이로운몰 설립에 참여했다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'person', 'name': '강재호',
+                 'name_en': 'Kang Jae-ho', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'organization', 'name': '이로운몰',
+                 'name_en': 'Iroun Mall', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '강재호가 이로운몰 설립에 참여했다.',
+                 'subject_uid': 'obj-1', 'predicate': '설립에 참여했다',
+                 'object_value': 'obj-2',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR'],
+                 'fact_type': 'action',
+                 'roles': {'role': '설립_참여자'}},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1',
+                 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2',
+                 'link_type': 'addresses', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # action-entity-edge-class: object 가 명사구처럼 보이지만
+    # metric/concept entity 면 그것도 obj-N. "기준금리" 는 metric
+    # entity → objects 배열에 올리고 object_value=obj-N.
+    {
+        'input': '한국은행이 기준금리를 동결했다.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'organization', 'name': '한국은행',
+                 'name_en': 'Bank of Korea', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'metric', 'name': '기준금리',
+                 'name_en': 'base interest rate', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': '한국은행이 기준금리를 동결했다.',
+                 'subject_uid': 'obj-1', 'predicate': '동결했다',
+                 'object_value': 'obj-2',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['KR'],
+                 'fact_type': 'action'},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1',
+                 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2',
+                 'link_type': 'addresses', 'properties': {}},
+            ],
+            'fact_fact_links': [], 'disambiguation_candidates': [],
+            'extraction_status': 'success', 'failure_reason': None,
+        },
+    },
+    # action-entity-edge-class: 영어 예제 — 같은 원칙이 언어
+    # 중립적임을 LLM 에 학습시킴.
+    {
+        'input': 'Apple released Vision Pro in 2024.',
+        'output': {
+            'objects': [
+                {'uid': 'obj-1', 'class': 'organization', 'name': 'Apple',
+                 'name_en': 'Apple', 'properties': {}},
+                {'uid': 'obj-2', 'class': 'product', 'name': 'Vision Pro',
+                 'name_en': 'Vision Pro', 'properties': {}},
+            ],
+            'facts': [
+                {'uid': 'fn-1', 'type': 'proposition',
+                 'claim': 'Apple released Vision Pro in 2024.',
+                 'subject_uid': 'obj-1', 'predicate': 'released',
+                 'object_value': 'obj-2',
+                 'negation_flag': False, 'negation_scope': None,
+                 'tags_suggested': ['2024'],
+                 'fact_type': 'action'},
+            ],
+            'fact_object_links': [
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-1',
+                 'link_type': 'involves', 'properties': {}},
+                {'fact_uid': 'fn-1', 'object_uid': 'obj-2',
+                 'link_type': 'addresses', 'properties': {}},
             ],
             'fact_fact_links': [], 'disambiguation_candidates': [],
             'extraction_status': 'success', 'failure_reason': None,
