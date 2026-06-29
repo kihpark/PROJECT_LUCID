@@ -26,12 +26,22 @@
  *   - links prop 이 주어지고 entity.kind === 'entity' 면 link 기반 카운트.
  *   - 이름은 pickEntityName(entity) 로 노출 ('(주체 없음)' 제거).
  *   - kind === 'entity' 인 경우 LEDGER 딥링크는 entity.id 사용.
+ *
+ * ★ V3a (STELLAR 발언 full context 위반 클래스, 2026-06-29):
+ *   focus 노드가 claim (kind === 'claim') 일 때는 ENTITY 레이아웃이
+ *   전혀 맞지 않는다. 사용자는 발언의 FULL 내용 (truncate 금지) + 화자 +
+ *   양태 + 관련 entity + RECALL/LEDGER 딥링크를 한 화면에서 봐야 한다.
+ *   분기는 함수 진입부에서 즉시 처리하고, 기존 entity 분기는 그대로.
  */
 'use client';
 
 import Link from 'next/link';
 import type { StellarLink, StellarNode } from '@/lib/syntheticGraph';
-import { pickEntityName } from './StellarHoverCard';
+import {
+  pickEntityName,
+  classifyClaimModality,
+  MODALITY_LABEL,
+} from './StellarHoverCard';
 
 const ACCENT = '#5EEAD4';
 const WHO_COLOR = '#5EEAD4';
@@ -121,6 +131,117 @@ export function StellarEntityCard({
   links,
   onClose,
 }: StellarEntityCardProps) {
+  // V3a — claim 노드 분기.
+  if (entity.kind === 'claim') {
+    const speaker = entity.speaker_label?.trim() || pickEntityName(entity);
+    const speechAct = entity.speech_act?.trim() || '말함';
+    const modality = classifyClaimModality(entity.speech_act);
+    const verbLine = modality ? MODALITY_LABEL[modality] : speechAct;
+    const fullContent =
+      (entity.content_claim && entity.content_claim.trim()) ||
+      (entity.object && entity.object.trim()) ||
+      (entity.label && entity.label.trim()) ||
+      '';
+    const relatedLabels =
+      entity.related_entity_labels && entity.related_entity_labels.length > 0
+        ? entity.related_entity_labels
+        : null;
+    const recallQuery = fullContent || speaker;
+    const recallHref = `/recall?q=${encodeURIComponent(recallQuery)}`;
+    const ledgerHref = `/ledger?fact=${encodeURIComponent(entity.id)}`;
+    return (
+      <aside
+        data-testid="stellar-entity-card-claim"
+        role="dialog"
+        aria-label="claim detail"
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 18,
+          zIndex: 20,
+          width: 360,
+          maxHeight: 'calc(100% - 32px)',
+          overflowY: 'auto',
+          background: PANEL_BG,
+          border: `1px solid ${PANEL_BORDER}`,
+          borderRadius: 14,
+          padding: 18,
+          marginTop: 56,
+          color: TEXT_PRIMARY,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(10px)',
+        }}
+      >
+        <header
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+          }}
+        >
+          <span
+            style={{
+              color: ACCENT,
+              fontSize: 11,
+              letterSpacing: '0.08em',
+              fontWeight: 600,
+            }}
+          >
+            STELLAR · 발언
+          </span>
+          <button
+            type="button"
+            data-testid="stellar-entity-card-close"
+            onClick={onClose}
+            aria-label="close"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: TEXT_DIM,
+              fontSize: 18,
+              cursor: 'pointer',
+              lineHeight: 1,
+              padding: 4,
+            }}
+          >
+            ×
+          </button>
+        </header>
+        <div data-testid="stellar-entity-card-claim-speaker"
+          style={{ fontSize: 16, fontWeight: 700, color: WHO_COLOR, lineHeight: 1.4 }}>
+          {speaker}
+        </div>
+        <div data-testid="stellar-entity-card-claim-speech-act"
+          data-modality={modality ?? ''}
+          style={{ marginTop: 4, fontSize: 12, color: ACCENT, fontWeight: 600, letterSpacing: '0.02em' }}>
+          {verbLine}
+        </div>
+        <div data-testid="stellar-entity-card-claim-content"
+          style={{ marginTop: 14, borderTop: `1px solid ${PANEL_BORDER}`, paddingTop: 14, fontSize: 13, color: TEXT_BODY, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontStyle: 'italic' }}>
+          {fullContent ? `“${fullContent}”` : ''}
+        </div>
+        {relatedLabels ? (
+          <div data-testid="stellar-entity-card-claim-related"
+            style={{ marginTop: 12, fontSize: 11, color: TEXT_DIM, lineHeight: 1.5 }}>
+            관련: {relatedLabels.join(', ')}
+          </div>
+        ) : null}
+        <div data-testid="stellar-entity-card-claim-deeplinks"
+          style={{ marginTop: 18, borderTop: `1px solid ${PANEL_BORDER}`, paddingTop: 14, display: 'flex', gap: 8 }}>
+          <Link href={recallHref} data-testid="stellar-entity-card-claim-recall-link"
+            style={{ flex: 1, background: 'rgba(94,234,212,0.08)', border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 8, padding: '8px 10px', fontSize: 12, fontWeight: 600, textAlign: 'center', textDecoration: 'none' }}>
+            RECALL 에서 보기
+          </Link>
+          <Link href={ledgerHref} data-testid="stellar-entity-card-claim-ledger-link"
+            style={{ flex: 1, background: 'rgba(94,234,212,0.08)', border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 8, padding: '8px 10px', fontSize: 12, fontWeight: 600, textAlign: 'center', textDecoration: 'none' }}>
+            LEDGER 에서 보기
+          </Link>
+        </div>
+      </aside>
+    );
+  }
+
   // fix/stellar-cards-entity-node-compat — v2 (entity-node + links) takes
   // priority. Legacy / synthetic callers omit `links` → fall back to the
   // existing 1-fact-per-node count path so old tests stay green.

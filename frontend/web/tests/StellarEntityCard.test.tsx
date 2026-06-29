@@ -326,3 +326,71 @@ describe('fact_counts (★ fix/entitycard-fact-count-and-dot-suggestion)', () =>
     ).toContain('2건');
   });
 });
+
+// ★ V3a (STELLAR 발언 full context 위반 클래스, 2026-06-29) — claim 노드 분기.
+describe('claim node branch (★ V3 — STELLAR 발언 full context)', () => {
+  function makeClaim(overrides: Partial<StellarNode> = {}): StellarNode {
+    return {
+      id: 'claim-X',
+      label: '',
+      cluster: 0,
+      weight: 1,
+      kind: 'claim',
+      speaker_label: 'A',
+      speech_act: 'assertion',
+      content_claim: 'X',
+      subject: undefined,
+      predicate: undefined,
+      object: undefined,
+      ...overrides,
+    };
+  }
+
+  it('claim node renders SPEAKER + full content (★ no truncation)', () => {
+    const longText = 'X'.repeat(300);
+    const fact = makeClaim({
+      content_claim: longText,
+      speaker_label: 'A',
+    });
+    render(
+      <StellarEntityCard entity={fact} allFacts={[]} onClose={() => {}} />,
+    );
+    const content = screen.getByTestId('stellar-entity-card-claim-content');
+    expect(content.textContent ?? '').toContain(longText);
+    // The speaker line uses speaker_label.
+    expect(
+      screen.getByTestId('stellar-entity-card-claim-speaker').textContent,
+    ).toBe('A');
+  });
+
+  it('claim card shows RECALL + LEDGER deep links with encoded full content / id', () => {
+    const longText = 'Q'.repeat(220);
+    const fact = makeClaim({
+      id: 'claim-uid-1',
+      content_claim: longText,
+    });
+    render(
+      <StellarEntityCard entity={fact} allFacts={[]} onClose={() => {}} />,
+    );
+    const recall = screen.getByTestId('stellar-entity-card-claim-recall-link');
+    expect(recall.getAttribute('href')).toBe(`/recall?q=${encodeURIComponent(longText)}`);
+    const ledger = screen.getByTestId('stellar-entity-card-claim-ledger-link');
+    expect(ledger.getAttribute('href')).toBe(`/ledger?fact=${encodeURIComponent('claim-uid-1')}`);
+  });
+
+  it('claim card root carries data-testid="stellar-entity-card-claim"', () => {
+    const fact = makeClaim();
+    render(
+      <StellarEntityCard entity={fact} allFacts={[]} onClose={() => {}} />,
+    );
+    expect(screen.getByTestId('stellar-entity-card-claim')).toBeTruthy();
+  });
+
+  it('claim card does NOT render the entity-fact-counts block', () => {
+    const fact = makeClaim();
+    render(
+      <StellarEntityCard entity={fact} allFacts={[]} onClose={() => {}} />,
+    );
+    expect(screen.queryByTestId('stellar-entity-card-counts')).toBeNull();
+  });
+});

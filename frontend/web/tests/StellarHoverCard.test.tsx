@@ -259,3 +259,116 @@ describe('v2 entity-node branch (★ fix/stellar-cards-entity-node-compat)', () 
     expect(container.textContent ?? '').not.toContain('(주체 없음)');
   });
 });
+
+// ★ V3b (STELLAR 발언 truncate 가시화, 2026-06-29) — '더 보기' hint.
+describe('claim hover truncate hint (★ V3b)', () => {
+  it('claim hover card shows "더 보기" hint when content > 100 chars', () => {
+    const longText = 'X'.repeat(150);
+    const fact = makeNode({
+      fact_type: 'claim',
+      speaker_label: 'A',
+      speech_act: 'assertion',
+      content_claim: longText,
+    });
+    render(<StellarHoverCard fact={fact} position={POS} />);
+    expect(screen.getByTestId('stellar-hover-card-more-hint')).toBeTruthy();
+    expect(screen.getByTestId('stellar-hover-card-more-hint').textContent).toBe('더 보기');
+  });
+
+  it('claim hover card omits "더 보기" hint when content fits', () => {
+    const fact = makeNode({
+      fact_type: 'claim',
+      speaker_label: 'A',
+      speech_act: 'assertion',
+      content_claim: 'short content',
+    });
+    render(<StellarHoverCard fact={fact} position={POS} />);
+    expect(screen.queryByTestId('stellar-hover-card-more-hint')).toBeNull();
+  });
+
+  it('v2 claim node also shows "더 보기" hint when truncated', () => {
+    const longText = 'Y'.repeat(150);
+    const fact = makeNode({
+      id: 'claim-1',
+      kind: 'claim',
+      speaker_label: 'A',
+      speech_act: 'assertion',
+      content_claim: longText,
+      subject: undefined,
+      predicate: undefined,
+      object: undefined,
+    });
+    render(<StellarHoverCard fact={fact} position={POS} />);
+    expect(screen.getByTestId('stellar-hover-card-more-hint')).toBeTruthy();
+  });
+});
+
+// ★ V4 (hover/click 일관성 위반 클래스, 2026-06-29) — fact_counts unified.
+import { StellarEntityCard } from '@/components/StellarEntityCard';
+
+describe('entity hover fact_counts (★ V4 — hover/click 일관성)', () => {
+  function makeEntityNode(overrides: Partial<StellarNode> = {}): StellarNode {
+    return {
+      id: 'uid-X',
+      label: 'X',
+      cluster: 0,
+      weight: 1,
+      kind: 'entity',
+      entity_type: 'organization',
+      subject: undefined,
+      predicate: undefined,
+      object: undefined,
+      ...overrides,
+    };
+  }
+
+  it('entity hover with fact_counts → renders 행동/발언/수치 breakdown', () => {
+    const fact = makeEntityNode({
+      fact_counts: { action: 2, claim: 3, measurement: 1 },
+    });
+    render(<StellarHoverCard fact={fact} position={POS} />);
+    const block = screen.getByTestId('stellar-hover-card-entity-fact-counts');
+    expect(block.textContent ?? '').toContain('행동 2');
+    expect(block.textContent ?? '').toContain('발언 3');
+    expect(block.textContent ?? '').toContain('수치 1');
+  });
+
+  it('entity hover without fact_counts → falls back to degree + measurements (regression)', () => {
+    const fact = makeEntityNode({
+      fact_counts: undefined,
+      degree: 4,
+    });
+    render(<StellarHoverCard fact={fact} position={POS} />);
+    expect(screen.queryByTestId('stellar-hover-card-entity-fact-counts')).toBeNull();
+    const meta = screen.getByTestId('stellar-hover-card-entity-meta').textContent ?? '';
+    expect(meta).toContain('연결 4');
+  });
+
+  it('★ consistency guard: hover + click read SAME fact_counts → identical numbers', () => {
+    const entity = makeEntityNode({
+      id: 'uid-Org',
+      label: 'Org-1',
+      fact_counts: { action: 7, claim: 11, measurement: 5 },
+    });
+    // Hover render.
+    const hover = render(<StellarHoverCard fact={entity} position={POS} />);
+    const hoverBlock = hover.getByTestId('stellar-hover-card-entity-fact-counts').textContent ?? '';
+    expect(hoverBlock).toContain('행동 7');
+    expect(hoverBlock).toContain('발언 11');
+    expect(hoverBlock).toContain('수치 5');
+    hover.unmount();
+    // Click-card render.
+    const click = render(
+      <StellarEntityCard entity={entity} allFacts={[]} onClose={() => {}} />,
+    );
+    expect(
+      click.getByTestId('stellar-entity-card-count-action').textContent,
+    ).toContain('7건');
+    expect(
+      click.getByTestId('stellar-entity-card-count-claim').textContent,
+    ).toContain('11건');
+    expect(
+      click.getByTestId('stellar-entity-card-count-measurement').textContent,
+    ).toContain('5건');
+  });
+});
