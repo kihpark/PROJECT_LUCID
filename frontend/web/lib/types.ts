@@ -238,6 +238,25 @@ export interface RecallFact {
   // amber [⚠ 모순 N건] badge when > 0. Defaults to 0 on legacy responses
   // / older clients — undefined coerces to 0 in the badge guard.
   contradiction_count?: number;
+  // feat/stellar-entity-edge-remodel-v2 (PO 2026-06-29):
+  // ★ M3-2a backend stores these on lucid_facts but the recall route does
+  //   NOT yet surface them on RecallFact. We expose the fields as optional
+  //   so the FE stellarRealAdapter can read them defensively (entity-edge
+  //   remodel falls back gracefully when undefined). Backend boost to
+  //   /api/spaces/{ks}/facts and /api/spaces/{ks}/recall is a separate PR
+  //   (see DISCOVERY note in stellarRealAdapter.ts).
+  // NB: speaker_uid is already declared above (v0.2 claim-layer field) —
+  // not re-declared here.
+  /** CLAIM related entities (uids referenced inside content_claim). Drives the
+   *  claim→related entity edges in the entity-edge remodel. */
+  related_entity_uids?: string[] | null;
+  /** Stage 2 — additional ACTION participants beyond subject/object
+   *  (recipient / instrument / location / …). Mirrored onto link.roles. */
+  fact_object_role?: Record<string, string> | null;
+  /** M3-2a stage 4 — verification gate (verified/claimed). Data-only;
+   *  the renderer MUST NOT bind to it (PO 정정 spec). The adapter carries
+   *  it onto the link as a meta attribute for downstream callers. */
+  link_status?: 'verified' | 'claimed' | string | null;
 }
 
 export interface EntityFactRef {

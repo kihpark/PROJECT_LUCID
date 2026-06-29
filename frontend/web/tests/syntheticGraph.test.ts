@@ -187,9 +187,9 @@ describe('generateSyntheticGraph', () => {
     for (const node of g.nodes) {
       const c = node.cluster;
       const agg = sumByCluster.get(c) ?? { x: 0, y: 0, z: 0, n: 0 };
-      agg.x += node.x;
-      agg.y += node.y;
-      agg.z += node.z;
+      agg.x += node.x ?? 0;
+      agg.y += node.y ?? 0;
+      agg.z += node.z ?? 0;
       agg.n += 1;
       sumByCluster.set(c, agg);
     }
