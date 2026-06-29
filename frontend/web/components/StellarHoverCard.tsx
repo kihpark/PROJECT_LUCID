@@ -396,6 +396,44 @@ export interface StellarHoverCardProps {
   position: { x: number; y: number };
 }
 
+// fix/stellar-ux-self-audit U3 — position guards.
+//
+// Constants used to clamp the hover card so it never spills past the
+// viewport edge and never sits directly under the cursor (the latter
+// would cause `mouseleave` on the node → hover state would end → the
+// tooltip would flicker / disappear, even though the tooltip itself
+// has `pointerEvents: 'none'`). The 20px offset matches the brief; the
+// max{width,height} reserves enough room for the worst-case card body.
+const HOVER_CARD_OFFSET = 20;
+const HOVER_CARD_MAX_WIDTH = 360; // matches maxWidth + padding + border
+const HOVER_CARD_MAX_HEIGHT = 240; // generous reserve for claim bodies
+
+/** fix/stellar-ux-self-audit U3 — viewport-aware position clamp.
+ *  Exported so unit tests can pin the policy without mounting the card.
+ *  Given the cursor coords and viewport size, returns a `{ left, top }`
+ *  that:
+ *    - sits HOVER_CARD_OFFSET away from the cursor (never under it),
+ *    - never extends past the right edge (clamped to vw - max width),
+ *    - never extends past the bottom edge (clamped to vh - max height). */
+export function computeHoverCardPosition(
+  cursor: { x: number; y: number },
+  viewport: { w: number; h: number },
+  cardSize: { w: number; h: number } = {
+    w: HOVER_CARD_MAX_WIDTH,
+    h: HOVER_CARD_MAX_HEIGHT,
+  },
+): { left: number; top: number } {
+  const left = Math.max(
+    0,
+    Math.min(cursor.x + HOVER_CARD_OFFSET, viewport.w - cardSize.w),
+  );
+  const top = Math.max(
+    0,
+    Math.min(cursor.y + HOVER_CARD_OFFSET, viewport.h - cardSize.h),
+  );
+  return { left, top };
+}
+
 export function StellarHoverCard({ fact, position }: StellarHoverCardProps) {
   // fix/stellar-cards-entity-node-compat — branch on node.kind (v2) FIRST.
   // Legacy / synthetic nodes leave kind=undefined → fall through to the
@@ -412,6 +450,22 @@ export function StellarHoverCard({ fact, position }: StellarHoverCardProps) {
   const modality =
     factType === 'claim' ? classifyClaimModality(fact.speech_act) : null;
 
+  // fix/stellar-ux-self-audit U3 — clamp to viewport edges + push the card
+  // a clear 20px away from the cursor so the cursor never lands ON the
+  // card itself. Without the offset bump (was +14), a fast mouse can
+  // intersect the card's top-left corner; with the card's own pointerEvents
+  // already 'none' this would not block clicks, but `mouseleave` on the
+  // underlying node would still fire, causing the tooltip to flicker out.
+  // The viewport read happens at render time so resizes re-place the card.
+  const viewport =
+    typeof window === 'undefined'
+      ? { w: 1920, h: 1080 }
+      : { w: window.innerWidth, h: window.innerHeight };
+  const { left, top } = computeHoverCardPosition(
+    { x: position.x, y: position.y },
+    viewport,
+  );
+
   return (
     <div
       data-testid="stellar-hover-card"
@@ -419,8 +473,8 @@ export function StellarHoverCard({ fact, position }: StellarHoverCardProps) {
       data-modality={modality ?? ''}
       style={{
         position: 'fixed',
-        top: position.y + 14,
-        left: position.x + 14,
+        top,
+        left,
         zIndex: 30,
         maxWidth: 340,
         padding: '10px 12px',
@@ -429,6 +483,9 @@ export function StellarHoverCard({ fact, position }: StellarHoverCardProps) {
         borderLeft: `3px solid ${ACCENT}`,
         borderRadius: 10,
         color: TEXT_PRIMARY,
+        // fix/stellar-ux-self-audit U3 — `pointerEvents: 'none'` was already
+        // set here; keep it pinned. Combined with the offset + clamp above,
+        // the card can never block / disturb the underlying hover state.
         pointerEvents: 'none',
         fontSize: 12,
         lineHeight: 1.45,

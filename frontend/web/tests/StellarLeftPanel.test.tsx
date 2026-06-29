@@ -22,10 +22,14 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { StellarLeftPanel, type EntityBucket } from '@/components/StellarLeftPanel';
 
 function harness(initial?: Partial<Record<EntityBucket, boolean>>) {
+  // fix/stellar-ux-self-audit U2 — `unknown` is now a first-class bucket
+  // alongside who/what/where. Default ON so the harness mirrors the
+  // production initial state.
   const buckets: Record<EntityBucket, boolean> = {
     who: initial?.who ?? true,
     what: initial?.what ?? true,
     where: initial?.where ?? true,
+    unknown: initial?.unknown ?? true,
   };
   const onChange = vi.fn();
   const utils = render(
@@ -43,16 +47,20 @@ describe('StellarLeftPanel (fix/stellar-leftpanel-simplify)', () => {
     expect(screen.getByTestId('stellar-left-panel')).toBeInTheDocument();
   });
 
-  it('renders exactly the 3 ENTITY toggles (WHO / WHAT / WHERE)', () => {
+  it('renders the 4 ENTITY toggles (WHO / WHAT / WHERE / unknown)', () => {
+    // fix/stellar-ux-self-audit U2 — `unknown` joins the panel as a 4th
+    // first-class bucket so users can hide entity nodes with missing or
+    // unmapped entity_type. The previous count of 3 was the violation
+    // (no surface to control 'unknown' nodes).
     harness();
     expect(screen.getByTestId('stellar-filter-entity-who')).toBeInTheDocument();
     expect(screen.getByTestId('stellar-filter-entity-what')).toBeInTheDocument();
     expect(screen.getByTestId('stellar-filter-entity-where')).toBeInTheDocument();
-    // No 4th bucket has snuck in.
+    expect(screen.getByTestId('stellar-filter-entity-unknown')).toBeInTheDocument();
     const checkboxes = screen
       .getAllByRole('checkbox')
       .filter((el) => (el.getAttribute('data-testid') ?? '').startsWith('stellar-filter-entity-'));
-    expect(checkboxes).toHaveLength(3);
+    expect(checkboxes).toHaveLength(4);
   });
 
   it('★ does NOT render the legacy fact_type section (PO simplify)', () => {
@@ -84,13 +92,24 @@ describe('StellarLeftPanel (fix/stellar-leftpanel-simplify)', () => {
   });
 
   it('checkboxes reflect entityBuckets prop (controlled)', () => {
-    harness({ who: false, what: true, where: false });
+    harness({ who: false, what: true, where: false, unknown: false });
     const who = screen.getByTestId('stellar-filter-entity-who') as HTMLInputElement;
     const what = screen.getByTestId('stellar-filter-entity-what') as HTMLInputElement;
     const where = screen.getByTestId('stellar-filter-entity-where') as HTMLInputElement;
+    const unknown = screen.getByTestId('stellar-filter-entity-unknown') as HTMLInputElement;
     expect(who.checked).toBe(false);
     expect(what.checked).toBe(true);
     expect(where.checked).toBe(false);
+    expect(unknown.checked).toBe(false);
+  });
+
+  // fix/stellar-ux-self-audit U2 — toggling the unknown bucket fires the
+  // change callback with the new value, matching the WHO/WHAT/WHERE shape.
+  it('toggling UNKNOWN calls onEntityBucketChange("unknown", next)', () => {
+    const { onChange } = harness({ who: true, what: true, where: true, unknown: true });
+    const unknown = screen.getByTestId('stellar-filter-entity-unknown');
+    fireEvent.click(unknown);
+    expect(onChange).toHaveBeenCalledWith('unknown', false);
   });
 
   it('toggling WHO calls onEntityBucketChange("who", next)', () => {

@@ -76,7 +76,10 @@ describe('StellarEntityCard render', () => {
     expect(screen.getByTestId('stellar-entity-card-count-measurement').textContent).toContain('0건');
   });
 
-  it('emits LEDGER + RECALL deep-link hrefs', () => {
+  it('emits LEDGER + RECALL deep-link hrefs (★ U4 spec param keys)', () => {
+    // fix/stellar-ux-self-audit U4 — deep-link param keys switched to the
+    // spec form: `/ledger?entity_uid=<uid>` and `/recall?focus=<uid>` so the
+    // contract is uniform across surfaces (PR brief / e2e / future routing).
     const entity = makeNode({
       subject: 'SpaceX',
       subject_uid: 'uid-spacex',
@@ -85,9 +88,10 @@ describe('StellarEntityCard render', () => {
       <StellarEntityCard entity={entity} allFacts={[entity]} onClose={() => {}} />,
     );
     const ledger = screen.getByTestId('stellar-entity-card-ledger-link');
-    expect(ledger.getAttribute('href')).toBe('/ledger?entity=uid-spacex');
+    expect(ledger.getAttribute('href')).toBe('/ledger?entity_uid=uid-spacex');
     const recall = screen.getByTestId('stellar-entity-card-recall-link');
-    expect(recall.getAttribute('href')).toBe('/recall?q=SpaceX');
+    // ★ legacy node (kind undefined) → falls back to subject_uid for focus.
+    expect(recall.getAttribute('href')).toBe('/recall?focus=uid-spacex');
   });
 
   it('renders a placeholder for the next-step merge/unmerge surface', () => {
@@ -199,7 +203,8 @@ describe('v2 entity-node + links (★ fix/stellar-cards-entity-node-compat)', ()
     expect(container.textContent ?? '').not.toContain('(주체 없음)');
   });
 
-  it('LEDGER href uses entity.id when kind === "entity"', () => {
+  it('LEDGER href uses entity.id when kind === "entity" (★ U4 entity_uid)', () => {
+    // fix/stellar-ux-self-audit U4 — spec form `entity_uid=<uid>`.
     const entity = makeEntity({ id: 'uid-a' });
     render(
       <StellarEntityCard
@@ -210,7 +215,10 @@ describe('v2 entity-node + links (★ fix/stellar-cards-entity-node-compat)', ()
       />,
     );
     const ledger = screen.getByTestId('stellar-entity-card-ledger-link');
-    expect(ledger.getAttribute('href')).toBe('/ledger?entity=uid-a');
+    expect(ledger.getAttribute('href')).toBe('/ledger?entity_uid=uid-a');
+    // RECALL also uses focus=<uid>; tested in the U4 deeplink contract above.
+    const recall = screen.getByTestId('stellar-entity-card-recall-link');
+    expect(recall.getAttribute('href')).toBe('/recall?focus=uid-a');
   });
 
   it('★ regression guard: "(주체 없음)" 노출 0 in v2 entity card', () => {
@@ -363,7 +371,9 @@ describe('claim node branch (★ V3 — STELLAR 발언 full context)', () => {
     ).toBe('A');
   });
 
-  it('claim card shows RECALL + LEDGER deep links with encoded full content / id', () => {
+  it('claim card shows RECALL (focus=<id>) + LEDGER (fact=<id>) deep links', () => {
+    // fix/stellar-ux-self-audit U4 — claim 노드도 RECALL 은 `focus=<fact_uid>`.
+    // LEDGER 는 fact-scoped page 이므로 `fact=<fact_uid>` 유지.
     const longText = 'Q'.repeat(220);
     const fact = makeClaim({
       id: 'claim-uid-1',
@@ -373,7 +383,9 @@ describe('claim node branch (★ V3 — STELLAR 발언 full context)', () => {
       <StellarEntityCard entity={fact} allFacts={[]} onClose={() => {}} />,
     );
     const recall = screen.getByTestId('stellar-entity-card-claim-recall-link');
-    expect(recall.getAttribute('href')).toBe(`/recall?q=${encodeURIComponent(longText)}`);
+    expect(recall.getAttribute('href')).toBe(
+      `/recall?focus=${encodeURIComponent('claim-uid-1')}`,
+    );
     const ledger = screen.getByTestId('stellar-entity-card-claim-ledger-link');
     expect(ledger.getAttribute('href')).toBe(`/ledger?fact=${encodeURIComponent('claim-uid-1')}`);
   });

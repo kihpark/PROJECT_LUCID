@@ -814,10 +814,18 @@ export function StellarView(props: StellarViewProps = {}) {
   // to ENTITY only. Old fact_type / as_of / link_status state removed
   // (the UI no longer surfaces them). Data fields on nodes/links are
   // preserved untouched — this is a UI-only simplification.
+  //
+  // fix/stellar-ux-self-audit U2 — `unknown` is now a first-class bucket
+  // alongside who/what/where. Entity nodes with missing or unmapped
+  // entity_type used to pass the filter regardless of the three known
+  // toggles, leaving no user control surface for them. Default ON so the
+  // existing visual behaviour (unknown surfaces) is preserved until the
+  // user explicitly hides them.
   const [entityBuckets, setEntityBuckets] = useState<Record<EntityBucket, boolean>>({
     who: true,
     what: true,
     where: true,
+    unknown: true,
   });
   // B-62-clear-focus-home-lookat — monotonic counter, bumped whenever
   // the user explicitly leaves a focus subgraph (× close / Esc /
@@ -919,27 +927,41 @@ export function StellarView(props: StellarViewProps = {}) {
       links = links.filter((l) => (l.link_status ?? 'verified') !== 'claimed');
     }
 
-    // ★ W3 (STELLAR 6-class fix, 2026-06-29) — entity-bucket filter.
+    // ★ W3 (STELLAR 6-class fix, 2026-06-29) +
+    // fix/stellar-ux-self-audit U2 — entity-bucket filter.
     //
-    // Rules (PO 의뢰서 verbatim):
+    // Rules:
     //   • CLAIM 노드 (kind === 'claim' OR fact_type === 'claim') 는 bucket
     //     필터를 받지 않는다 — showClaims 토글만 따른다.
     //   • Known-bucket entity 노드 (who/what/where) 는 해당 토글이 켜져
     //     있어야 surface.
     //   • Unknown 버킷 entity 노드 (entity_type missing or unmapped) 는
-    //     항상 surface — 사용자가 모든 토글을 꺼야만 사라진다.
+    //     entityBuckets.unknown 토글이 켜져 있어야 surface — 옛 동작
+    //     (항상 surface) 은 사용자가 끌 수 없는 violation 이었다.
+    //
+    // U2 fix: `unknown` is now a first-class user-controlled bucket; turning
+    // it off hides every entity node with a missing/unmapped entity_type.
     const allBucketsOff =
-      !entityBuckets.who && !entityBuckets.what && !entityBuckets.where;
+      !entityBuckets.who &&
+      !entityBuckets.what &&
+      !entityBuckets.where &&
+      !entityBuckets.unknown;
     if (allBucketsOff) {
       nodes = [];
     } else if (
-      !(entityBuckets.who && entityBuckets.what && entityBuckets.where)
+      !(
+        entityBuckets.who &&
+        entityBuckets.what &&
+        entityBuckets.where &&
+        entityBuckets.unknown
+      )
     ) {
       nodes = nodes.filter((n) => {
         // CLAIM 노드는 통과 — showClaims 가 이미 위에서 분기.
         if (n.kind === 'claim' || n.fact_type === 'claim') return true;
         const b = entityBucketForSingle(n.entity_type);
-        if (b === 'unknown') return true; // unknown 은 항상 surface
+        // U2: unknown 도 user-controlled. 옛 동작은 ‘unknown 항상 통과’ →
+        // 사용자가 토글로 끄지 못함.
         return entityBuckets[b];
       });
     }
