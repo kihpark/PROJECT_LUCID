@@ -32,8 +32,11 @@ export const ENTITY_COLORS = {
 
 export type EntityColorKey = keyof typeof ENTITY_COLORS;
 
-/** CLAIM 노드 전용 색. ★ PO 정정: opacity 1 (흐림 금지). */
-export const CLAIM_NODE_COLOR = '#5EEAD4';
+/** CLAIM 노드 전용 색. ★ PO 정정: opacity 1 (흐림 금지).
+ *  ★ 2026-06-29 PO: entity 노드 와 시각 구분 필요 — 옛 #5EEAD4 (teal) =
+ *  WHO entity 색과 충돌. neutral cool grey 로 분리 (★ "발언" = 채도 0,
+ *  entity = colorful hue). */
+export const CLAIM_NODE_COLOR = '#CBD5E1';
 
 /** CLAIM 노드 opacity. ★ 무조건 1. */
 export const CLAIM_NODE_OPACITY = 1;
