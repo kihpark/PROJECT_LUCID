@@ -385,6 +385,195 @@ describe('★ PO acceptance #4: node degree = entity link count', () => {
   });
 });
 
+// ★ fix/entitycard-fact-count-and-dot-suggestion — fact_counts accumulation
+//   independent of edge generation. The 강재호 PO scenario lives here.
+describe('fact_counts (★ fix/entitycard-fact-count-and-dot-suggestion)', () => {
+  it('ACTION with literal object → subject fact_counts.action = 1 (no edge)', async () => {
+    // ★ 강재호 / "이로운몰 설립" scenario verbatim. No entity-edge is drawn
+    //   because object_value is a literal — but the fact_count MUST reflect
+    //   the underlying fact's existence so the EntityCard reads "행동 1".
+    mockApi([
+      {
+        fact_uid: 'fact-kang-literal',
+        subject_uid: UID.KANG,
+        subject_label: '강재호',
+        subject_entity_type: 'person',
+        predicate: '설립',
+        object_value: '이로운몰 설립',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const kang = data.nodes.find((n) => n.id === UID.KANG);
+    expect(kang?.fact_counts?.action).toBe(1);
+    expect(kang?.fact_counts?.claim).toBe(0);
+    expect(kang?.fact_counts?.measurement).toBe(0);
+    // ★ no link emitted — counts came from the fact itself.
+    expect(data.links.filter((l) => l.source === UID.KANG)).toHaveLength(0);
+  });
+
+  it('ACTION with entity object → BOTH subject + object fact_counts.action bumped', async () => {
+    mockApi([
+      {
+        fact_uid: 'f1',
+        subject_uid: UID.KANG,
+        subject_label: '강재호',
+        subject_entity_type: 'person',
+        predicate: '설립',
+        object_value: UID.IROUNMALL,
+        object_label: '이로운몰',
+        object_entity_type: 'organization',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const kang = data.nodes.find((n) => n.id === UID.KANG);
+    const irounmall = data.nodes.find((n) => n.id === UID.IROUNMALL);
+    expect(kang?.fact_counts?.action).toBe(1);
+    expect(irounmall?.fact_counts?.action).toBe(1);
+  });
+
+  it('CLAIM → speaker + each related entity fact_counts.claim bumped', async () => {
+    mockApi([
+      {
+        fact_uid: 'claim-rel-1',
+        subject_uid: UID.KAHNEMAN,
+        subject_label: '대니얼 카너먼',
+        subject_entity_type: 'person',
+        predicate: 'said',
+        object_value: 'X',
+        source_uids: ['s1'],
+        fact_type: 'claim',
+        speaker_uid: UID.KAHNEMAN,
+        speaker_label: '대니얼 카너먼',
+        speech_act: 'assertion',
+        content_claim: 'X',
+        related_entity_uids: [UID.REL_X],
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const speaker = data.nodes.find((n) => n.id === UID.KAHNEMAN);
+    const rel = data.nodes.find((n) => n.id === UID.REL_X);
+    expect(speaker?.fact_counts?.claim).toBe(1);
+    expect(rel?.fact_counts?.claim).toBe(1);
+  });
+
+  it('CLAIM with stub speaker (no speaker_uid) → stub fact_counts.claim bumped', async () => {
+    mockApi([
+      {
+        fact_uid: 'claim-stub-1',
+        subject_uid: UID.KAHNEMAN,
+        subject_label: '대니얼 카너먼',
+        subject_entity_type: 'person',
+        predicate: 'said',
+        object_value: 'X',
+        source_uids: ['s1'],
+        fact_type: 'claim',
+        // ★ no speaker_uid — stub path.
+        speaker_label: '대니얼 카너먼',
+        speech_act: 'assertion',
+        content_claim: 'X',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const stub = data.nodes.find(
+      (n) => typeof n.id === 'string' && n.id.startsWith('claim-speaker:'),
+    );
+    expect(stub?.fact_counts?.claim).toBe(1);
+  });
+
+  it('MEASUREMENT → subject fact_counts.measurement bumped (in addition to measurements push)', async () => {
+    mockApi([
+      {
+        fact_uid: 'measure-1',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: 'has_metric',
+        object_value: '53',
+        source_uids: ['s1'],
+        fact_type: 'measurement',
+        metric: 'HBM 점유율',
+        measurement_value: 53,
+        measurement_unit: '%',
+        as_of: '2026-06-29',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const samsung = data.nodes.find((n) => n.id === UID.SAMSUNG);
+    expect(samsung?.fact_counts?.measurement).toBe(1);
+    // ★ measurement attribute is STILL pushed (no regression).
+    expect(samsung?.measurements?.length).toBe(1);
+  });
+
+  it('sum across multiple facts is correct (mixed action / claim / measurement)', async () => {
+    mockApi([
+      // 3 actions with samsung as subject (1 literal + 2 entity object).
+      {
+        fact_uid: 'a1',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '발표',
+        object_value: '메모리 단가 +35%',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+      {
+        fact_uid: 'a2',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '발표',
+        object_value: UID.HBM,
+        object_label: 'HBM3E',
+        object_entity_type: 'product',
+        source_uids: ['s2'],
+        fact_type: 'action',
+      },
+      {
+        fact_uid: 'a3',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '경쟁',
+        object_value: UID.TSMC,
+        object_label: 'TSMC',
+        object_entity_type: 'organization',
+        source_uids: ['s3'],
+        fact_type: 'action',
+      },
+      // 1 measurement on samsung.
+      {
+        fact_uid: 'm1',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: 'has_metric',
+        object_value: '53',
+        source_uids: ['s4'],
+        fact_type: 'measurement',
+        metric: 'HBM 점유율',
+        measurement_value: 53,
+        measurement_unit: '%',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const samsung = data.nodes.find((n) => n.id === UID.SAMSUNG);
+    expect(samsung?.fact_counts?.action).toBe(3);
+    expect(samsung?.fact_counts?.claim).toBe(0);
+    expect(samsung?.fact_counts?.measurement).toBe(1);
+  });
+});
+
 describe('Renderer-facing pass-through (entity_type stays on the node)', () => {
   it('first fact decides entity_type, later facts do not overwrite a known type', async () => {
     mockApi([

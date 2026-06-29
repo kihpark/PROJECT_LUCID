@@ -474,6 +474,28 @@ export function postAssistantBrief(
 // spo-pending-ux — entity suggestion + predicate autocomplete
 // ---------------------------------------------------------------------------
 
+/**
+ * ★ fix/entitycard-fact-count-and-dot-suggestion — entity suggestion guard.
+ *
+ * Backend `backend/api/routes/entities.py::suggest_entities` only filters
+ * empty `name` strings — a stray "." (or other punctuation-only label that
+ * upstream extraction treated as an entity) survives and can rank high in
+ * `match_phrase_prefix` due to low IDF. Frontend renders the dropdown verbatim,
+ * so the user sees a "." item that returns nothing on click.
+ *
+ * Filter sits at the api layer (NOT backend, per PO frontend-only constraint)
+ * so BOTH RecallView and FactCard get the protection automatically. Exported
+ * for unit tests.
+ */
+export function isMeaningfulLabel(label: string | null | undefined): boolean {
+  if (!label) return false;
+  const trimmed = label.trim();
+  if (!trimmed) return false;
+  // Strip common punctuation; require at least one alphanumeric /
+  // hangul / kana / CJK character. \p{L} = letter, \p{N} = number.
+  return /[\p{L}\p{N}]/u.test(trimmed);
+}
+
 export function searchEntitySuggestions(
   q: string,
   spaceId: string,
@@ -484,7 +506,7 @@ export function searchEntitySuggestions(
   params.set('limit', String(limit));
   return request<{ items: EntitySuggestion[] }>(
     `/api/spaces/${spaceId}/entities/suggest?${params.toString()}`,
-  ).then((r) => r.items);
+  ).then((r) => r.items.filter((s) => isMeaningfulLabel(s.primary_label)));
 }
 
 // Module-level predicate cache — predicates are global vocabulary that

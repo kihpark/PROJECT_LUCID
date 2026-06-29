@@ -124,8 +124,18 @@ export function StellarEntityCard({
   // fix/stellar-cards-entity-node-compat — v2 (entity-node + links) takes
   // priority. Legacy / synthetic callers omit `links` → fall back to the
   // existing 1-fact-per-node count path so old tests stay green.
-  const counts =
-    links && entity.kind === 'entity'
+  //
+  // ★ fix/entitycard-fact-count-and-dot-suggestion — entity.fact_counts 가
+  //   adapter 에서 직접 누적되어 있으면 그것이 진실. link/edge 와 무관하게
+  //   ACTION (literal object 포함) / CLAIM / MEASUREMENT 가 전부 셈된다.
+  //   없으면 기존 link-derived (v2) → countFactsByType (legacy) fallback.
+  const counts = entity.fact_counts
+    ? {
+        action: entity.fact_counts.action,
+        claim: entity.fact_counts.claim,
+        measurement: entity.fact_counts.measurement,
+      }
+    : links && entity.kind === 'entity'
       ? countFactsFromLinks(entity, links)
       : countFactsByType(entity, allFacts);
   const entityName = pickEntityName(entity);

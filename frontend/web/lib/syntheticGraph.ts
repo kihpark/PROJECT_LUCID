@@ -206,6 +206,9 @@ export interface StellarNode {
    *  NOT bind to this. (Note: StellarLink also carries link_status for
    *  the M3-2c CLAIM toggle; that is a separate field on the LINK.) */
   link_status?: 'verified' | 'claimed' | string | null;
+  /** ★ fix/entitycard-fact-count-and-dot-suggestion — fact_type 별 정확 카운트.
+   *  link 수와 무관 (literal object 인 ACTION 도 subject 의 action++). */
+  fact_counts?: { action: number; claim: number; measurement: number } | null;
 }
 
 // feat/stellar-entity-edge-remodel-v2 — link kinds the renderer cares about.

@@ -230,3 +230,99 @@ describe('v2 entity-node + links (★ fix/stellar-cards-entity-node-compat)', ()
     expect(container.textContent ?? '').not.toContain('(주체 없음)');
   });
 });
+
+// ★ fix/entitycard-fact-count-and-dot-suggestion — PO live report: 강재호
+// hover 에서 행동/발언/수치/연결이 전부 0 으로 나옴. 그러나 강재호 는 ACTION
+// fact 1 건 (object 가 literal "이로운몰 설립") 의 subject 이므로 행동 1 이
+// 맞다. link 수 ≠ fact 수. entity.fact_counts 가 link 와 무관하게 누적된다.
+describe('fact_counts (★ fix/entitycard-fact-count-and-dot-suggestion)', () => {
+  function makeEntity(overrides: Partial<StellarNode> = {}): StellarNode {
+    return {
+      id: 'uid-kang',
+      label: '강재호',
+      cluster: 0,
+      weight: 1,
+      kind: 'entity',
+      entity_type: 'person',
+      ...overrides,
+    };
+  }
+
+  it('★ 강재호 시나리오: links=[] but fact_counts.action=1 → "1건" rendered', () => {
+    const entity = makeEntity({
+      fact_counts: { action: 1, claim: 0, measurement: 0 },
+    });
+    render(
+      <StellarEntityCard
+        entity={entity}
+        allFacts={[]}
+        links={[]}
+        onClose={() => {}}
+      />,
+    );
+    // ★ link count 0 + fact count 1.
+    expect(
+      screen.getByTestId('stellar-entity-card-count-action').textContent,
+    ).toContain('1건');
+    expect(
+      screen.getByTestId('stellar-entity-card-count-claim').textContent,
+    ).toContain('0건');
+    expect(
+      screen.getByTestId('stellar-entity-card-count-measurement').textContent,
+    ).toContain('0건');
+  });
+
+  it('fact_counts.claim = 3 → "3건" in 발언 row', () => {
+    const entity = makeEntity({
+      fact_counts: { action: 0, claim: 3, measurement: 0 },
+    });
+    render(
+      <StellarEntityCard
+        entity={entity}
+        allFacts={[]}
+        links={[]}
+        onClose={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId('stellar-entity-card-count-claim').textContent,
+    ).toContain('3건');
+  });
+
+  it('fact_counts.measurement = 2 → "2건" in 수치 row', () => {
+    const entity = makeEntity({
+      fact_counts: { action: 0, claim: 0, measurement: 2 },
+    });
+    render(
+      <StellarEntityCard
+        entity={entity}
+        allFacts={[]}
+        links={[]}
+        onClose={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId('stellar-entity-card-count-measurement').textContent,
+    ).toContain('2건');
+  });
+
+  it('fact_counts absent → falls back to countFactsFromLinks (link path still works)', () => {
+    // Regression: when fact_counts is undefined, v2 link-derived path still
+    // operates so existing entity-node graphs render the same as before.
+    const entity = makeEntity({ fact_counts: undefined });
+    const links: StellarLink[] = [
+      { source: 'uid-kang', target: 'uid-b', kind: 'action', fact_count: 2 },
+    ];
+    render(
+      <StellarEntityCard
+        entity={entity}
+        allFacts={[]}
+        links={links}
+        onClose={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId('stellar-entity-card-count-action').textContent,
+    ).toContain('2건');
+  });
+});
