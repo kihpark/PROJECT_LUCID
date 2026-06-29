@@ -177,3 +177,85 @@ describe('★ 단일 카드 (★ 중복 오버레이 0)', () => {
     expect(container.querySelector('[data-testid="stellar-node-label"]')).toBeNull();
   });
 });
+
+// fix/stellar-cards-entity-node-compat (2026-06-29) — STELLAR v2 데이터 모델
+// 에서 노드는 (1) entity (kind='entity') 또는 (2) claim (kind='claim') 중
+// 하나다. 호버 카드는 node.kind 가 있으면 그 v2 모양을 직접 렌더해야 한다.
+describe('v2 entity-node branch (★ fix/stellar-cards-entity-node-compat)', () => {
+  it('entity node renders name + entity_type + degree meta', () => {
+    const fact = makeNode({
+      id: 'uid-jaeho',
+      kind: 'entity',
+      label: '강재호',
+      entity_type: 'person',
+      degree: 3,
+      // v2 entity 노드는 subject 가 비어 있을 수 있음 — '(주체 없음)' 으로
+      // 떨어지면 안 된다.
+      subject: undefined,
+      predicate: undefined,
+      object: undefined,
+    });
+    const { container } = render(
+      <StellarHoverCard fact={fact} position={POS} />,
+    );
+    const card = screen.getByTestId('stellar-hover-card');
+    expect(card.getAttribute('data-fact-type')).toBe('entity');
+    expect(screen.getByTestId('stellar-hover-card-entity-name').textContent).toBe(
+      '강재호',
+    );
+    const meta = screen.getByTestId('stellar-hover-card-entity-meta').textContent ?? '';
+    expect(meta).toContain('person');
+    expect(meta).toContain('연결 3');
+    // ★ regression guard — v2 entity 카드에 '(주체 없음)' 잔재가 없어야 한다.
+    expect(container.textContent ?? '').not.toContain('(주체 없음)');
+  });
+
+  it('claim node renders speaker + speech_act (modality) + content', () => {
+    const fact = makeNode({
+      id: 'claim-1',
+      kind: 'claim',
+      label: '모스 탄 의 단정',
+      speaker_label: '모스 탄',
+      speech_act: 'assertion',
+      content_claim: 'X 이다',
+      // v2 claim 노드는 subject 가 비어 있을 수 있음.
+      subject: undefined,
+      predicate: undefined,
+      object: undefined,
+    });
+    const { container } = render(
+      <StellarHoverCard fact={fact} position={POS} />,
+    );
+    const card = screen.getByTestId('stellar-hover-card');
+    expect(card.getAttribute('data-fact-type')).toBe('claim');
+    expect(card.getAttribute('data-modality')).toBe('assertion');
+    expect(screen.getByTestId('stellar-hover-card-speaker').textContent).toBe(
+      '모스 탄',
+    );
+    expect(screen.getByTestId('stellar-hover-card-speech-act').textContent).toBe(
+      '단정',
+    );
+    expect(screen.getByTestId('stellar-hover-card-content').textContent).toContain(
+      'X 이다',
+    );
+    // ★ regression guard — '(주체 없음)' 노출 0.
+    expect(container.textContent ?? '').not.toContain('(주체 없음)');
+  });
+
+  it('★ regression guard: no "(주체 없음)" 문자열 in v2 entity card', () => {
+    const fact = makeNode({
+      id: 'uid-x',
+      kind: 'entity',
+      label: '',
+      entity_type: 'organization',
+      degree: 0,
+      subject: undefined,
+      predicate: undefined,
+      object: undefined,
+    });
+    const { container } = render(
+      <StellarHoverCard fact={fact} position={POS} />,
+    );
+    expect(container.textContent ?? '').not.toContain('(주체 없음)');
+  });
+});

@@ -1,5 +1,6 @@
 /**
- * M3-2d 호버 카드 (PO 의뢰서 verbatim + 2026-06-28 정정 + 데이터모델 v2 반영).
+ * M3-2d 호버 카드 (PO 의뢰서 verbatim + 2026-06-28 정정 + 데이터모델 v2 반영
+ *   + fix/stellar-cards-entity-node-compat 2026-06-29).
  *
  * ★ 단일 SPO 카드. 다른 라벨 모두 제거 — 중복 오버레이 0.
  *
@@ -14,6 +15,13 @@
  *     - opinion   : 추측·의견
  *   speech_act 가 위 세 키워드 중 하나면 양태 라벨을 노출.
  *   기타 값은 동사 그대로 (예: 발표했다).
+ *
+ * ★ fix/stellar-cards-entity-node-compat (PO 2026-06-29):
+ *   STELLAR v2 의 entity-node / claim-node 모델을 카드가 직접 읽도록 분기.
+ *   - kind === 'entity' → EntityBody (label + entity_type + degree).
+ *   - kind === 'claim'  → ClaimEntityBody (speaker_label + speech_act + content_claim).
+ *   - kind === undefined → 기존 ActionBody/ClaimBody/MeasurementBody (synthetic/legacy).
+ *   ★ '(주체 없음)' 문자열 제거. 모든 주체-이름 fallback 은 pickEntityName 으로 통합.
  */
 'use client';
 
@@ -30,7 +38,7 @@ const PANEL_BORDER = '#1c272b';
 
 export type ClaimModality = 'assertion' | 'judgment' | 'opinion';
 
-const MODALITY_LABEL: Record<ClaimModality, string> = {
+export const MODALITY_LABEL: Record<ClaimModality, string> = {
   assertion: '단정',
   judgment: '판단',
   opinion: '의견',
@@ -58,17 +66,50 @@ function formatMeasurementValue(v: number): string {
   return v.toFixed(2).replace(/\.?0+$/, '');
 }
 
-const FACT_TYPE_KO: Record<'action' | 'claim' | 'measurement', string> = {
+/** fix/stellar-cards-entity-node-compat — central entity-name picker.
+ *  Used by every v2 + legacy branch so we never display '(주체 없음)'.
+ *
+ *  Precedence (v2 + legacy compatible):
+ *    1. node.subject_label  — explicit display label for an entity ref.
+ *    2. node.subject         — legacy / synthetic subject string.
+ *    3. node.label           — v2 entity / claim node label.
+ *    4. node.id (first 8)    — last-resort uid stub.
+ *
+ *  Why subject before label: legacy / synthetic nodes carry composite labels
+ *  (e.g. "강재호 · 어떤객체") and a clean subject string ("강재호"); existing
+ *  tests + the in-canvas hover pin the cleaner one. v2 entity / claim nodes
+ *  leave `subject` undefined → label is consulted next.
+ */
+export function pickEntityName(node: StellarNode): string {
+  const subjectLabel = (node as { subject_label?: unknown }).subject_label;
+  if (typeof subjectLabel === 'string' && subjectLabel.trim().length > 0) {
+    return subjectLabel.trim();
+  }
+  if (typeof node.subject === 'string' && node.subject.trim().length > 0) {
+    return node.subject.trim();
+  }
+  const labelLike = (node as { label?: unknown }).label;
+  if (typeof labelLike === 'string' && labelLike.trim().length > 0) {
+    return labelLike.trim();
+  }
+  if (typeof node.id === 'string' && node.id.length > 0) {
+    return node.id.slice(0, 8);
+  }
+  return '?';
+}
+
+const FACT_TYPE_KO: Record<'action' | 'claim' | 'measurement' | 'entity', string> = {
   action: '행위',
   claim: '발언',
   measurement: '수치',
+  entity: '엔티티',
 };
 
 function FactTypeBadge({
   factType,
   modality,
 }: {
-  factType: 'action' | 'claim' | 'measurement';
+  factType: 'action' | 'claim' | 'measurement' | 'entity';
   modality: ClaimModality | null;
 }) {
   const text = modality
@@ -111,7 +152,7 @@ function CardFooter({ asOf }: { asOf: string | null | undefined }) {
 }
 
 function ActionBody({ fact }: { fact: StellarNode }) {
-  const subject = fact.subject || '(주체 없음)';
+  const subject = pickEntityName(fact);
   const predicate = predicateLabel(fact.predicate ?? '');
   const object = truncate(fact.object, 90);
   const roles = fact.roles ?? null;
@@ -151,7 +192,7 @@ function ActionBody({ fact }: { fact: StellarNode }) {
 }
 
 function ClaimBody({ fact }: { fact: StellarNode }) {
-  const speaker = fact.speaker_label?.trim() || fact.subject || '(주체 없음)';
+  const speaker = fact.speaker_label?.trim() || pickEntityName(fact);
   const speechAct = fact.speech_act?.trim() || '말함';
   const modality = classifyClaimModality(fact.speech_act);
   const verbLine = modality ? MODALITY_LABEL[modality] : speechAct;
@@ -194,7 +235,7 @@ function ClaimBody({ fact }: { fact: StellarNode }) {
 }
 
 function MeasurementBody({ fact }: { fact: StellarNode }) {
-  const entity = fact.subject || '(주체 없음)';
+  const entity = pickEntityName(fact);
   const metric = fact.metric?.trim() || '';
   const value =
     typeof fact.measurement_value === 'number'
@@ -220,16 +261,112 @@ function MeasurementBody({ fact }: { fact: StellarNode }) {
   );
 }
 
+/** fix/stellar-cards-entity-node-compat — v2 entity-node body.
+ *  Hover over an entity node → name + entity_type + degree (+ measurements count). */
+function EntityBody({ fact }: { fact: StellarNode }) {
+  const name = pickEntityName(fact);
+  const entityType =
+    fact.entity_type?.trim() ||
+    fact.subject_entity_type?.trim() ||
+    '';
+  const degree = typeof fact.degree === 'number' ? fact.degree : null;
+  const measurementsCount = Array.isArray(fact.measurements)
+    ? fact.measurements.length
+    : 0;
+  return (
+    <div>
+      <div
+        data-testid="stellar-hover-card-entity-name"
+        style={{ color: WHO_COLOR, fontWeight: 600 }}
+      >
+        {name}
+      </div>
+      <div
+        data-testid="stellar-hover-card-entity-meta"
+        style={{ color: TEXT_BODY, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}
+      >
+        {entityType ? <span>{entityType}</span> : null}
+        {entityType && degree !== null ? (
+          <span style={{ color: TEXT_DIM, margin: '0 6px' }}>·</span>
+        ) : null}
+        {degree !== null ? <span>연결 {degree}</span> : null}
+        {measurementsCount > 0 ? (
+          <>
+            <span style={{ color: TEXT_DIM, margin: '0 6px' }}>·</span>
+            <span data-testid="stellar-hover-card-entity-measurements-count">
+              수치 {measurementsCount}건
+            </span>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** fix/stellar-cards-entity-node-compat — v2 claim-node body.
+ *  Hover over a claim node → speaker_label + speech_act + content_claim
+ *  (+ related entity labels). */
+function ClaimEntityBody({ fact }: { fact: StellarNode }) {
+  const speaker = fact.speaker_label?.trim() || '(화자 미상)';
+  const speechAct = fact.speech_act?.trim() || '말함';
+  const modality = classifyClaimModality(fact.speech_act);
+  const verbLine = modality ? MODALITY_LABEL[modality] : speechAct;
+  const content = fact.content_claim?.trim() || fact.object || '';
+  const relatedLabels =
+    fact.related_entity_labels && fact.related_entity_labels.length > 0
+      ? fact.related_entity_labels
+      : null;
+  return (
+    <div>
+      <div
+        data-testid="stellar-hover-card-speaker"
+        style={{ color: WHO_COLOR, fontWeight: 600 }}
+      >
+        {speaker}
+      </div>
+      <div
+        data-testid="stellar-hover-card-speech-act"
+        data-modality={modality ?? ''}
+        style={{ color: ACCENT, fontSize: 11, marginTop: 2, fontWeight: 600 }}
+      >
+        {verbLine}
+      </div>
+      <div
+        data-testid="stellar-hover-card-content"
+        style={{ color: TEXT_BODY, marginTop: 4, fontStyle: 'italic' }}
+      >
+        “{truncate(content, 100)}”
+      </div>
+      {relatedLabels ? (
+        <div
+          data-testid="stellar-hover-card-related"
+          style={{ color: TEXT_DIM, fontSize: 10, marginTop: 6, lineHeight: 1.5 }}
+        >
+          관련: {relatedLabels.join(', ')}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export interface StellarHoverCardProps {
   fact: StellarNode;
   position: { x: number; y: number };
 }
 
 export function StellarHoverCard({ fact, position }: StellarHoverCardProps) {
-  const factType = (fact.fact_type ?? 'action') as
-    | 'action'
-    | 'claim'
-    | 'measurement';
+  // fix/stellar-cards-entity-node-compat — branch on node.kind (v2) FIRST.
+  // Legacy / synthetic nodes leave kind=undefined → fall through to the
+  // existing fact_type branches so old tests + synthetic mode stay green.
+  const kind = fact.kind;
+  let factType: 'action' | 'claim' | 'measurement' | 'entity';
+  if (kind === 'entity') {
+    factType = 'entity';
+  } else if (kind === 'claim') {
+    factType = 'claim';
+  } else {
+    factType = (fact.fact_type ?? 'action') as 'action' | 'claim' | 'measurement';
+  }
   const modality =
     factType === 'claim' ? classifyClaimModality(fact.speech_act) : null;
 
@@ -257,9 +394,13 @@ export function StellarHoverCard({ fact, position }: StellarHoverCardProps) {
       }}
     >
       <FactTypeBadge factType={factType} modality={modality} />
-      {factType === 'action' ? <ActionBody fact={fact} /> : null}
-      {factType === 'claim' ? <ClaimBody fact={fact} /> : null}
-      {factType === 'measurement' ? <MeasurementBody fact={fact} /> : null}
+      {factType === 'entity' ? <EntityBody fact={fact} /> : null}
+      {kind === 'claim' ? <ClaimEntityBody fact={fact} /> : null}
+      {kind === undefined && factType === 'action' ? <ActionBody fact={fact} /> : null}
+      {kind === undefined && factType === 'claim' ? <ClaimBody fact={fact} /> : null}
+      {kind === undefined && factType === 'measurement' ? (
+        <MeasurementBody fact={fact} />
+      ) : null}
       <CardFooter asOf={fact.as_of} />
     </div>
   );

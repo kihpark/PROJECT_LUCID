@@ -17,7 +17,7 @@ import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateSyntheticGraph } from '@/lib/syntheticGraph';
-import type { StellarGraphData, StellarNode } from '@/lib/syntheticGraph';
+import type { StellarGraphData, StellarLink, StellarNode } from '@/lib/syntheticGraph';
 import { emptyStellarGraph, loadRealStellarGraph } from '@/lib/stellarRealAdapter';
 import { predicateLabel } from '@/lib/predicateLabels';
 import {
@@ -26,7 +26,9 @@ import {
 } from './StellarLeftPanel';
 // M3-2d interactions — single SPO hover card + entity card + edge facts list.
 // ★ PO 의뢰서 verbatim. 중복 오버레이 0.
-import { StellarHoverCard } from './StellarHoverCard';
+// fix/stellar-cards-entity-node-compat — pickEntityName shared so the
+// in-canvas tooltip never falls back to '(주체 없음)'.
+import { StellarHoverCard, pickEntityName } from './StellarHoverCard';
 import { StellarEntityCard } from './StellarEntityCard';
 import { StellarEdgeFactsList } from './StellarEdgeFactsList';
 
@@ -436,8 +438,12 @@ interface TooltipLines {
 export function tooltipLinesForNode(node: StellarNode): TooltipLines {
   const ft = node.fact_type ?? 'action';
 
+  // fix/stellar-cards-entity-node-compat — v2 entity / claim nodes carry the
+  // name on `label` (or related fields) instead of `subject`. Route every
+  // missing-subject fallback through pickEntityName so the in-canvas tooltip
+  // never displays the stale '(주체 없음)' string.
   if (ft === 'claim') {
-    const speaker = node.speaker_label?.trim() || node.subject || '(주체 없음)';
+    const speaker = node.speaker_label?.trim() || pickEntityName(node);
     const act = node.speech_act?.trim() || '말함';
     const content =
       node.content_claim?.trim() || node.object || '';
@@ -449,7 +455,7 @@ export function tooltipLinesForNode(node: StellarNode): TooltipLines {
   }
 
   if (ft === 'measurement') {
-    const metric = node.metric?.trim() || node.subject || '';
+    const metric = node.metric?.trim() || pickEntityName(node);
     const value =
       typeof node.measurement_value === 'number'
         ? formatMeasurementValue(node.measurement_value)
@@ -469,7 +475,7 @@ export function tooltipLinesForNode(node: StellarNode): TooltipLines {
   // SPO triples by construction. We render predicate through the KO
   // gloss helper so 'supports' shows as '뒷받침하는 것은' etc.
   return {
-    head: node.subject || '',
+    head: node.subject?.trim() ? node.subject : pickEntityName(node),
     mid: `→ ${predicateLabel(node.predicate ?? '')} →`,
     body: truncate(node.object, 90),
   };
@@ -711,8 +717,15 @@ export interface StellarViewProps {
     mode: StellarSource;
     onNodeHover?: (n: StellarNode | null) => void;
     onNodeClick?: (n: StellarNode) => void;
-    /** M3-2d — edge-click handler. Receives the two endpoint nodes. */
-    onLinkClick?: (endpoints: { a: StellarNode; b: StellarNode }) => void;
+    /** M3-2d — edge-click handler. Receives the two endpoint nodes.
+     *  fix/stellar-cards-entity-node-compat — optional `link` carries the
+     *  v2 StellarLink so the EdgeFactsList can render link-derived summary
+     *  (predicates / fact_count / roles / link_status). The existing mock
+     *  renderer in tests only passes {a, b} — link is opt-in. */
+    onLinkClick?: (
+      endpoints: { a: StellarNode; b: StellarNode },
+      link?: StellarLink,
+    ) => void;
     focusedId?: string | null;
     focusedNeighborIds?: Set<string>;
     selectedId?: string | null;
@@ -781,7 +794,13 @@ export function StellarView(props: StellarViewProps = {}) {
   // the user's eye position + orbit + zoom.
   const [viewResetTick, setViewResetTick] = useState(0);
   // M3-2d — 엣지 클릭 상태. null 이면 entity 카드 (focused) 가 보인다.
-  const [edgeClick, setEdgeClick] = useState<{ a: StellarNode; b: StellarNode } | null>(null);
+  // fix/stellar-cards-entity-node-compat — optional `link` carries the v2
+  // StellarLink object so the EdgeFactsList summary path can render it.
+  const [edgeClick, setEdgeClick] = useState<{
+    a: StellarNode;
+    b: StellarNode;
+    link?: StellarLink;
+  } | null>(null);
   const [realData, setRealData] = useState<StellarGraphData | null>(null);
   const [realLoading, setRealLoading] = useState(false);
   const realLoadedRef = useRef(false);
@@ -1175,10 +1194,12 @@ export function StellarView(props: StellarViewProps = {}) {
           mode={source}
           onNodeHover={handleHover}
           onNodeClick={handleClick}
-          onLinkClick={(endpoints) => {
+          onLinkClick={(endpoints, link) => {
             // M3-2d — 엣지 클릭. focus 는 그대로 두고 edgeClick state 만 set.
             // (focused 와 edgeClick 이 둘 다 truthy 일 때 EdgeFactsList 가 우선.)
-            setEdgeClick(endpoints);
+            // fix/stellar-cards-entity-node-compat — v2 link 객체가 함께 오면
+            // 보존했다가 EdgeFactsList 로 전달.
+            setEdgeClick(link ? { ...endpoints, link } : endpoints);
           }}
           focusedId={focused?.id ?? null}
           focusedNeighborIds={focusedNeighborIds}
@@ -1254,14 +1275,16 @@ export function StellarView(props: StellarViewProps = {}) {
         <StellarEntityCard
           entity={focused}
           allFacts={activeData.nodes}
+          links={activeData.links}
           onClose={handleClearFocus}
         />
       ) : null}
       {/* M3-2d — 엣지 클릭 → fact 리스트. */}
       {edgeClick ? (
         <StellarEdgeFactsList
-          endpoints={edgeClick}
+          endpoints={{ a: edgeClick.a, b: edgeClick.b }}
           allFacts={activeData.nodes}
+          link={edgeClick.link}
           onClose={() => setEdgeClick(null)}
         />
       ) : null}

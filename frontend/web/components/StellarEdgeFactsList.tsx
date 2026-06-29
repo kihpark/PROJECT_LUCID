@@ -1,6 +1,6 @@
 /**
  * M3-2d StellarEdgeFactsList — 엣지 클릭 → fact 리스트 (우패널).
- * PO 의뢰서 verbatim.
+ * PO 의뢰서 verbatim + fix/stellar-cards-entity-node-compat (2026-06-29).
  *
  * 엣지 = 두 entity 사이 관계. 이 패널은 그 관계를 형성하는 모든 fact 를
  * 한 줄씩 나열한다.
@@ -16,12 +16,19 @@
  *   link_status (verified/claimed) → 시각 강약 X. 데이터 메타데이터 only.
  *   리스트에 link_status 값을 라벨로 노출하더라도 stroke/색/opacity 어떤
  *   visual signal 도 바뀌지 않는다. unbind 가드 테스트로 검증.
+ *
+ * ★ fix/stellar-cards-entity-node-compat (PO 2026-06-29):
+ *   STELLAR v2 의 link 객체를 직접 받아 그리는 새 경로 추가.
+ *   - link prop 이 주어지면 link.predicates / fact_count / roles / link_status
+ *     를 요약 렌더 (1 행 per row 가 아니라 link 1 개 = 1 카드).
+ *   - 양 끝 이름은 pickEntityName 으로 노출 — '(주체 없음)' / '(객체 없음)' 제거.
+ *   - link prop 이 없으면 기존 findFactsForEdge + row 렌더 (백워드 호환).
  */
 'use client';
 
-import type { StellarNode } from '@/lib/syntheticGraph';
+import type { StellarLink, StellarNode } from '@/lib/syntheticGraph';
 import { predicateLabel } from '@/lib/predicateLabels';
-import { classifyClaimModality } from './StellarHoverCard';
+import { classifyClaimModality, pickEntityName } from './StellarHoverCard';
 
 const ACCENT = '#5EEAD4';
 const WHO_COLOR = '#5EEAD4';
@@ -60,89 +67,213 @@ export function findFactsForEdge(
 export interface StellarEdgeFactsListProps {
   /** The two endpoint nodes the edge spans. */
   endpoints: { a: StellarNode; b: StellarNode };
-  /** Full fact set so we can filter by the SPO pair. */
+  /** Full fact set so we can filter by the SPO pair (legacy path). */
   allFacts: StellarNode[];
+  /** fix/stellar-cards-entity-node-compat — v2 link object. When provided,
+   *  the panel renders a single summary card derived from link metadata
+   *  instead of one row per fact-node. */
+  link?: StellarLink;
   /** Close handler. */
   onClose: () => void;
+}
+
+const PANEL_STYLE = {
+  position: 'absolute' as const,
+  top: 16,
+  right: 18,
+  zIndex: 20,
+  width: 420,
+  maxHeight: 'calc(100% - 32px)',
+  overflowY: 'auto' as const,
+  background: PANEL_BG,
+  border: `1px solid ${PANEL_BORDER}`,
+  borderRadius: 14,
+  padding: 18,
+  marginTop: 56,
+  color: TEXT_PRIMARY,
+  boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
+  backdropFilter: 'blur(10px)',
+};
+
+function PanelHeader({
+  count,
+  onClose,
+}: {
+  count: number;
+  onClose: () => void;
+}) {
+  return (
+    <header
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+      }}
+    >
+      <span
+        style={{
+          color: ACCENT,
+          fontSize: 11,
+          letterSpacing: '0.08em',
+          fontWeight: 600,
+        }}
+      >
+        STELLAR · EDGE · {count}건
+      </span>
+      <button
+        type="button"
+        data-testid="stellar-edge-facts-close"
+        onClick={onClose}
+        aria-label="close"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: TEXT_DIM,
+          fontSize: 18,
+          cursor: 'pointer',
+          lineHeight: 1,
+          padding: 4,
+        }}
+      >
+        ×
+      </button>
+    </header>
+  );
+}
+
+function EndpointsLine({
+  aName,
+  bName,
+}: {
+  aName: string;
+  bName: string;
+}) {
+  return (
+    <div
+      data-testid="stellar-edge-facts-endpoints"
+      style={{ fontSize: 13, color: TEXT_BODY, lineHeight: 1.5, marginBottom: 14 }}
+    >
+      <span style={{ color: WHO_COLOR, fontWeight: 600 }}>{aName}</span>
+      <span style={{ color: TEXT_DIM, margin: '0 6px' }}>↔</span>
+      <span style={{ color: WHO_COLOR, fontWeight: 600 }}>{bName}</span>
+    </div>
+  );
 }
 
 export function StellarEdgeFactsList({
   endpoints,
   allFacts,
+  link,
   onClose,
 }: StellarEdgeFactsListProps) {
+  const aName = pickEntityName(endpoints.a);
+  const bName = pickEntityName(endpoints.b);
+
+  // fix/stellar-cards-entity-node-compat — v2 link-driven summary path.
+  if (link) {
+    const factCount =
+      typeof link.fact_count === 'number' && link.fact_count > 0
+        ? link.fact_count
+        : 1;
+    const predicateList: string[] = (() => {
+      if (link.predicates && link.predicates.length > 0) {
+        return link.predicates;
+      }
+      if (link.predicate) return [link.predicate];
+      return [];
+    })();
+    const roles = link.roles && Object.keys(link.roles).length > 0
+      ? link.roles
+      : null;
+    return (
+      <aside
+        data-testid="stellar-edge-facts-list"
+        role="dialog"
+        aria-label="edge facts"
+        style={PANEL_STYLE}
+      >
+        <PanelHeader count={factCount} onClose={onClose} />
+        <EndpointsLine aName={aName} bName={bName} />
+        <div
+          data-testid="stellar-edge-facts-summary"
+          data-link-kind={link.kind ?? ''}
+          style={{ fontSize: 12, color: TEXT_BODY, lineHeight: 1.6 }}
+        >
+          <span data-testid="stellar-edge-facts-fact-count">{factCount}건의 fact</span>
+        </div>
+        {predicateList.length > 0 ? (
+          <ul
+            data-testid="stellar-edge-facts-predicates"
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: '10px 0 0 0',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+            }}
+          >
+            {predicateList.map((p, i) => (
+              <li
+                key={`${p}-${i}`}
+                data-testid="stellar-edge-facts-predicate"
+                style={{
+                  padding: '3px 8px',
+                  border: `1px solid ${PANEL_BORDER}`,
+                  borderRadius: 999,
+                  color: ACCENT,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  background: 'rgba(94,234,212,0.06)',
+                }}
+              >
+                {predicateLabel(p)}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {roles ? (
+          <div
+            data-testid="stellar-edge-facts-roles"
+            style={{
+              color: TEXT_DIM,
+              fontSize: 10,
+              marginTop: 10,
+              lineHeight: 1.5,
+            }}
+          >
+            roles:{' '}
+            {Object.entries(roles)
+              .map(([k, v]) => k + ': ' + v)
+              .join(', ')}
+          </div>
+        ) : null}
+        {link.link_status ? (
+          <div
+            data-testid="stellar-edge-facts-link-status"
+            data-link-status={link.link_status}
+            style={{ color: TEXT_DIM, fontSize: 10, marginTop: 8 }}
+          >
+            · {link.link_status}
+          </div>
+        ) : null}
+      </aside>
+    );
+  }
+
+  // Legacy / synthetic path — 1 fact = 1 node + findFactsForEdge.
   const facts = findFactsForEdge(endpoints.a, endpoints.b, allFacts);
-  const aName = endpoints.a.subject || '(주체 없음)';
-  const bName = endpoints.b.subject || '(객체 없음)';
 
   return (
     <aside
       data-testid="stellar-edge-facts-list"
       role="dialog"
       aria-label="edge facts"
-      style={{
-        position: 'absolute',
-        top: 16,
-        right: 18,
-        zIndex: 20,
-        width: 420,
-        maxHeight: 'calc(100% - 32px)',
-        overflowY: 'auto',
-        background: PANEL_BG,
-        border: `1px solid ${PANEL_BORDER}`,
-        borderRadius: 14,
-        padding: 18,
-        marginTop: 56,
-        color: TEXT_PRIMARY,
-        boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
-        backdropFilter: 'blur(10px)',
-      }}
+      style={PANEL_STYLE}
     >
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <span
-          style={{
-            color: ACCENT,
-            fontSize: 11,
-            letterSpacing: '0.08em',
-            fontWeight: 600,
-          }}
-        >
-          STELLAR · EDGE · {facts.length}건
-        </span>
-        <button
-          type="button"
-          data-testid="stellar-edge-facts-close"
-          onClick={onClose}
-          aria-label="close"
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: TEXT_DIM,
-            fontSize: 18,
-            cursor: 'pointer',
-            lineHeight: 1,
-            padding: 4,
-          }}
-        >
-          ×
-        </button>
-      </header>
-
-      <div
-        data-testid="stellar-edge-facts-endpoints"
-        style={{ fontSize: 13, color: TEXT_BODY, lineHeight: 1.5, marginBottom: 14 }}
-      >
-        <span style={{ color: WHO_COLOR, fontWeight: 600 }}>{aName}</span>
-        <span style={{ color: TEXT_DIM, margin: '0 6px' }}>↔</span>
-        <span style={{ color: WHO_COLOR, fontWeight: 600 }}>{bName}</span>
-      </div>
+      <PanelHeader count={facts.length} onClose={onClose} />
+      <EndpointsLine aName={aName} bName={bName} />
 
       {facts.length === 0 ? (
         <div

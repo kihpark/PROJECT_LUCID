@@ -11,8 +11,9 @@ import { render, screen } from '@testing-library/react';
 import {
   StellarEntityCard,
   countFactsByType,
+  countFactsFromLinks,
 } from '@/components/StellarEntityCard';
-import type { StellarNode } from '@/lib/syntheticGraph';
+import type { StellarLink, StellarNode } from '@/lib/syntheticGraph';
 
 function makeNode(overrides: Partial<StellarNode> = {}): StellarNode {
   return {
@@ -122,5 +123,110 @@ describe('StellarEntityCard render', () => {
     );
     screen.getByTestId('stellar-entity-card-close').click();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// fix/stellar-cards-entity-node-compat (2026-06-29) — v2 entity-node + links.
+describe('v2 entity-node + links (★ fix/stellar-cards-entity-node-compat)', () => {
+  function makeEntity(overrides: Partial<StellarNode> = {}): StellarNode {
+    return {
+      id: 'uid-a',
+      label: '강재호',
+      cluster: 0,
+      weight: 1,
+      kind: 'entity',
+      entity_type: 'person',
+      subject: undefined,
+      predicate: undefined,
+      object: undefined,
+      ...overrides,
+    };
+  }
+
+  function makeLink(overrides: Partial<StellarLink> = {}): StellarLink {
+    return {
+      source: 'uid-a',
+      target: 'uid-b',
+      kind: 'action',
+      fact_count: 1,
+      ...overrides,
+    };
+  }
+
+  it('counts action / claim / measurement from links + entity.measurements', () => {
+    const entity = makeEntity({
+      id: 'uid-a',
+      measurements: [],
+    });
+    const links: StellarLink[] = [
+      makeLink({ source: 'uid-a', target: 'uid-b', kind: 'action', fact_count: 2 }),
+      makeLink({ source: 'uid-b', target: 'uid-a', kind: 'action', fact_count: 1 }),
+      makeLink({ source: 'uid-a', target: 'claim-1', kind: 'speaker', fact_count: 1 }),
+    ];
+    const counts = countFactsFromLinks(entity, links);
+    expect(counts.action).toBe(3);
+    expect(counts.claim).toBe(1);
+    expect(counts.measurement).toBe(0);
+  });
+
+  it('renders entity name + type + link-derived counts', () => {
+    const entity = makeEntity({ id: 'uid-a', label: '강재호', entity_type: 'person' });
+    const links: StellarLink[] = [
+      makeLink({ source: 'uid-a', target: 'uid-b', kind: 'action', fact_count: 2 }),
+      makeLink({ source: 'uid-b', target: 'uid-a', kind: 'action', fact_count: 1 }),
+      makeLink({ source: 'uid-a', target: 'claim-1', kind: 'speaker', fact_count: 1 }),
+    ];
+    const { container } = render(
+      <StellarEntityCard
+        entity={entity}
+        allFacts={[]}
+        links={links}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('stellar-entity-card-name').textContent).toBe('강재호');
+    expect(screen.getByTestId('stellar-entity-card-type').textContent).toBe('person');
+    expect(screen.getByTestId('stellar-entity-card-count-action').textContent).toContain(
+      '3건',
+    );
+    expect(screen.getByTestId('stellar-entity-card-count-claim').textContent).toContain(
+      '1건',
+    );
+    expect(
+      screen.getByTestId('stellar-entity-card-count-measurement').textContent,
+    ).toContain('0건');
+    // ★ regression guard.
+    expect(container.textContent ?? '').not.toContain('(주체 없음)');
+  });
+
+  it('LEDGER href uses entity.id when kind === "entity"', () => {
+    const entity = makeEntity({ id: 'uid-a' });
+    render(
+      <StellarEntityCard
+        entity={entity}
+        allFacts={[]}
+        links={[]}
+        onClose={() => {}}
+      />,
+    );
+    const ledger = screen.getByTestId('stellar-entity-card-ledger-link');
+    expect(ledger.getAttribute('href')).toBe('/ledger?entity=uid-a');
+  });
+
+  it('★ regression guard: "(주체 없음)" 노출 0 in v2 entity card', () => {
+    const entity = makeEntity({
+      id: 'uid-empty',
+      label: '',
+      subject: undefined,
+    });
+    const { container } = render(
+      <StellarEntityCard
+        entity={entity}
+        allFacts={[]}
+        links={[]}
+        onClose={() => {}}
+      />,
+    );
+    expect(container.textContent ?? '').not.toContain('(주체 없음)');
   });
 });
