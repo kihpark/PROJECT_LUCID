@@ -205,7 +205,7 @@ export function StellarEdgeFactsList({
                     {f.subject}
                   </span>
                   <span style={{ color: ACCENT, margin: '0 6px' }}>
-                    {predicateLabel(f.predicate)}
+                    {predicateLabel(f.predicate ?? '')}
                   </span>
                   <span style={{ color: TEXT_BODY }}>{f.object}</span>
                 </div>

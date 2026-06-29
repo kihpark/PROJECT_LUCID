@@ -112,7 +112,7 @@ function CardFooter({ asOf }: { asOf: string | null | undefined }) {
 
 function ActionBody({ fact }: { fact: StellarNode }) {
   const subject = fact.subject || '(주체 없음)';
-  const predicate = predicateLabel(fact.predicate);
+  const predicate = predicateLabel(fact.predicate ?? '');
   const object = truncate(fact.object, 90);
   const roles = fact.roles ?? null;
   return (

@@ -1085,12 +1085,14 @@ export function StellarGraph(props: StellarGraphProps) {
       let baseColor: string;
       if (mode === 'real') {
         if (link.kind) {
-          baseColor = edgeStyle(link.kind, link.fact_count ?? 1).color;
+          // 'speaker' is a CLAIM-family edge — share the claim_related palette.
+          const edgeKind = link.kind === 'speaker' ? 'claim_related' : link.kind;
+          baseColor = edgeStyle(edgeKind, link.fact_count ?? 1).color;
         } else {
           baseColor = 'rgba(63,224,198,0.55)';
         }
       } else {
-        const typeColor = EDGE_COLORS[link.type] ?? '#ffffff';
+        const typeColor = (link.type ? EDGE_COLORS[link.type] : undefined) ?? '#ffffff';
         const score =
           typeof link.corroborationScore === 'number'
             ? Math.max(0.04, Math.min(1, link.corroborationScore))
@@ -1137,7 +1139,10 @@ export function StellarGraph(props: StellarGraphProps) {
       // edgeStyle helper (log scale on fact_count, clamped [0.8, 5.0]).
       // Legacy real-mode links without kind keep the flat 0.6 floor.
       if (mode === 'real') {
-        if (link.kind) return edgeStyle(link.kind, link.fact_count ?? 1).width;
+        if (link.kind) {
+          const edgeKind = link.kind === 'speaker' ? 'claim_related' : link.kind;
+          return edgeStyle(edgeKind, link.fact_count ?? 1).width;
+        }
         return 0.6;
       }
       const score =

@@ -58,6 +58,28 @@ function gaussian(rng: () => number): number {
 
 export type EdgeType = 'supports' | 'elaborates' | 'causes' | 'contradicts';
 
+// feat/stellar-entity-edge-remodel-v2 (PO 2026-06-29):
+// ★ 데이터모델 v2 의 시각화 reshape:
+//   - 노드 = entity (+ claim 노드). NEVER 1-fact-per-node.
+//   - 엣지 = subject_uid → object_uid (ACTION) / speaker → claim → related (CLAIM).
+//   - measurement = entity 속성 (노드 X).
+// `kind` discriminates entity vs claim nodes; renderer / hover card branch on
+// it (claim 노드는 또렷한 작은 점 + 양태 배지). Pre-v2 synthetic / legacy paths
+// leave `kind` undefined → treated as 'entity' so backward compat is preserved.
+export type StellarNodeKind = 'entity' | 'claim';
+
+/** Per-entity measurement snapshot, attached to entity nodes when an entity
+ *  appears as the subject of a MEASUREMENT fact. The hover/entity card surfaces
+ *  these as 시계열 속성 chips. */
+export interface StellarMeasurement {
+  metric: string | null;
+  value: number | null;
+  unit: string | null;
+  as_of: string | null;
+  /** Originating fact for provenance / drill-down. */
+  fact_uid: string;
+}
+
 export interface StellarNode {
   id: string;
   label: string;
@@ -66,6 +88,16 @@ export interface StellarNode {
   /** Source-count analogue. Kept for backward compat — newer surfaces should
    *  prefer `degree` for size and `validationStrength` for emissive feel. */
   weight: number;
+  /** feat/stellar-entity-edge-remodel-v2 — node-kind discriminator.
+   *  'entity' = subject/object UUID-anchored entity; 'claim' = independent
+   *  claim node (id = fact_uid). Synthetic / legacy nodes leave undefined →
+   *  callers treat absence as 'entity'. */
+  kind?: StellarNodeKind;
+  /** feat/stellar-entity-edge-remodel-v2 — measurements attached to an entity
+   *  node. Populated by the real adapter when a MEASUREMENT fact's subject_uid
+   *  matches this entity. Hover/entity cards render them; the renderer never
+   *  treats measurements as nodes. */
+  measurements?: StellarMeasurement[] | null;
   /** B-62-v1 — actual graph degree (in + out edges incident on this node).
    *  Populated by `attachGraphMetrics` after the generator builds the link
    *  set. The Stellar renderer drives node size from this so size === how
@@ -75,14 +107,18 @@ export interface StellarNode {
    *  for real, weight for synthetic). Drives the emissive lift in nodeColor:
    *  well-validated facts glow brighter. */
   validationStrength?: number;
-  /** Initial 3D position seeded by the generator (ForceGraph3D respects x/y/z). */
-  x: number;
-  y: number;
-  z: number;
-  /** A short Korean entity-style label so the tooltip is meaningful. */
-  subject: string;
-  predicate: string;
-  object: string;
+  /** Initial 3D position seeded by the generator (ForceGraph3D respects x/y/z).
+   *  Optional now (feat/stellar-entity-edge-remodel-v2) — entity-node graphs
+   *  let ForceGraph3D place nodes; synthetic mode still seeds them. */
+  x?: number;
+  y?: number;
+  z?: number;
+  /** A short Korean entity-style label so the tooltip is meaningful.
+   *  Optional on entity-mode nodes (feat/stellar-entity-edge-remodel-v2);
+   *  required only on the legacy fact-per-node path. */
+  subject?: string;
+  predicate?: string;
+  object?: string;
   // feat/stellar-hover-restore-by-type — fact_type-specific fields used
   // by the floating hover tooltip in StellarView to render an adaptive
   // summary (action / claim / measurement). All optional: synthetic
@@ -172,10 +208,28 @@ export interface StellarNode {
   link_status?: 'verified' | 'claimed' | string | null;
 }
 
+// feat/stellar-entity-edge-remodel-v2 — link kinds the renderer cares about.
+// 'action' = ACTION fact (entity → entity, predicate label).
+// 'claim_related' = CLAIM-side edge (speaker → claim → related entity).
+// 'speaker' = CLAIM speaker → claim node edge.
+export type StellarLinkKind = 'action' | 'claim_related' | 'speaker';
+
 export interface StellarLink {
   source: string;
   target: string;
-  type: EdgeType;
+  /** Synthetic typed edges (supports/elaborates/causes/contradicts). Real
+   *  mode leaves this undefined — the renderer reads `kind` instead. */
+  type?: EdgeType;
+  /** feat/stellar-entity-edge-remodel-v2 — predicate string for ACTION edges
+   *  (e.g. "설립", "발표"). Drives the in-canvas / hover edge label. */
+  predicate?: string | null;
+  /** feat/stellar-entity-edge-remodel-v2 — every predicate behind this edge
+   *  when multiple ACTION facts join the same entity pair. The renderer can
+   *  show the most common, the most recent, or all. */
+  predicates?: string[] | null;
+  /** feat/stellar-entity-edge-remodel-v2 — role attributes carried from the
+   *  fact (recipient / instrument / location / …). */
+  roles?: Record<string, string> | null;
   /** B-62-demo-clusters-edges — 0..1 corroboration score. Drives edge
    *  brightness in the renderer (high = bright constellation, low =
    *  dim background filament). For the demo we sample a heavy-tailed
@@ -197,7 +251,7 @@ export interface StellarLink {
    *  'action' = action / measurement fact (teal); 'claim_related' =
    *  CLAIM-related edge (amber). Synthetic links leave it undefined →
    *  the renderer falls back to the EDGE_COLORS[type] path. */
-  kind?: 'action' | 'claim_related';
+  kind?: StellarLinkKind;
   /** fix/m3-2b-wiring — number of underlying facts joining the same
    *  subject/object pair. Drives edge width (log scale) in the M3-2b
    *  edgeStyle helper. Synthetic links leave it undefined → renderer

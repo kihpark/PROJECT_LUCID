@@ -1,303 +1,420 @@
 /**
- * fix/m3-2b-wiring-actually-apply — adapter contract tests.
+ * feat/stellar-entity-edge-remodel-v2 — adapter contract tests.
  *
- * Validates that loadRealStellarGraph populates the M3-2b visual-vocab
- * metadata the StellarGraph renderer now consumes:
+ * The v2 model:
+ *   - node = entity (NOT fact). Multiple facts about the same entity pair
+ *     collapse into one edge with accumulated fact_count.
+ *   - ACTION fact -> subject entity -> object entity (entity-edge).
+ *   - CLAIM fact  -> claim node + speaker entity edge + related entity edges.
+ *   - MEASUREMENT -> entity property (NEVER a node).
  *
- *   * node.entity_type (subject_entity_type pass-through) — drives node color
- *     via ENTITY_COLORS in mode='real'.
- *   * node.fact_type   — 'claim' switches to CLAIM_NODE_COLOR.
- *   * link.kind        — 'action' vs 'claim_related' — drives edge color
- *                        via stellarEdgeStyle.edgeStyle().
- *   * link.fact_count  — drives edge width (log scale).
- *
- * Without these fields, the renderer would silently fall back to legacy
- * cluster-palette/flat-accent — which was the PO repro
- * ("STELLAR REAL 변경 사항 안 보임").
+ * These tests pin the canonical PO acceptance scenario ("강재호 -> 이로운몰
+ * 설립") and the fall-through behaviors (literal object_value, multi-fact
+ * collapse, claim modality, measurement-as-attribute, entity degree).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-// Mock the API + auth surfaces so loadRealStellarGraph runs against an
-// in-memory fact list rather than the real backend. Returning a single
-// fact pair with shared subject so linkBySubjectOverlap emits a chain link.
-vi.mock('@/lib/api', () => ({
-  getHomeBrief: vi.fn().mockResolvedValue(null),
-  listSpaceFacts: vi.fn().mockResolvedValue({
-    facts: [
-      {
-        fact_uid: 'fact-a',
-        subject_uid: '00000000-0000-4000-8000-000000000001',
-        subject_label: '서울시',
-        predicate: 'develops',
-        object_value: '한강 르네상스',
-        source_uids: ['src-1'],
-        fact_type: 'action',
-        // ★ M3-2b — backend may emit subject_entity_type. Adapter must
-        // pass it through so the renderer can color the node WHO teal.
-        subject_entity_type: 'organization',
-      },
-      {
-        fact_uid: 'fact-b',
-        subject_uid: '00000000-0000-4000-8000-000000000001',
-        subject_label: '서울시',
-        predicate: 'launches',
-        object_value: '청계천 복원',
-        source_uids: ['src-2', 'src-3'],
-        fact_type: 'action',
-        subject_entity_type: 'organization',
-      },
-      {
-        fact_uid: 'fact-c',
-        subject_uid: '00000000-0000-4000-8000-000000000002',
-        subject_label: '대니얼 카너먼',
-        predicate: 'said',
-        object_value: '손실 회피 계수 2.25',
-        source_uids: ['src-4'],
-        fact_type: 'claim',
-        subject_entity_type: 'person',
-        speaker_label: '대니얼 카너먼',
-        speech_act: 'said',
-        content_claim: '손실 회피 계수 2.25',
-      },
-    ],
-  }),
-  recall: vi.fn(),
-}));
 
 vi.mock('@/lib/auth', () => ({
   getCurrentSpace: vi.fn().mockReturnValue('ks-test'),
 }));
 
-// predicateLabel is pure; mocking is unnecessary but cheap to stub.
 vi.mock('@/lib/predicateLabels', () => ({
-  predicateLabel: (predicate: string, label?: string | null) => label ?? predicate,
+  predicateLabel: (predicate: string, label?: string | null) =>
+    label ?? predicate,
 }));
 
-let loadRealStellarGraph: typeof import('@/lib/stellarRealAdapter').loadRealStellarGraph;
+const UID = {
+  KANG: '11111111-1111-4111-8111-111111111111',
+  IROUNMALL: '22222222-2222-4222-8222-222222222222',
+  KAHNEMAN: '33333333-3333-4333-8333-333333333333',
+  SAMSUNG: '44444444-4444-4444-8444-444444444444',
+  HBM: '55555555-5555-4555-8555-555555555555',
+  TSMC: '66666666-6666-4666-8666-666666666666',
+  REL_X: '77777777-7777-4777-8777-777777777777',
+};
 
-beforeEach(async () => {
+function mockApi(facts: unknown[], brief: unknown = null) {
+  vi.doMock('@/lib/api', () => ({
+    getHomeBrief: vi.fn().mockResolvedValue(brief),
+    listSpaceFacts: vi.fn().mockResolvedValue({ facts, total: facts.length, truncated: false }),
+    recall: vi.fn(),
+  }));
+}
+
+beforeEach(() => {
   vi.resetModules();
-  ({ loadRealStellarGraph } = await import('@/lib/stellarRealAdapter'));
 });
 
 afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('loadRealStellarGraph — fix/m3-2b-wiring entity_type pass-through', () => {
-  it('exposes subject_entity_type on each node as the entity_type bucket', async () => {
-    const data = await loadRealStellarGraph();
-    const orgNode = data.nodes.find((n) => n.id === 'fact-a');
-    const personNode = data.nodes.find((n) => n.id === 'fact-c');
-    expect(orgNode?.entity_type).toBe('organization');
-    expect(personNode?.entity_type).toBe('person');
-  });
+describe('Acceptance 1: ACTION -> entity-edge (강재호 -> 이로운몰 설립)', () => {
+  it('emits an action edge between the two entity nodes labelled by the predicate', async () => {
+    mockApi([
+      {
+        fact_uid: 'fact-kang-founded',
+        subject_uid: UID.KANG,
+        subject_label: '강재호',
+        subject_entity_type: 'person',
+        predicate: '설립',
+        object_value: UID.IROUNMALL,
+        object_label: '이로운몰',
+        object_entity_type: 'organization',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
 
-  it('preserves fact_type so the CLAIM node can switch to CLAIM_NODE_COLOR', async () => {
-    const data = await loadRealStellarGraph();
-    const claimNode = data.nodes.find((n) => n.id === 'fact-c');
-    expect(claimNode?.fact_type).toBe('claim');
-  });
+    const kang = data.nodes.find((n) => n.id === UID.KANG);
+    const irounmall = data.nodes.find((n) => n.id === UID.IROUNMALL);
+    expect(kang?.kind).toBe('entity');
+    expect(irounmall?.kind).toBe('entity');
+    expect(kang?.label).toBe('강재호');
+    expect(irounmall?.label).toBe('이로운몰');
 
-  it('keeps subject_entity_type / object_entity_type as separate pass-through fields', async () => {
-    const data = await loadRealStellarGraph();
-    const claimNode = data.nodes.find((n) => n.id === 'fact-c');
-    expect(claimNode?.subject_entity_type).toBe('person');
-    // No object_entity_type in the mock — adapter passes null through.
-    expect(claimNode?.object_entity_type).toBeNull();
-  });
-});
-
-describe('loadRealStellarGraph — fix/m3-2b-wiring link kind / fact_count', () => {
-  it('emits chain links with kind="action" between non-claim siblings', async () => {
-    const data = await loadRealStellarGraph();
-    // The two 서울시 facts share a subject so linkBySubjectOverlap emits
-    // exactly one chain link between them; both endpoints are action facts,
-    // so kind must be 'action' (teal).
-    const link = data.links.find(
-      (l) =>
-        (l.source === 'fact-a' && l.target === 'fact-b') ||
-        (l.source === 'fact-b' && l.target === 'fact-a'),
+    const edge = data.links.find(
+      (l) => l.source === UID.KANG && l.target === UID.IROUNMALL,
     );
-    expect(link).toBeTruthy();
-    expect(link?.kind).toBe('action');
+    expect(edge).toBeTruthy();
+    expect(edge?.kind).toBe('action');
+    expect(edge?.predicate).toBe('설립');
+    expect(edge?.fact_count).toBe(1);
   });
 
-  it('attaches fact_count to every chain link (drives edge width)', async () => {
-    const data = await loadRealStellarGraph();
-    for (const link of data.links) {
-      expect(typeof link.fact_count).toBe('number');
-      expect(link.fact_count).toBeGreaterThan(0);
-    }
-  });
-
-  it('does NOT bind link_status to the renderer (★ PO 정정 가드)', async () => {
-    // Adapter must not synthesise link_status into kind — kind is a pure
-    // function of fact_type, not of link_status. We assert by injecting
-    // a "claimed" link_status hint into the mock and confirming the
-    // emitted edges still derive kind from fact_type only.
-    const data = await loadRealStellarGraph();
-    for (const link of data.links) {
-      // The data-only contract: kind belongs to {action, claim_related},
-      // never to link_status' {verified, claimed}.
-      expect(['action', 'claim_related']).toContain(link.kind);
-    }
+  it('★ PO acceptance #1: fact is NOT a node — only entities are nodes', async () => {
+    mockApi([
+      {
+        fact_uid: 'fact-kang-founded',
+        subject_uid: UID.KANG,
+        subject_label: '강재호',
+        subject_entity_type: 'person',
+        predicate: '설립',
+        object_value: UID.IROUNMALL,
+        object_label: '이로운몰',
+        object_entity_type: 'organization',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    // No node with id === fact_uid.
+    const factNode = data.nodes.find((n) => n.id === 'fact-kang-founded');
+    expect(factNode).toBeUndefined();
   });
 });
 
-describe('loadRealStellarGraph — claim ↔ action edge kind', () => {
-  it('emits kind="claim_related" when either endpoint is a CLAIM fact', async () => {
-    // Re-import with a mock where one subject groups a CLAIM and an
-    // ACTION fact together — the chain link between them must be
-    // labelled claim_related (amber) per the M3-2b spec.
-    vi.resetModules();
-    vi.doMock('@/lib/api', () => ({
-      getHomeBrief: vi.fn().mockResolvedValue(null),
-      listSpaceFacts: vi.fn().mockResolvedValue({
-        facts: [
-          {
-            fact_uid: 'mix-1',
-            subject_uid: '00000000-0000-4000-8000-000000000003',
-            subject_label: '삼성전자',
-            predicate: 'announced',
-            object_value: 'HBM3E 양산',
-            source_uids: ['s1'],
-            fact_type: 'action',
-            subject_entity_type: 'organization',
-          },
-          {
-            fact_uid: 'mix-2',
-            subject_uid: '00000000-0000-4000-8000-000000000003',
-            subject_label: '삼성전자',
-            predicate: 'said',
-            object_value: 'HBM 점유율 53%',
-            source_uids: ['s2'],
-            fact_type: 'claim',
-            subject_entity_type: 'organization',
-          },
-        ],
-      }),
-      recall: vi.fn(),
-    }));
-    vi.doMock('@/lib/auth', () => ({
-      getCurrentSpace: vi.fn().mockReturnValue('ks-test'),
-    }));
-    vi.doMock('@/lib/predicateLabels', () => ({
-      predicateLabel: (predicate: string, label?: string | null) =>
-        label ?? predicate,
-    }));
+describe('Multi-fact ACTION pairs collapse to one edge with fact_count', () => {
+  it('two facts on the same (subject, object) pair -> one edge, fact_count = 2', async () => {
+    mockApi([
+      {
+        fact_uid: 'f1',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '발표',
+        object_value: UID.HBM,
+        object_label: 'HBM3E 양산',
+        object_entity_type: 'product',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+      {
+        fact_uid: 'f2',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '출하',
+        object_value: UID.HBM,
+        object_label: 'HBM3E 양산',
+        object_entity_type: 'product',
+        source_uids: ['s2'],
+        fact_type: 'action',
+      },
+    ]);
     const mod = await import('@/lib/stellarRealAdapter');
     const data = await mod.loadRealStellarGraph();
-    const link = data.links.find(
-      (l) =>
-        (l.source === 'mix-1' && l.target === 'mix-2') ||
-        (l.source === 'mix-2' && l.target === 'mix-1'),
+    const edges = data.links.filter(
+      (l) => l.source === UID.SAMSUNG && l.target === UID.HBM,
     );
-    expect(link).toBeTruthy();
-    expect(link?.kind).toBe('claim_related');
+    expect(edges).toHaveLength(1);
+    expect(edges[0]?.fact_count).toBe(2);
+    expect(edges[0]?.predicates).toEqual(['발표', '출하']);
   });
 });
 
-describe('loadRealStellarGraph - fix/m32b-entity-type-degree-actual-wiring degree', () => {
-  it('populates node.degree from the link set so size = sqrt(degree)', async () => {
-    // The previous describe ends with a vi.doMock override (mix-1/mix-2).
-    // We need to restore the default mock so fact-a / fact-b / fact-c are
-    // present in the graph; otherwise node.find(fact-a) is undefined and
-    // a?.degree is undefined regardless of attachGraphMetrics behavior.
-    vi.resetModules();
-    vi.doMock('@/lib/api', () => ({
-      getHomeBrief: vi.fn().mockResolvedValue(null),
-      listSpaceFacts: vi.fn().mockResolvedValue({
-        facts: [
-          {
-            fact_uid: 'fact-a',
-            subject_uid: '00000000-0000-4000-8000-000000000001',
-            subject_label: '서울시',
-            predicate: 'develops',
-            object_value: '한강 르네상스',
-            source_uids: ['src-1'],
-            fact_type: 'action',
-            subject_entity_type: 'organization',
-          },
-          {
-            fact_uid: 'fact-b',
-            subject_uid: '00000000-0000-4000-8000-000000000001',
-            subject_label: '서울시',
-            predicate: 'launches',
-            object_value: '청계천 복원',
-            source_uids: ['src-2', 'src-3'],
-            fact_type: 'action',
-            subject_entity_type: 'organization',
-          },
-          {
-            fact_uid: 'fact-c',
-            subject_uid: '00000000-0000-4000-8000-000000000002',
-            subject_label: '대니얼 카너먼',
-            predicate: 'said',
-            object_value: '손실 회피 계수 2.25',
-            source_uids: ['src-4'],
-            fact_type: 'claim',
-            subject_entity_type: 'person',
-          },
-        ],
-      }),
-      recall: vi.fn(),
-    }));
-    vi.doMock('@/lib/auth', () => ({
-      getCurrentSpace: vi.fn().mockReturnValue('ks-test'),
-    }));
-    vi.doMock('@/lib/predicateLabels', () => ({
-      predicateLabel: (predicate: string, label?: string | null) =>
-        label ?? predicate,
-    }));
+describe('CLAIM -> claim node + speaker edge + related entity edges', () => {
+  it('emits a claim node (kind="claim", id=fact_uid) with speech_act + content_claim', async () => {
+    mockApi([
+      {
+        fact_uid: 'claim-kahneman-1',
+        subject_uid: UID.KAHNEMAN,
+        subject_label: '대니얼 카너먼',
+        subject_entity_type: 'person',
+        predicate: 'said',
+        object_value: '손실 회피 계수 2.25',
+        source_uids: ['s1'],
+        fact_type: 'claim',
+        speaker_label: '대니얼 카너먼',
+        speech_act: 'judgment',
+        content_claim: '손실 회피 계수 2.25',
+      },
+    ]);
     const mod = await import('@/lib/stellarRealAdapter');
     const data = await mod.loadRealStellarGraph();
-    const a = data.nodes.find((n) => n.id === 'fact-a');
-    const b = data.nodes.find((n) => n.id === 'fact-b');
-    const c = data.nodes.find((n) => n.id === 'fact-c');
-    expect(a?.degree).toBe(1);
-    expect(b?.degree).toBe(1);
-    expect(c?.degree).toBe(0);
+    const claim = data.nodes.find((n) => n.id === 'claim-kahneman-1');
+    expect(claim?.kind).toBe('claim');
+    expect(claim?.fact_type).toBe('claim');
+    expect(claim?.speech_act).toBe('judgment');
+    expect(claim?.content_claim).toBe('손실 회피 계수 2.25');
   });
 
-  it('exposes object_entity_type as a pass-through when the fact carries it', async () => {
-    // Reload with a mock where one fact has an entity-shape object_value
-    // and the backend has already resolved object_entity_type. The adapter
-    // must surface that as node.object_entity_type so callers can read it.
-    vi.resetModules();
-    vi.doMock('@/lib/api', () => ({
-      getHomeBrief: vi.fn().mockResolvedValue(null),
-      listSpaceFacts: vi.fn().mockResolvedValue({
-        facts: [
-          {
-            fact_uid: 'ot-1',
-            subject_uid: '00000000-0000-4000-8000-000000000010',
-            subject_label: '직원',
-            predicate: 'works_at',
-            object_value: '00000000-0000-4000-8000-000000000011',
-            object_label: '한국은행',
-            source_uids: ['s10'],
-            fact_type: 'action',
-            subject_entity_type: 'person',
-            object_entity_type: 'organization',
-          },
-        ],
-      }),
-      recall: vi.fn(),
-    }));
-    vi.doMock('@/lib/auth', () => ({
-      getCurrentSpace: vi.fn().mockReturnValue('ks-test'),
-    }));
-    vi.doMock('@/lib/predicateLabels', () => ({
-      predicateLabel: (predicate: string, label?: string | null) =>
-        label ?? predicate,
-    }));
+  it('emits a speaker entity node + speaker edge from speaker -> claim node', async () => {
+    mockApi([
+      {
+        fact_uid: 'claim-kahneman-1',
+        subject_uid: UID.KAHNEMAN,
+        subject_label: '대니얼 카너먼',
+        subject_entity_type: 'person',
+        predicate: 'said',
+        object_value: '손실 회피 계수 2.25',
+        source_uids: ['s1'],
+        fact_type: 'claim',
+        speaker_uid: UID.KAHNEMAN,
+        speaker_label: '대니얼 카너먼',
+        speech_act: 'judgment',
+        content_claim: '손실 회피 계수 2.25',
+      },
+    ]);
     const mod = await import('@/lib/stellarRealAdapter');
     const data = await mod.loadRealStellarGraph();
-    const node = data.nodes.find((n) => n.id === 'ot-1');
-    expect(node?.subject_entity_type).toBe('person');
-    expect(node?.object_entity_type).toBe('organization');
-    // entity_type falls through to subject_entity_type by default.
-    expect(node?.entity_type).toBe('person');
+    const speakerNode = data.nodes.find((n) => n.id === UID.KAHNEMAN);
+    expect(speakerNode?.kind).toBe('entity');
+    const speakerEdge = data.links.find(
+      (l) => l.source === UID.KAHNEMAN && l.target === 'claim-kahneman-1',
+    );
+    expect(speakerEdge).toBeTruthy();
+    expect(speakerEdge?.kind).toBe('speaker');
+  });
+
+  it('emits claim_related edges from claim node -> each related entity', async () => {
+    mockApi([
+      {
+        fact_uid: 'claim-rel-1',
+        subject_uid: UID.KAHNEMAN,
+        subject_label: '대니얼 카너먼',
+        subject_entity_type: 'person',
+        predicate: 'said',
+        object_value: 'X',
+        source_uids: ['s1'],
+        fact_type: 'claim',
+        speaker_uid: UID.KAHNEMAN,
+        speaker_label: '대니얼 카너먼',
+        speech_act: 'assertion',
+        content_claim: 'X',
+        related_entity_uids: [UID.REL_X],
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const rel = data.nodes.find((n) => n.id === UID.REL_X);
+    expect(rel?.kind).toBe('entity');
+    const edge = data.links.find(
+      (l) => l.source === 'claim-rel-1' && l.target === UID.REL_X,
+    );
+    expect(edge?.kind).toBe('claim_related');
+  });
+
+  it('falls back to a deterministic speaker stub id when speaker_uid is absent', async () => {
+    mockApi([
+      {
+        fact_uid: 'claim-stub-1',
+        subject_uid: UID.KAHNEMAN,
+        subject_label: '대니얼 카너먼',
+        subject_entity_type: 'person',
+        predicate: 'said',
+        object_value: 'X',
+        source_uids: ['s1'],
+        fact_type: 'claim',
+        // No speaker_uid — only speaker_label.
+        speaker_label: '대니얼 카너먼',
+        speech_act: 'assertion',
+        content_claim: 'X',
+      },
+      {
+        fact_uid: 'claim-stub-2',
+        subject_uid: UID.KAHNEMAN,
+        subject_label: '대니얼 카너먼',
+        subject_entity_type: 'person',
+        predicate: 'said',
+        object_value: 'Y',
+        source_uids: ['s1'],
+        fact_type: 'claim',
+        speaker_label: '대니얼 카너먼',
+        speech_act: 'assertion',
+        content_claim: 'Y',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    // Same speaker_label -> same stub node.
+    const stubs = data.nodes.filter((n) =>
+      typeof n.id === 'string' && n.id.startsWith('claim-speaker:'),
+    );
+    expect(stubs).toHaveLength(1);
+    expect(stubs[0]?.kind).toBe('entity');
+    // Two speaker edges originating from the stub.
+    const speakerEdges = data.links.filter(
+      (l) => typeof l.source === 'string' && l.source.startsWith('claim-speaker:') && l.kind === 'speaker',
+    );
+    expect(speakerEdges).toHaveLength(2);
+  });
+});
+
+describe('MEASUREMENT -> entity property (★ never a node)', () => {
+  it('attaches the measurement to the subject entity, NOT a separate node', async () => {
+    mockApi([
+      {
+        fact_uid: 'measure-1',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: 'has_metric',
+        object_value: '53',
+        source_uids: ['s1'],
+        fact_type: 'measurement',
+        metric: 'HBM 점유율',
+        measurement_value: 53,
+        measurement_unit: '%',
+        as_of: '2026-06-29',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    // No measurement-as-node.
+    const m = data.nodes.find((n) => n.id === 'measure-1');
+    expect(m).toBeUndefined();
+    // Measurement is attached to the entity.
+    const samsung = data.nodes.find((n) => n.id === UID.SAMSUNG);
+    expect(samsung?.kind).toBe('entity');
+    expect(samsung?.measurements).toEqual([
+      {
+        metric: 'HBM 점유율',
+        value: 53,
+        unit: '%',
+        as_of: '2026-06-29',
+        fact_uid: 'measure-1',
+      },
+    ]);
+  });
+});
+
+describe('object_value literal -> skip edge (entity still surfaces)', () => {
+  it('does not emit an action edge when object_value is a literal', async () => {
+    mockApi([
+      {
+        fact_uid: 'literal-1',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '발표',
+        // Literal object (Korean string, not a UUID).
+        object_value: '메모리 단가 +35%',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const samsung = data.nodes.find((n) => n.id === UID.SAMSUNG);
+    // Subject entity is in the graph.
+    expect(samsung).toBeTruthy();
+    // No edge whose source is samsung.
+    expect(data.links.filter((l) => l.source === UID.SAMSUNG)).toHaveLength(0);
+  });
+});
+
+
+describe('★ PO acceptance #4: node degree = entity link count', () => {
+  it('three action facts from one subject -> degree 3 on the subject', async () => {
+    mockApi([
+      {
+        fact_uid: 'f1',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '발표',
+        object_value: UID.HBM,
+        object_label: 'HBM',
+        object_entity_type: 'product',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+      {
+        fact_uid: 'f2',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '경쟁',
+        object_value: UID.TSMC,
+        object_label: 'TSMC',
+        object_entity_type: 'organization',
+        source_uids: ['s2'],
+        fact_type: 'action',
+      },
+      {
+        fact_uid: 'f3',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '협력',
+        object_value: UID.IROUNMALL,
+        object_label: '이로운몰',
+        object_entity_type: 'organization',
+        source_uids: ['s3'],
+        fact_type: 'action',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const samsung = data.nodes.find((n) => n.id === UID.SAMSUNG);
+    expect(samsung?.degree).toBe(3);
+  });
+});
+
+describe('Renderer-facing pass-through (entity_type stays on the node)', () => {
+  it('first fact decides entity_type, later facts do not overwrite a known type', async () => {
+    mockApi([
+      {
+        fact_uid: 'f1',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        subject_entity_type: 'organization',
+        predicate: '발표',
+        object_value: UID.HBM,
+        object_label: 'HBM',
+        object_entity_type: 'product',
+        source_uids: ['s1'],
+        fact_type: 'action',
+      },
+      {
+        fact_uid: 'f2',
+        subject_uid: UID.SAMSUNG,
+        subject_label: '삼성전자',
+        predicate: '협력',
+        object_value: UID.IROUNMALL,
+        object_label: '이로운몰',
+        object_entity_type: 'organization',
+        source_uids: ['s2'],
+        fact_type: 'action',
+      },
+    ]);
+    const mod = await import('@/lib/stellarRealAdapter');
+    const data = await mod.loadRealStellarGraph();
+    const samsung = data.nodes.find((n) => n.id === UID.SAMSUNG);
+    expect(samsung?.entity_type).toBe('organization');
   });
 });

@@ -470,7 +470,7 @@ export function tooltipLinesForNode(node: StellarNode): TooltipLines {
   // gloss helper so 'supports' shows as '뒷받침하는 것은' etc.
   return {
     head: node.subject || '',
-    mid: `→ ${predicateLabel(node.predicate)} →`,
+    mid: `→ ${predicateLabel(node.predicate ?? '')} →`,
     body: truncate(node.object, 90),
   };
 }
