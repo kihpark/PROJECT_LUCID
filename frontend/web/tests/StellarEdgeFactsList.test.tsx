@@ -14,7 +14,7 @@ import {
   findFactsForEdge,
 } from '@/components/StellarEdgeFactsList';
 import { edgeStyle, edgeStyleIgnoringLinkStatus } from '@/lib/stellarEdgeStyle';
-import type { StellarNode } from '@/lib/syntheticGraph';
+import type { StellarLink, StellarNode } from '@/lib/syntheticGraph';
 
 function makeNode(overrides: Partial<StellarNode> = {}): StellarNode {
   return {
@@ -215,5 +215,93 @@ describe('StellarEdgeFactsList render', () => {
     );
     screen.getByTestId('stellar-edge-facts-close').click();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// fix/stellar-cards-entity-node-compat (2026-06-29) — v2 link-driven path.
+describe('v2 link-driven (★ fix/stellar-cards-entity-node-compat)', () => {
+  it('renders endpoint names + predicates list + fact_count + roles', () => {
+    const a: StellarNode = {
+      id: 'uid-a',
+      label: '강재호',
+      cluster: 0,
+      weight: 1,
+      kind: 'entity',
+      entity_type: 'person',
+    };
+    const b: StellarNode = {
+      id: 'uid-b',
+      label: 'Lucid',
+      cluster: 0,
+      weight: 1,
+      kind: 'entity',
+      entity_type: 'organization',
+    };
+    const link: StellarLink = {
+      source: 'uid-a',
+      target: 'uid-b',
+      kind: 'action',
+      predicate: '설립',
+      predicates: ['설립', '발표'],
+      fact_count: 5,
+      roles: { recipient: '시장' },
+    };
+    const { container } = render(
+      <StellarEdgeFactsList
+        endpoints={{ a, b }}
+        allFacts={[]}
+        link={link}
+        onClose={() => {}}
+      />,
+    );
+    const endpoints = screen.getByTestId('stellar-edge-facts-endpoints').textContent ?? '';
+    expect(endpoints).toContain('강재호');
+    expect(endpoints).toContain('Lucid');
+    expect(
+      screen.getByTestId('stellar-edge-facts-fact-count').textContent,
+    ).toContain('5건');
+    const predicates = screen.getAllByTestId('stellar-edge-facts-predicate');
+    const predicateText = predicates.map((el) => el.textContent ?? '').join('|');
+    expect(predicateText).toContain('설립');
+    expect(predicateText).toContain('발표');
+    const rolesText = screen.getByTestId('stellar-edge-facts-roles').textContent ?? '';
+    expect(rolesText).toContain('recipient: 시장');
+    // ★ regression guard.
+    expect(container.textContent ?? '').not.toContain('(주체 없음)');
+    expect(container.textContent ?? '').not.toContain('(객체 없음)');
+  });
+
+  it('★ regression guard: empty endpoints fall back gracefully (no "주체 없음" / "객체 없음")', () => {
+    const a: StellarNode = {
+      id: 'uid-a',
+      label: '',
+      cluster: 0,
+      weight: 1,
+      kind: 'entity',
+    };
+    const b: StellarNode = {
+      id: 'uid-b',
+      label: '',
+      cluster: 0,
+      weight: 1,
+      kind: 'entity',
+    };
+    const link: StellarLink = {
+      source: 'uid-a',
+      target: 'uid-b',
+      kind: 'action',
+      predicate: 'x',
+      fact_count: 1,
+    };
+    const { container } = render(
+      <StellarEdgeFactsList
+        endpoints={{ a, b }}
+        allFacts={[]}
+        link={link}
+        onClose={() => {}}
+      />,
+    );
+    expect(container.textContent ?? '').not.toContain('(주체 없음)');
+    expect(container.textContent ?? '').not.toContain('(객체 없음)');
   });
 });

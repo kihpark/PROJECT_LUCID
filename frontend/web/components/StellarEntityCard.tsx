@@ -1,6 +1,6 @@
 /**
  * M3-2d StellarEntityCard — 노드 클릭 → entity 카드 (우패널).
- * PO 의뢰서 verbatim.
+ * PO 의뢰서 verbatim + fix/stellar-cards-entity-node-compat (2026-06-29).
  *
  * 노드 = 한 entity. 이 카드는 그 entity 에 연결된 모든 fact 를
  * fact_type 별로 분류하고, LEDGER / RECALL 로의 딥링크를 제공한다.
@@ -20,11 +20,18 @@
  *
  * ★ PO 정정: link_status 시각 unbind — 어떤 시각 강약도 link_status 에
  *   묶이지 않는다. 카운트는 fact_type 기준으로만.
+ *
+ * ★ fix/stellar-cards-entity-node-compat (PO 2026-06-29):
+ *   STELLAR v2 의 entity-node + link 모델 지원.
+ *   - links prop 이 주어지고 entity.kind === 'entity' 면 link 기반 카운트.
+ *   - 이름은 pickEntityName(entity) 로 노출 ('(주체 없음)' 제거).
+ *   - kind === 'entity' 인 경우 LEDGER 딥링크는 entity.id 사용.
  */
 'use client';
 
 import Link from 'next/link';
-import type { StellarNode } from '@/lib/syntheticGraph';
+import type { StellarLink, StellarNode } from '@/lib/syntheticGraph';
+import { pickEntityName } from './StellarHoverCard';
 
 const ACCENT = '#5EEAD4';
 const WHO_COLOR = '#5EEAD4';
@@ -37,7 +44,10 @@ const PANEL_BORDER = '#1c272b';
 /** Count facts of each fact_type that touch this entity.
  *  An action fact "touches" the entity when entity is the subject.
  *  A claim fact "touches" when entity is the speaker (= subject).
- *  A measurement fact "touches" when entity is the subject. */
+ *  A measurement fact "touches" when entity is the subject.
+ *
+ *  ★ Legacy / synthetic compat: this helper still expects "1 fact = 1 node".
+ *  v2 entity-node graphs should use countFactsFromLinks instead. */
 export function countFactsByType(
   entity: StellarNode,
   allFacts: StellarNode[],
@@ -57,11 +67,50 @@ export function countFactsByType(
   return { action, claim, measurement };
 }
 
+/** fix/stellar-cards-entity-node-compat — v2 link-driven fact counts.
+ *  Returns the same shape as countFactsByType so render code is symmetric.
+ *
+ *  action       = links where (source===id || target===id) && kind==='action',
+ *                 summed by fact_count (default 1 per link).
+ *  claim        = links where (source===id && kind==='speaker') count +
+ *                 (target===id && kind==='claim_related') count,
+ *                 summed by fact_count.
+ *  measurement  = entity.measurements?.length ?? 0.
+ *
+ *  Pure for testability. */
+export function countFactsFromLinks(
+  entity: StellarNode,
+  links: StellarLink[],
+): { action: number; claim: number; measurement: number } {
+  const id = entity.id;
+  let action = 0;
+  let claim = 0;
+  for (const l of links) {
+    const src = String(l.source);
+    const tgt = String(l.target);
+    const count = typeof l.fact_count === 'number' ? l.fact_count : 1;
+    if (l.kind === 'action' && (src === id || tgt === id)) {
+      action += count;
+    } else if (l.kind === 'speaker' && src === id) {
+      claim += count;
+    } else if (l.kind === 'claim_related' && tgt === id) {
+      claim += count;
+    }
+  }
+  const measurement = Array.isArray(entity.measurements)
+    ? entity.measurements.length
+    : 0;
+  return { action, claim, measurement };
+}
+
 export interface StellarEntityCardProps {
   /** The clicked node — taken as the entity anchor. */
   entity: StellarNode;
-  /** Full fact set so we can count fact_type buckets. */
+  /** Full fact set so we can count fact_type buckets (legacy / synthetic path). */
   allFacts: StellarNode[];
+  /** fix/stellar-cards-entity-node-compat — v2 link list. When provided AND
+   *  entity.kind === 'entity', counts are computed from links + measurements. */
+  links?: StellarLink[];
   /** Close handler — clears the focus on the parent. */
   onClose: () => void;
 }
@@ -69,14 +118,28 @@ export interface StellarEntityCardProps {
 export function StellarEntityCard({
   entity,
   allFacts,
+  links,
   onClose,
 }: StellarEntityCardProps) {
-  const counts = countFactsByType(entity, allFacts);
-  const entityName = entity.subject || '(주체 없음)';
-  const entityType = entity.subject_entity_type ?? null;
-  // LEDGER / RECALL 딥링크 — 의뢰서 verbatim.
-  const ledgerHref = entity.subject_uid
-    ? `/ledger?entity=${encodeURIComponent(entity.subject_uid)}`
+  // fix/stellar-cards-entity-node-compat — v2 (entity-node + links) takes
+  // priority. Legacy / synthetic callers omit `links` → fall back to the
+  // existing 1-fact-per-node count path so old tests stay green.
+  const counts =
+    links && entity.kind === 'entity'
+      ? countFactsFromLinks(entity, links)
+      : countFactsByType(entity, allFacts);
+  const entityName = pickEntityName(entity);
+  const entityType =
+    entity.entity_type?.trim() ||
+    entity.subject_entity_type?.trim() ||
+    null;
+  // LEDGER / RECALL 딥링크.
+  // v2 entity 노드는 node.id 가 곧 entity uid → 직접 사용.
+  // 레거시는 subject_uid 가 fact 안의 entity 참조 → 그 값을 사용.
+  const ledgerEntityKey =
+    entity.kind === 'entity' ? entity.id : entity.subject_uid;
+  const ledgerHref = ledgerEntityKey
+    ? `/ledger?entity=${encodeURIComponent(ledgerEntityKey)}`
     : '/ledger';
   const recallHref = `/recall?q=${encodeURIComponent(entityName)}`;
 
