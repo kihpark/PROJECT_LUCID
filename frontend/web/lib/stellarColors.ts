@@ -17,11 +17,18 @@
  *   PO 정정 spec: link_status / 미검증 / 흐림 / 점선 시각 강약 폐기.
  */
 
-/** Entity-type-keyed color palette. Unknown types fall back to STELLAR_ACCENT. */
+/** Entity-type-keyed color palette. Unknown types fall back to STELLAR_ACCENT.
+ *  ★ L2 (PO 2026-06-29): WHO 묶음 안에서 person / organization / group 의
+ *  hue 를 미세하게 분리 — color-blind safe channel 은 stellarShapes 가 담당
+ *  하지만, 정상 시각 사용자에게도 색의 미세 차이를 더해 인지 부담을 더 줄인다.
+ *    person       → teal       '#5EEAD4'  (선명 teal — 가장 친숙한 톤)
+ *    organization → cyan       '#22D3EE'  (약간 청록 쪽, "조직 = 차가운")
+ *    group        → teal-lime  '#A3E635'  (lime, "묶음")
+ *  세 톤 모두 luminance 비슷하게 유지해 bloom threshold 효과는 동일. */
 export const ENTITY_COLORS = {
-  person: '#5EEAD4',        // WHO
-  organization: '#5EEAD4',  // WHO
-  group: '#5EEAD4',         // WHO
+  person: '#5EEAD4',        // WHO · person
+  organization: '#22D3EE',  // WHO · organization (★ L2 — cyan 톤 분리)
+  group: '#A3E635',         // WHO · group        (★ L2 — lime 톤 분리)
   product: '#F5C36B',       // WHAT
   resource: '#F5C36B',      // WHAT
   concept: '#F5C36B',       // WHAT

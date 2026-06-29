@@ -31,6 +31,11 @@ import {
 import { StellarHoverCard, pickEntityName } from './StellarHoverCard';
 import { StellarEntityCard } from './StellarEntityCard';
 import { StellarEdgeFactsList } from './StellarEdgeFactsList';
+// ★ L1 / L4 (STELLAR legend/shape/hover, PO 2026-06-29):
+//   L1 = STELLAR LEGEND (color + shape vocabulary 안내)
+//   L4 = edge hover tooltip (predicate only)
+import { StellarLegend } from './StellarLegend';
+import { StellarEdgeHoverTooltip } from './StellarEdgeHoverTooltip';
 
 // ---------------------------------------------------------------------------
 // fix/stellar-cleanup #9 — predicate / fact-type theme color.
@@ -757,6 +762,10 @@ export interface StellarViewProps {
       endpoints: { a: StellarNode; b: StellarNode },
       link?: StellarLink,
     ) => void;
+    /** ★ L4 (PO 2026-06-29) — edge hover callback. fires when cursor
+     *  enters / leaves a link. The parent renders StellarEdgeHoverTooltip
+     *  with the predicate label only. */
+    onLinkHover?: (link: StellarLink | null) => void;
     focusedId?: string | null;
     focusedNeighborIds?: Set<string>;
     selectedId?: string | null;
@@ -840,6 +849,14 @@ export function StellarView(props: StellarViewProps = {}) {
     a: StellarNode;
     b: StellarNode;
     link?: StellarLink;
+  } | null>(null);
+  // ★ L4 (STELLAR legend/shape/hover, PO 2026-06-29) — edge hover state.
+  //   null 이면 tooltip 미표시. predicate 만 보여주고 click 은 별도 동작
+  //   (EdgeFactsList) 으로 분리 — hover 와 click 이 다른 surface 다.
+  const [edgeHover, setEdgeHover] = useState<{
+    link: StellarLink;
+    x: number;
+    y: number;
   } | null>(null);
   const [realData, setRealData] = useState<StellarGraphData | null>(null);
   const [realLoading, setRealLoading] = useState(false);
@@ -1007,6 +1024,19 @@ export function StellarView(props: StellarViewProps = {}) {
       return;
     }
     setHovered({ node, x: cursorRef.current.x, y: cursorRef.current.y });
+  }, []);
+
+  // ★ L4 (PO 2026-06-29) — edge hover handler. predicate-only tooltip.
+  const handleLinkHover = useCallback((link: StellarLink | null) => {
+    if (!link) {
+      setEdgeHover(null);
+      return;
+    }
+    setEdgeHover({
+      link,
+      x: cursorRef.current.x,
+      y: cursorRef.current.y,
+    });
   }, []);
 
   // B-62-v1 — click is now FOCUS. The handler pushes the previous focus
@@ -1266,6 +1296,7 @@ export function StellarView(props: StellarViewProps = {}) {
             // 보존했다가 EdgeFactsList 로 전달.
             setEdgeClick(link ? { ...endpoints, link } : endpoints);
           }}
+          onLinkHover={handleLinkHover}
           focusedId={focused?.id ?? null}
           focusedNeighborIds={focusedNeighborIds}
           selectedId={selected?.id ?? null}
@@ -1330,8 +1361,20 @@ export function StellarView(props: StellarViewProps = {}) {
         focused={focused}
       />
 
+      {/* ★ L1 (PO 2026-06-29) — STELLAR LEGEND. default visible, user can
+       *  collapse. 색·형태 어휘 안내. */}
+      <StellarLegend />
+
       {hovered ? (
         <StellarHoverCard fact={hovered.node} position={{ x: hovered.x, y: hovered.y }} />
+      ) : null}
+      {/* ★ L4 (PO 2026-06-29) — edge hover tooltip. predicate label only. */}
+      {edgeHover ? (
+        <StellarEdgeHoverTooltip
+          predicate={edgeHover.link.predicate ?? null}
+          predicates={edgeHover.link.predicates ?? null}
+          position={{ x: edgeHover.x, y: edgeHover.y }}
+        />
       ) : null}
       {/* M3-2d — 노드 클릭 → entity 카드 (의뢰서 verbatim). FocusPanel
        *  로직 (relations, expand, history) 은 highlight ring 을 위해
@@ -1390,6 +1433,63 @@ export function StellarView(props: StellarViewProps = {}) {
         style={{ display: 'none' }}
       >
         e2e: fire edge click
+      </button>
+      {/* ★ L4 (PO 2026-06-29) — e2e hover hook. The 3D canvas onLinkHover
+       *  raycast is unreliable in Playwright (force-graph-3d → three.js).
+       *  This hidden button fires the same handler the production canvas
+       *  drives so the e2e can prove the tooltip path renders correctly.
+       *  display:none → 사용자 노출 0. */}
+      <button
+        type="button"
+        data-testid="stellar-e2e-fire-edge-hover"
+        aria-hidden="true"
+        tabIndex={-1}
+        onClick={() => {
+          const ls = filteredData.links;
+          if (ls.length === 0) return;
+          const link = ls[0];
+          if (!link) return;
+          setEdgeHover({
+            link,
+            x: cursorRef.current.x || 200,
+            y: cursorRef.current.y || 200,
+          });
+        }}
+        style={{ display: 'none' }}
+      >
+        e2e: fire edge hover
+      </button>
+      {/* ★ L3 (PO 2026-06-29) — e2e hover hook for a CLAIM node. Playwright
+       *  cannot reliably hover the 3D canvas raycast; this button fires the
+       *  exact same handleHover path the production canvas drives, picking
+       *  the first claim node in filteredData. display:none — production
+       *  surface impact 0. */}
+      <button
+        type="button"
+        data-testid="stellar-e2e-fire-claim-hover"
+        aria-hidden="true"
+        tabIndex={-1}
+        onClick={() => {
+          const ns = filteredData.nodes;
+          const claim = ns.find(
+            (n) => n.kind === 'claim' || n.fact_type === 'claim',
+          );
+          if (!claim) return;
+          handleHover(claim);
+        }}
+        style={{ display: 'none' }}
+      >
+        e2e: fire claim hover
+      </button>
+      <button
+        type="button"
+        data-testid="stellar-e2e-clear-edge-hover"
+        aria-hidden="true"
+        tabIndex={-1}
+        onClick={() => setEdgeHover(null)}
+        style={{ display: 'none' }}
+      >
+        e2e: clear edge hover
       </button>
     </div>
   );
