@@ -109,9 +109,25 @@ function ensureEntity(
     object_uid: null,
     measurements: [],
     fact_type: null,
+    // ★ fix/entitycard-fact-count-and-dot-suggestion — fact_type 별 정확 카운트.
+    //   Initialised to all-zeros so processFact can bump independently of edges.
+    fact_counts: { action: 0, claim: 0, measurement: 0 },
   };
   acc.entities.set(uid, node);
   return node;
+}
+
+/** ★ fix/entitycard-fact-count-and-dot-suggestion — bump a fact_type bucket
+ *  on an entity node, INDEPENDENT of whether a link edge is created. Pure
+ *  additive: never touches link/edge generation. */
+function bumpFactCount(
+  entity: StellarNode,
+  kind: 'action' | 'claim' | 'measurement',
+): void {
+  if (!entity.fact_counts) {
+    entity.fact_counts = { action: 0, claim: 0, measurement: 0 };
+  }
+  entity.fact_counts[kind] += 1;
 }
 
 function actionEdgeKey(srcId: string, tgtId: string): string {
@@ -158,6 +174,9 @@ function processFact(acc: AccState, fact: RecallFact): void {
     };
     if (!subj.measurements) subj.measurements = [];
     subj.measurements.push(m);
+    // ★ fix/entitycard-fact-count-and-dot-suggestion — subject entity 의
+    //   measurement count++ (measurement attribute push 와 별개로 카운트).
+    bumpFactCount(subj, 'measurement');
     return;
   }
 
@@ -183,6 +202,7 @@ function processFact(acc: AccState, fact: RecallFact): void {
     acc.claims.push(claimNode);
 
     let speakerId: string | null = null;
+    let speakerNode: StellarNode | null = null;
     if (isEntityRef(fact.speaker_uid)) {
       const speaker = ensureEntity(
         acc,
@@ -191,11 +211,13 @@ function processFact(acc: AccState, fact: RecallFact): void {
         null,
       );
       speakerId = speaker.id;
+      speakerNode = speaker;
     } else {
       const stub = speakerStubId(fact.speaker_label);
       if (stub) {
         const speaker = ensureEntity(acc, stub, fact.speaker_label, null);
         speakerId = speaker.id;
+        speakerNode = speaker;
       }
     }
     if (speakerId) {
@@ -210,11 +232,17 @@ function processFact(acc: AccState, fact: RecallFact): void {
           null,
       });
     }
+    // ★ fix/entitycard-fact-count-and-dot-suggestion — speaker entity (real
+    //   uid 또는 stub) 의 claim count++. INDEPENDENT 하게 edge 무관 누적.
+    if (speakerNode) bumpFactCount(speakerNode, 'claim');
 
     for (const relUid of fact.related_entity_uids ?? []) {
       if (!isEntityRef(relUid)) continue;
       const rel = ensureEntity(acc, relUid, null, null);
       pushClaimRelated(acc, claimNode.id, rel.id, fact.link_status ?? null);
+      // ★ fix/entitycard-fact-count-and-dot-suggestion — related entity 도
+      //   claim count++ (해당 claim 의 참여자).
+      bumpFactCount(rel, 'claim');
     }
     return;
   }
@@ -227,6 +255,10 @@ function processFact(acc: AccState, fact: RecallFact): void {
     fact.subject_label,
     fact.subject_entity_type,
   );
+  // ★ fix/entitycard-fact-count-and-dot-suggestion — ALWAYS bump subject 의
+  //   action count, even when object is a literal (강재호 / 이로운몰 설립
+  //   시나리오). link 가 만들어지지 않더라도 fact 는 존재한다.
+  bumpFactCount(subj, 'action');
   if (!isEntityRef(fact.object_value)) {
     subj.weight = (subj.weight ?? 1) + 1;
     return;
@@ -237,6 +269,9 @@ function processFact(acc: AccState, fact: RecallFact): void {
     fact.object_label,
     fact.object_entity_type,
   );
+  // ★ fix/entitycard-fact-count-and-dot-suggestion — object 가 entity ref 인
+  //   경우에는 object 의 action count 도 누적.
+  bumpFactCount(obj, 'action');
   const key = actionEdgeKey(subj.id, obj.id);
   const existing = acc.actionEdgeIndex.get(key);
   if (existing) {
