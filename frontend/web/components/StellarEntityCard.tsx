@@ -146,8 +146,10 @@ export function StellarEntityCard({
       entity.related_entity_labels && entity.related_entity_labels.length > 0
         ? entity.related_entity_labels
         : null;
-    const recallQuery = fullContent || speaker;
-    const recallHref = `/recall?q=${encodeURIComponent(recallQuery)}`;
+    // fix/stellar-ux-self-audit U4 — claim 딥링크도 entity 카드와 동일한
+    // `focus=<uid>` 컨벤션. claim 노드의 id 는 fact_uid 이므로 그것을
+    // 그대로 focus 로 넘긴다. LEDGER 는 fact-scoped → `fact=<uid>` 유지.
+    const recallHref = `/recall?focus=${encodeURIComponent(entity.id)}`;
     const ledgerHref = `/ledger?fact=${encodeURIComponent(entity.id)}`;
     return (
       <aside
@@ -283,12 +285,21 @@ export function StellarEntityCard({
   // LEDGER / RECALL 딥링크.
   // v2 entity 노드는 node.id 가 곧 entity uid → 직접 사용.
   // 레거시는 subject_uid 가 fact 안의 entity 참조 → 그 값을 사용.
+  //
+  // fix/stellar-ux-self-audit U4 — entity 딥링크의 param key 를 spec 형식
+  // (`entity_uid`, `focus`) 으로 고정. 옛 형식 (`entity=`, `q=<name>`) 은
+  // LEDGER / RECALL 페이지가 아직 query 를 읽지 않더라도, 외부 surface (PR
+  // brief / e2e 검증 / 미래 라우팅) 가 일관된 contract 를 기대한다. 이름이
+  // 아닌 entity uid 를 RECALL 에 넘겨 동일 entity 의 모든 fact 가
+  // surface 되도록 의미를 통일한다.
   const ledgerEntityKey =
     entity.kind === 'entity' ? entity.id : entity.subject_uid;
   const ledgerHref = ledgerEntityKey
-    ? `/ledger?entity=${encodeURIComponent(ledgerEntityKey)}`
+    ? `/ledger?entity_uid=${encodeURIComponent(ledgerEntityKey)}`
     : '/ledger';
-  const recallHref = `/recall?q=${encodeURIComponent(entityName)}`;
+  const recallFocusKey =
+    entity.kind === 'entity' ? entity.id : entity.subject_uid ?? entity.id;
+  const recallHref = `/recall?focus=${encodeURIComponent(recallFocusKey ?? '')}`;
 
   return (
     <aside

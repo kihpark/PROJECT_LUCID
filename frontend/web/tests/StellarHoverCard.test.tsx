@@ -9,6 +9,7 @@ import { render, screen } from '@testing-library/react';
 import {
   StellarHoverCard,
   classifyClaimModality,
+  computeHoverCardPosition,
 } from '@/components/StellarHoverCard';
 import type { StellarNode } from '@/lib/syntheticGraph';
 
@@ -29,6 +30,52 @@ function makeNode(overrides: Partial<StellarNode> = {}): StellarNode {
     ...overrides,
   };
 }
+
+// fix/stellar-ux-self-audit U3 — viewport-aware position clamp policy.
+describe('computeHoverCardPosition (★ U3 HoverCard 위치 가드)', () => {
+  const VW = { w: 1920, h: 1080 };
+  // Default card-size reservation in the helper.
+  const CARD = { w: 360, h: 240 };
+
+  it('offsets by +20px from cursor when there is room', () => {
+    const { left, top } = computeHoverCardPosition({ x: 100, y: 200 }, VW, CARD);
+    expect(left).toBe(120);
+    expect(top).toBe(220);
+  });
+
+  it('clamps to vw - cardWidth when cursor is near the right edge', () => {
+    const { left } = computeHoverCardPosition({ x: 1900, y: 100 }, VW, CARD);
+    expect(left).toBeLessThanOrEqual(VW.w - CARD.w);
+    expect(left).toBe(VW.w - CARD.w);
+  });
+
+  it('clamps to vh - cardHeight when cursor is near the bottom edge', () => {
+    const { top } = computeHoverCardPosition({ x: 100, y: 1060 }, VW, CARD);
+    expect(top).toBeLessThanOrEqual(VW.h - CARD.h);
+    expect(top).toBe(VW.h - CARD.h);
+  });
+
+  it('never returns negative left/top (top-left corner safety)', () => {
+    const { left, top } = computeHoverCardPosition(
+      { x: -100, y: -100 },
+      VW,
+      CARD,
+    );
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(top).toBeGreaterThanOrEqual(0);
+  });
+
+  // ★ U3 — pointerEvents: 'none' so the card never intercepts mouse events.
+  // Without this, the card could land under the cursor and cause mouseleave
+  // on the underlying node, ending the hover state and flickering the card.
+  it('renders the card with pointerEvents: none (hover-flicker guard)', () => {
+    const fact = makeNode();
+    render(<StellarHoverCard fact={fact} position={POS} />);
+    const card = screen.getByTestId('stellar-hover-card') as HTMLElement;
+    // jsdom does not run the layout engine; check the inline style directly.
+    expect(card.style.pointerEvents).toBe('none');
+  });
+});
 
 describe('classifyClaimModality (★ 데이터모델 v2)', () => {
   it('returns "assertion" for 단정 keywords', () => {

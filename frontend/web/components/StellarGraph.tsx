@@ -1373,6 +1373,20 @@ export function StellarGraph(props: StellarGraphProps) {
            * real mode still gets the flat 0.6. */
           linkOpacity={mode === 'real' ? 0.4 : 0.5}
           linkWidth={linkWidth}
+          /* fix/stellar-ux-self-audit U1 — edge click hit area.
+           * react-force-graph-3d exposes `linkHoverPrecision` as the
+           * 3D analogue of the 2D `linkPointerAreaExtent` prop. Larger
+           * values broaden the raycast tube around each link line, so
+           * users no longer need to land the cursor on a 0.6-thick
+           * line in 3D space (≈sub-pixel near the camera horizon).
+           *
+           * Default = 1 (just the line itself). We bump to 8 — enough
+           * that even the thinnest links (0.4–0.6 base width) accept
+           * clicks within an ~8-unit tolerance, without making the
+           * thick high-fact_count edges feel sloppy on overlap. The
+           * value is mode-agnostic: thin synthetic filaments and
+           * thick real spine edges both win the broader hit area. */
+          linkHoverPrecision={8}
           linkDirectionalParticles={0}
           linkDirectionalParticleSpeed={0.004}
           linkDirectionalParticleWidth={1.1}

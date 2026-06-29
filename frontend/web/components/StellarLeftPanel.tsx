@@ -22,7 +22,12 @@
  * 된다 (PO 단순화 원칙).
  */
 
-export type EntityBucket = 'who' | 'what' | 'where';
+// fix/stellar-ux-self-audit U2 — `unknown` is now a first-class bucket. The
+// left-panel renders four toggles (WHO / WHAT / WHERE / 기타·unknown) so the
+// user can hide entity nodes whose entity_type is missing or unmapped — the
+// previous behaviour silently passed unknown-type nodes through regardless
+// of the three known toggles, leaving no user control surface for them.
+export type EntityBucket = 'who' | 'what' | 'where' | 'unknown';
 // 옛 타입 alias 보존 — StellarView 가 데이터 필터 (CLAIM 토글, link_status
 // metadata) 에서 계속 쓸 수 있도록 export 만 남긴다. 좌패널 UI 에는 더 이상
 // 안 보임.
@@ -63,6 +68,10 @@ const ENTITY_BUCKET_LABEL: Record<EntityBucket, string> = {
   who: 'WHO · 사람/조직',
   what: 'WHAT · 개념/사건',
   where: 'WHERE · 장소',
+  // fix/stellar-ux-self-audit U2 — explicit bucket for entity_type missing
+  // or unmapped. Previously the filter passed these through regardless of
+  // the three known toggles → user could not hide them.
+  unknown: '기타 · unknown',
 };
 
 export function StellarLeftPanel(props: StellarLeftPanelProps): React.ReactElement {
