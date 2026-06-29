@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from api.structure.action_object_resolver import resolve_action_object_to_entity
 from api.structure.claude_client import decompose_via_claude
 from api.structure.coord_splitter import split_coordinated_subjects
 from api.structure.models import StructureResult
@@ -45,6 +46,34 @@ def decompose(merged_text: str, metadata: dict[str, Any] | None = None) -> Struc
             len(result.facts) - pre_split_count,
             pre_split_count,
             len(result.facts),
+        )
+    # feat/v2-action-entity-edge-class-fix (PO 2026-06-29):
+    # 원칙 1 위반 클래스 fix — ACTION fact 의 object_value 가 literal 인
+    # 경우 같은 result.objects 배열에서 deterministic 매칭으로 obj-N
+    # placeholder 로 치환. LLM Path A (prompt) 가 못 잡은 잔여를
+    # safety net 으로 흡수. CLAIM / MEASUREMENT 무변경.
+    pre_resolve_action_with_literal = sum(
+        1 for f in result.facts
+        if f.fact_type == "action"
+        and isinstance(f.object_value, str)
+        and f.object_value.strip()
+        and not f.object_value.strip().lower().startswith("obj-")
+    )
+    result = resolve_action_object_to_entity(result)
+    post_resolve_action_with_literal = sum(
+        1 for f in result.facts
+        if f.fact_type == "action"
+        and isinstance(f.object_value, str)
+        and f.object_value.strip()
+        and not f.object_value.strip().lower().startswith("obj-")
+    )
+    if pre_resolve_action_with_literal != post_resolve_action_with_literal:
+        logger.info(
+            "decompose: action_object_resolver rewrote %d ACTION fact(s) "
+            "(literal->entity; pre=%d post=%d)",
+            pre_resolve_action_with_literal - post_resolve_action_with_literal,
+            pre_resolve_action_with_literal,
+            post_resolve_action_with_literal,
         )
     logger.info(
         "decompose: status=%s, facts=%d, objects=%d, latency_ms=%d, failure_reason=%s",
