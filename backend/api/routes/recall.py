@@ -363,6 +363,14 @@ def _hit_to_fact(hit: dict[str, Any]) -> RecallFact | None:
             measurement_value=source.get("measurement_value"),
             measurement_unit=source.get("measurement_unit"),
             as_of=source.get("as_of"),
+            # m3-2a STELLAR v2 (PO 2026-06-29) — pass-through 4 필드.
+            # ES 에 이미 저장된 (processor.py:702/717/723) 필드를
+            # frontend stellarRealAdapter v2 가 entity-edge / claim 그래프
+            # 자동 정합에 사용. 옛 fact 에 없으면 default.
+            speaker_uid=source.get("speaker_uid"),
+            related_entity_uids=source.get("related_entity_uids") or [],
+            fact_object_role=source.get("fact_object_role") or {},
+            link_status=source.get("link_status"),
         )
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning("recall: malformed fact source dropped: %s", exc)

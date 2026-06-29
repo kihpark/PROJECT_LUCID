@@ -98,6 +98,13 @@ class RecallFact(LucidBaseModel):
     # is deferred — the badge is observational only.
     contradiction_count: int = 0
 
+    # m3-2a STELLAR v2 (PO 2026-06-29) — entity-edge / claim 그래프 자동 정합.
+    # ES `_source` 의 4 필드 pass-through. 옛 fact 에 없으면 default.
+    speaker_uid: str | None = None
+    related_entity_uids: list[str] = []
+    fact_object_role: dict[str, str] = {}
+    link_status: str | None = None
+
 
 class RecallResponse(LucidBaseModel):
     """The thin-slice recall envelope.
