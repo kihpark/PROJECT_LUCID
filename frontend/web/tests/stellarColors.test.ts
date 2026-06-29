@@ -50,11 +50,15 @@ describe('colorForEntityType (lookup helper)', () => {
   });
 });
 
-describe('CLAIM node color (★ PO 정정: 또렷, 흐림 X)', () => {
-  it('uses the teal family, NOT a dim grey', () => {
-    expect(CLAIM_NODE_COLOR).toBe('#5EEAD4');
-    // ★ guard: must not be a grey de-emphasis token.
-    expect(CLAIM_NODE_COLOR).not.toMatch(/^#?[6-9a-f]{6}$/i);
+describe('CLAIM node color (★ PO 2026-06-29: entity 와 시각 구분)', () => {
+  it('★ NOT the WHO teal — distinct from any entity color', () => {
+    // ★ 옛 '#5EEAD4' = WHO teal 과 동일 → 사용자 시각 구분 불가
+    // ★ 새 light cool grey → channel-agnostic neutral
+    expect(CLAIM_NODE_COLOR).toBe('#CBD5E1');
+    expect(CLAIM_NODE_COLOR).not.toBe('#5EEAD4'); // ★ WHO 와 겹치면 안 됨
+    expect(CLAIM_NODE_COLOR).not.toBe('#F5C36B'); // ★ WHAT
+    expect(CLAIM_NODE_COLOR).not.toBe('#A78BFA'); // ★ EVENT
+    expect(CLAIM_NODE_COLOR).not.toBe('#7A8CA3'); // ★ WHERE
   });
 
   it('★ opacity is exactly 1 (PO 정정: 흐림 폐기)', () => {
