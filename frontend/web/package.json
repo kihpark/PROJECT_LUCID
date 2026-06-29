@@ -10,7 +10,10 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:report": "playwright show-report"
   },
   "dependencies": {
     "next": "^15.0.0",
@@ -20,9 +23,11 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.4.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -32,6 +37,7 @@
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.0.0",
     "jsdom": "^25.0.0",
+    "jsonwebtoken": "^9.0.3",
     "postcss": "^8.4.0",
     "prettier": "^3.3.0",
     "tailwindcss": "^3.4.0",
