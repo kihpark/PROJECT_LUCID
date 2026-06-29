@@ -241,6 +241,16 @@ export interface StellarGraphProps {
   onNodeHover?: (node: StellarNode | null) => void;
   /** Click callback (full node). */
   onNodeClick?: (node: StellarNode) => void;
+  /** ★ W1 (STELLAR 6-class fix, 2026-06-29) — edge-click callback. The
+   *  parent (StellarView) wired this in props but the actual ForceGraph3D
+   *  renderer ignored it — the EdgeFactsList only ever opened from the
+   *  vitest MockRenderer in jsdom. Hooking it up here makes the production
+   *  canvas surface the same EdgeFactsList that the unit tests already
+   *  cover. Signature mirrors StellarView. */
+  onLinkClick?: (
+    endpoints: { a: StellarNode; b: StellarNode },
+    link?: StellarLink,
+  ) => void;
   /** B-62-v1 — id of the currently focused node (set by parent on click).
    *  When non-null, distant nodes dim and only focus-incident edges keep
    *  their typed colour. */
@@ -466,6 +476,7 @@ export function StellarGraph(props: StellarGraphProps) {
     mode,
     onNodeHover,
     onNodeClick,
+    onLinkClick,
     focusedId = null,
     focusedNeighborIds,
     selectedId = null,
@@ -1369,6 +1380,27 @@ export function StellarGraph(props: StellarGraphProps) {
           showNavInfo={false}
           onNodeHover={handleHoverInternal}
           onNodeClick={onNodeClick}
+          /* ★ W1 (STELLAR 6-class fix, 2026-06-29) — edge click wired.
+           * After d3-force pass `link.source`/`link.target` are full
+           * NodeObject references (not just string ids). Defensively
+           * narrow: when either endpoint has not resolved to a node
+           * (string id during initial settle) we skip the callback. */
+          onLinkClick={(link: unknown) => {
+            if (!onLinkClick) return;
+            const rawLink = link as StellarLink & {
+              source: StellarNode | string;
+              target: StellarNode | string;
+            };
+            const a = rawLink.source;
+            const b = rawLink.target;
+            if (!a || !b || typeof a === 'string' || typeof b === 'string') {
+              return;
+            }
+            onLinkClick(
+              { a: a as StellarNode, b: b as StellarNode },
+              rawLink as StellarLink,
+            );
+          }}
           /* B-62-fix2 — let the d3-force simulation settle after ~300
            * ticks so node positions stop drifting. PO repro showed nodes
            * appearing to slowly grow even after the bloom-accumulation

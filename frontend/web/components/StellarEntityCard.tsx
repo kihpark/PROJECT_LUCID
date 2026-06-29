@@ -218,6 +218,7 @@ export function StellarEntityCard({
           {verbLine}
         </div>
         <div data-testid="stellar-entity-card-claim-content"
+          data-content-length={fullContent.length}
           style={{ marginTop: 14, borderTop: `1px solid ${PANEL_BORDER}`, paddingTop: 14, fontSize: 13, color: TEXT_BODY, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontStyle: 'italic' }}>
           {fullContent ? `“${fullContent}”` : ''}
         </div>
@@ -227,6 +228,21 @@ export function StellarEntityCard({
             관련: {relatedLabels.join(', ')}
           </div>
         ) : null}
+        {/* ★ W5 (STELLAR 6-class fix, 2026-06-29) — self-count semantics.
+         *  CLAIM 노드 클릭 시 카드 자체가 한 발언의 isolated detail view 이므로
+         *  "이 발언 1건" 의 self-count 를 보여야 한다. 다른 entity 카드의
+         *  fact_counts surface 와 다르다. */}
+        <div
+          data-testid="stellar-entity-card-claim-self-count"
+          style={{
+            marginTop: 12,
+            fontSize: 11,
+            color: TEXT_DIM,
+            letterSpacing: '0.02em',
+          }}
+        >
+          이 발언 1건
+        </div>
         <div data-testid="stellar-entity-card-claim-deeplinks"
           style={{ marginTop: 18, borderTop: `1px solid ${PANEL_BORDER}`, paddingTop: 14, display: 'flex', gap: 8 }}>
           <Link href={recallHref} data-testid="stellar-entity-card-claim-recall-link"
@@ -443,6 +459,57 @@ export function StellarEntityCard({
           RECALL 에서 보기
         </Link>
       </div>
+
+      {/* ★ W2 (STELLAR 6-class fix, 2026-06-29) — measurement values.
+       *  entity 카드는 "수치 fact N건" 카운트만 보여줬을 뿐 실제
+       *  metric/value/unit/as_of 가 어디에서도 surface 되지 않았다.
+       *  이 섹션이 entity.measurements 배열을 listing → 사용자가 한
+       *  entity 의 numeric vital 을 STELLAR 안에서 바로 읽을 수 있다. */}
+      {entity.measurements && entity.measurements.length > 0 ? (
+        <section
+          data-testid="stellar-entity-card-measurements"
+          style={{
+            marginTop: 18,
+            borderTop: `1px solid ${PANEL_BORDER}`,
+            paddingTop: 14,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: TEXT_DIM,
+              letterSpacing: '0.08em',
+              marginBottom: 8,
+              textTransform: 'uppercase',
+            }}
+          >
+            수치 ({entity.measurements.length}건)
+          </div>
+          {entity.measurements.map((m, i) => (
+            <div
+              key={`${m.fact_uid}-${i}`}
+              data-testid="stellar-entity-card-measurement-row"
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: 12,
+                marginBottom: 4,
+              }}
+            >
+              <span style={{ color: TEXT_BODY }}>{m.metric ?? '(metric)'}</span>
+              <span style={{ color: ACCENT, fontWeight: 600 }}>
+                {m.value ?? ''} {m.unit ?? ''}
+                {m.as_of ? (
+                  <span style={{ color: TEXT_DIM, marginLeft: 6 }}>
+                    {' '}
+                    · {m.as_of}
+                  </span>
+                ) : null}
+              </span>
+            </div>
+          ))}
+        </section>
+      ) : null}
 
       {/* ★ M3-2 이후 사용자 수동 통합/분리 진입점 placeholder. */}
       <div
