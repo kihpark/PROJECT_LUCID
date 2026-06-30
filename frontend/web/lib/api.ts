@@ -509,6 +509,139 @@ export function searchEntitySuggestions(
   ).then((r) => r.items.filter((s) => isMeaningfulLabel(s.primary_label)));
 }
 
+// ───────────────────────────────────────────────────────────────────
+// REQ-012-v1 — entity 종류 수정 + 노드 합치기 + 분리.
+// ───────────────────────────────────────────────────────────────────
+
+/** ★ PO 의뢰서 verbatim: 10종 closed set.
+ *  resolution_gateway.ENTITY_TYPE_V3 와 동일. */
+export const ENTITY_TYPE_OPTIONS: ReadonlyArray<{
+  value: string;
+  label: string;
+}> = [
+  { value: 'person', label: '사람' },
+  { value: 'organization', label: '조직' },
+  { value: 'group', label: '그룹' },
+  { value: 'knowledge', label: '지식' },
+  { value: 'resource', label: '자원' },
+  { value: 'task', label: '행위' },
+  { value: 'concept', label: '개념' },
+  { value: 'event', label: '사건' },
+  { value: 'metric', label: '지표' },
+  { value: 'location', label: '장소' },
+];
+
+export interface EntityTypeChangeResult {
+  entity_uid: string;
+  primary_label: string;
+  previous_entity_type: string | null;
+  entity_type: string;
+  relabel_history_size: number;
+  updated_at: string;
+}
+
+/** REQ-012-v1 기능 A — entity 종류 변경. closed 10-set 검증은 server-side. */
+export function changeEntityType(
+  spaceId: string,
+  entityUid: string,
+  entityType: string,
+  reason?: string,
+): Promise<EntityTypeChangeResult> {
+  return request<EntityTypeChangeResult>(
+    `/api/spaces/${spaceId}/entities/${encodeURIComponent(entityUid)}/type`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ entity_type: entityType, reason: reason ?? null }),
+    },
+  );
+}
+
+export interface MergeCandidate {
+  entity_uid: string;
+  primary_label: string;
+  entity_type: string | null;
+  score: number;
+  reason: string;
+}
+
+/** REQ-012-v1 기능 B 후보 제시. */
+export function fetchMergeCandidates(
+  spaceId: string,
+  entityUid: string,
+  limit = 10,
+): Promise<MergeCandidate[]> {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  return request<{ items: MergeCandidate[] }>(
+    `/api/spaces/${spaceId}/entities/${encodeURIComponent(entityUid)}/merge-candidates?${params.toString()}`,
+  ).then((r) => r.items);
+}
+
+export interface EntityMergeResult {
+  canonical_uid: string;
+  primary_label: string;
+  entity_type: string;
+  aliases: string[];
+  members_retired: string[];
+  facts_rewritten: {
+    subjects_remapped: number;
+    objects_remapped: number;
+    facts_touched: number;
+  };
+  merged_at: string;
+}
+
+/** REQ-012-v1 기능 B — 사용자 수동 병합. */
+export function mergeEntities(
+  spaceId: string,
+  canonicalUid: string,
+  members: string[],
+  opts?: { primaryLabel?: string; reason?: string },
+): Promise<EntityMergeResult> {
+  return request<EntityMergeResult>(
+    `/api/spaces/${spaceId}/entities/merge`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        canonical_uid: canonicalUid,
+        members,
+        primary_label: opts?.primaryLabel ?? null,
+        reason: opts?.reason ?? null,
+      }),
+    },
+  );
+}
+
+export interface EntityUnmergeResult {
+  canonical_uid: string;
+  members_restored: string[];
+  aliases_after: string[];
+  facts_reverted: {
+    subjects_reverted: number;
+    objects_reverted: number;
+    facts_touched: number;
+  };
+  unmerged_at: string;
+}
+
+/** REQ-012-v1 기능 B 되돌리기 — 가장 최근 user_merge 한 그룹 복원. */
+export function unmergeEntity(
+  spaceId: string,
+  canonicalUid: string,
+  reason?: string,
+): Promise<EntityUnmergeResult> {
+  return request<EntityUnmergeResult>(
+    `/api/spaces/${spaceId}/entities/unmerge`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        canonical_uid: canonicalUid,
+        reason: reason ?? null,
+      }),
+    },
+  );
+}
+
 // Module-level predicate cache — predicates are global vocabulary that
 // rarely change. First call fetches; subsequent calls return the same
 // promise so only one in-flight request is ever made even if the component

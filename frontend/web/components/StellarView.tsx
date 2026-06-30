@@ -19,6 +19,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateSyntheticGraph } from '@/lib/syntheticGraph';
 import type { StellarGraphData, StellarLink, StellarNode } from '@/lib/syntheticGraph';
 import { emptyStellarGraph, loadRealStellarGraph } from '@/lib/stellarRealAdapter';
+// REQ-012-v1 — entity 수정/병합 후 그래프 재로딩에 spaceId 필요.
+import { getCurrentSpace } from '@/lib/auth';
 import { predicateLabel } from '@/lib/predicateLabels';
 import {
   StellarLeftPanel,
@@ -935,6 +937,22 @@ export function StellarView(props: StellarViewProps = {}) {
       .finally(() => setRealLoading(false));
   }, [source, props.realLoader]);
 
+  // REQ-012-v1 — entity 종류 변경 / 병합 / 분리 후 그래프 갱신.
+  // realLoadedRef 를 reset 하면 다음 effect tick 이 다시 loadRealStellarGraph
+  // 를 부른다 (★ 새 색/형태/topology 가 즉시 반영).
+  const activeSpaceId = getCurrentSpace();
+  const handleEntityChanged = () => {
+    realLoadedRef.current = false;
+    if (source === 'real') {
+      setRealLoading(true);
+      const loader = props.realLoader ?? loadRealStellarGraph;
+      loader()
+        .then((d) => setRealData(d))
+        .catch(() => setRealData(emptyStellarGraph()))
+        .finally(() => setRealLoading(false));
+    }
+  };
+
   const activeData = source === 'synthetic' ? syntheticData : (realData ?? emptyStellarGraph());
 
   // M3-2c — apply layer toggle + left-panel filters to activeData.
@@ -1404,6 +1422,8 @@ export function StellarView(props: StellarViewProps = {}) {
           entity={focused}
           allFacts={activeData.nodes}
           links={activeData.links}
+          spaceId={source === 'real' ? activeSpaceId : null}
+          onEntityChanged={handleEntityChanged}
           onClose={handleClearFocus}
         />
       ) : null}

@@ -36,6 +36,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import type { StellarLink, StellarNode } from '@/lib/syntheticGraph';
 import {
   pickEntityName,
@@ -43,6 +44,8 @@ import {
   MODALITY_LABEL,
 } from './StellarHoverCard';
 import { entityTypeLabelKo } from '@/lib/displayNames';
+import { EntityTypeDropdown } from './EntityTypeDropdown';
+import { MergeCandidatesModal } from './MergeCandidatesModal';
 
 const ACCENT = '#5EEAD4';
 const WHO_COLOR = '#5EEAD4';
@@ -122,6 +125,11 @@ export interface StellarEntityCardProps {
   /** fix/stellar-cards-entity-node-compat — v2 link list. When provided AND
    *  entity.kind === 'entity', counts are computed from links + measurements. */
   links?: StellarLink[];
+  /** REQ-012-v1 — knowledge space id for entity edit / merge endpoints.
+   *  Omitted = edit UX 비활성 (M3-2d behavior preserved for synthetic mode). */
+  spaceId?: string | null;
+  /** REQ-012-v1 — entity 변경 후 부모가 그래프를 refetch 하도록. */
+  onEntityChanged?: () => void;
   /** Close handler — clears the focus on the parent. */
   onClose: () => void;
 }
@@ -130,8 +138,15 @@ export function StellarEntityCard({
   entity,
   allFacts,
   links,
+  spaceId,
+  onEntityChanged,
   onClose,
 }: StellarEntityCardProps) {
+  // REQ-012-v1 — merge modal toggle local state.
+  // Lives here (not on parent) because the entity card is the single
+  // entry point per PO 의뢰서 (StellarEntityCard / LedgerCard /
+  // RecallEvidenceCard). Other entry points instantiate their own card.
+  const [mergeOpen, setMergeOpen] = useState(false);
   // V3a — claim 노드 분기.
   if (entity.kind === 'claim') {
     const speaker = entity.speaker_label?.trim() || pickEntityName(entity);
@@ -527,20 +542,76 @@ export function StellarEntityCard({
         </section>
       ) : null}
 
-      {/* ★ M3-2 이후 사용자 수동 통합/분리 진입점 placeholder. */}
-      <div
-        data-testid="stellar-entity-card-merge-placeholder"
-        style={{
-          marginTop: 18,
-          borderTop: `1px solid ${PANEL_BORDER}`,
-          paddingTop: 14,
-          fontSize: 11,
-          color: TEXT_DIM,
-          lineHeight: 1.5,
-        }}
-      >
-        다음 단계 — 사용자 수동 통합/분리 (M3-2 이후 별도 트랙).
-      </div>
+      {/* ★ REQ-012-v1 (PO 의뢰서 2026-07-01) — 사용자 수정 진입점.
+       *  spaceId 가 있을 때만 활성 (synthetic / 익명 모드는 기존 placeholder). */}
+      {spaceId && entity.kind === 'entity' && ledgerEntityKey ? (
+        <>
+          <EntityTypeDropdown
+            spaceId={spaceId}
+            entityUid={ledgerEntityKey}
+            currentType={entityType}
+            confidence={entity.entity_type_confidence ?? null}
+            onChanged={() => onEntityChanged?.()}
+          />
+          <div
+            data-testid="stellar-entity-card-merge-cta"
+            style={{
+              marginTop: 14,
+              borderTop: `1px solid ${PANEL_BORDER}`,
+              paddingTop: 14,
+            }}
+          >
+            <button
+              type="button"
+              data-testid="stellar-entity-card-merge-open"
+              onClick={() => setMergeOpen(true)}
+              style={{
+                width: '100%',
+                background: 'rgba(94,234,212,0.05)',
+                border: `1px dashed ${ACCENT}`,
+                color: ACCENT,
+                borderRadius: 6,
+                padding: '8px 10px',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              비슷한 노드와 합치기 / 분리
+            </button>
+          </div>
+          {mergeOpen ? (
+            <MergeCandidatesModal
+              spaceId={spaceId}
+              anchorEntityUid={ledgerEntityKey}
+              anchorPrimaryLabel={entityName}
+              onClose={() => setMergeOpen(false)}
+              onMerged={() => {
+                setMergeOpen(false);
+                onEntityChanged?.();
+              }}
+              onUnmerged={() => {
+                setMergeOpen(false);
+                onEntityChanged?.();
+              }}
+            />
+          ) : null}
+        </>
+      ) : (
+        <div
+          data-testid="stellar-entity-card-merge-placeholder"
+          style={{
+            marginTop: 18,
+            borderTop: `1px solid ${PANEL_BORDER}`,
+            paddingTop: 14,
+            fontSize: 11,
+            color: TEXT_DIM,
+            lineHeight: 1.5,
+          }}
+        >
+          다음 단계 — 사용자 수동 통합/분리 (synthetic 모드 에서는 비활성).
+        </div>
+      )}
     </aside>
   );
 }
