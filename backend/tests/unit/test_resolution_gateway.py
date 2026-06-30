@@ -54,7 +54,8 @@ def test_resolve_below_threshold_returns_candidate(mock_emb):
     ]
     result = resolve("어떤 회사", "ko", "ks-1", client=client)
     assert result.source == "candidate"
-    assert result.entity_id == ""  # ★ 1c 에서 채움
+    # ★ 1c-ii: gateway 가 ES insert 후 entity_id 채움 (non-empty)
+    assert result.entity_id, "★ 1c-ii: candidate must carry non-empty entity_id"
 
 
 @patch("api.structure.resolution_gateway.get_embedding")

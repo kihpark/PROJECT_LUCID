@@ -41,6 +41,7 @@ import logging
 import re
 import uuid
 from collections import Counter
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -50,19 +51,20 @@ from api.models.source_job import SourceStatus
 from api.storage.elasticsearch.embeddings import get_embedding
 from api.storage.postgres.orm import SourceJobORM
 from api.storage.postgres.session import make_sessionmaker
-from api.structure.brand_resolver import resolve_korean_brand
 from api.structure.completeness_validator import (
     check_completeness,
     check_measurement_completeness,
 )
 from api.structure.decomposer import decompose
-from api.structure.entity_resolver import _detect_lang
 from api.structure.fact_dedup import dedup_facts, filter_links_by_fact_uids
 from api.structure.link_creator import LinkCreationResult, create_links
 from api.structure.models import StructureFact, StructureObject, StructureResult
-from api.structure.object_matcher import MatchResult, match_or_create_object
-from api.structure.predicate_mapper import map_predicate_to_type_and_label
-from api.structure.subject_recovery import recover_korean_subject_from_claim
+# REQ-004 STAGE 1c — caller migration:
+# ★ 5 resolver (entity_resolver / brand_resolver / subject_recovery /
+#   object_matcher / predicate_mapper / action_object_resolver) 호출 제거.
+# ★ 모든 entity resolution = resolution_gateway.resolve() 단일 경로.
+# ★ predicate = 자연어 verbatim (★ v3: OPL 통제어 0).
+from api.structure.resolution_gateway import ResolvedEntity, resolve as resolve_entity_via_gateway
 from api.structure.surface_extractor import (
     detect_predicate_violation,
     detect_violation,
@@ -74,6 +76,48 @@ logger = logging.getLogger("lucid.structure.processor")
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _detect_lang(text: str | None) -> str:
+    """Local language heuristic (★ STAGE 1c — formerly entity_resolver._detect_lang).
+
+    Presence of any Hangul codepoint => "ko", else "en". Kept here so the
+    processor no longer imports from the 5 legacy resolver modules.
+    """
+    if not text:
+        return "en"
+    for ch in text:
+        if "가" <= ch <= "힣" or "ᄀ" <= ch <= "ᇿ" or "㄰" <= ch <= "㆏":
+            return "ko"
+    return "en"
+
+
+# REQ-004 STAGE 1c — caller shim:
+# The processor used to receive a `GatewayMatchResult` from object_matcher.match_or_create_object.
+# After 1c, `_match_object` returns a `GatewayMatchResult` adapter wrapping the
+# gateway's `ResolvedEntity` so the rest of processor (summaries, uid_map,
+# disambig queue, payload serializers) keeps working without restructuring.
+# ★ Contract:
+#   - matched_object_uid : entity_id when source in {"exact", "embedding"}
+#   - new_object_uid     : entity_id when source == "candidate" (★ gateway inserts ES doc)
+#   - created_new        : True when source == "candidate"
+#   - disambiguation_required : True when gateway returned a candidate with
+#     additional kNN candidates (★ 1b-iv disambig band) — currently False
+#     because the gateway absorbs the disambig band into "candidate" itself.
+#   - primary_label      : ResolvedEntity.canonical_name (★ corrected surface)
+#   - decision_reason    : f"gateway_{source}" string
+@dataclass(frozen=False)
+class GatewayMatchResult:
+    matched_object_uid: str | None = None
+    new_object_uid: str | None = None
+    created_new: bool = False
+    disambiguation_required: bool = False
+    candidates: list[Any] = field(default_factory=list)
+    decision_reason: str = ""
+    primary_label: str | None = None
+    entity_type: str | None = None
+    confidence: float = 0.0
+    source: str = ""
 
 
 def _safe_object_class(raw: Any) -> ObjectClass | None:
@@ -155,7 +199,7 @@ def _match_object(
     knowledge_space_id: str,
     surface_map: dict[str, str] | None = None,
     decomp: StructureResult | None = None,
-) -> tuple[MatchResult | None, ObjectClass | None, bool]:
+) -> tuple[GatewayMatchResult | None, ObjectClass | None, bool]:
     """Compute embedding + run the matcher.
 
     Returns ``(match_result, resolved_class, needs_review)``.
@@ -190,123 +234,100 @@ def _match_object(
     the same violation check applies — anglicized Korean entities
     are still flagged.
     """
+    """REQ-004 STAGE 1c — gateway-only path.
+
+    All entity resolution now flows through `resolution_gateway.resolve()`.
+    The 5 legacy resolvers (entity_resolver / brand_resolver / subject_recovery
+    / object_matcher / predicate_mapper / action_object_resolver) are no longer
+    called from the processor. The gateway absorbs:
+      - brand alias + Korean particle strip (★ 1b-iii)
+      - exact match cascade (★ 1b-i)
+      - kNN multi-band (★ 1b-iv)
+      - LLM type classification (★ 1b-ii)
+      - candidate entity ES insert (★ 1c-ii — fills entity_id)
+
+    The legacy `_match_object` violation / claim-recovery / candidate-override
+    dance is retired: the gateway is the single decision point. The processor
+    keeps `detect_violation` on the SERIALIZE path (predicate_violation chip)
+    so the Decide UI keeps surfacing surface mismatches, but no longer rewrites
+    the candidate surface here — the gateway's exact-match cascade lands on the
+    correct canonical entity when one exists.
+
+    Returns (GatewayMatchResult | None, ObjectClass | None, needs_review).
+    needs_review is preserved as a no-op False — the gateway never raises and
+    `detect_violation` is called downstream in `_serialize_struct_fact`.
+    """
     resolved_class = _safe_object_class(obj.class_)
     if resolved_class is None:
         return None, None, False
-    emb = get_embedding(obj.name)
-    embedding_list = list(emb) if emb is not None else None
     raw_surface = (surface_map or {}).get(obj.uid)
+    surface_seed = raw_surface or obj.name or ""
+    surface_lang = _detect_lang(surface_seed)
 
-    # Use the LLM-supplied surface span when present; otherwise fall
-    # back to the obj's `name`. The fallback IS subject to the same
-    # verbatim check below (Mode A — LLM omitted subject_surface but
-    # emitted English `name`).
-    surface_seed = raw_surface or obj.name
-    bare_surface = strip_korean_particles(surface_seed)
-
-    # Step (1) — brand canonical for Korean transliterations of
-    # international brands. 스페이스X → SpaceX. The map is narrow and
-    # brands-only; ministries / persons / arbitrary companies stay
-    # Korean.
-    brand_en = resolve_korean_brand(bare_surface)
-    surface = brand_en if brand_en else surface_seed
-
-    # Step (2) — verbatim violation detection. Source text is the
-    # claim the entity appears in. When no claim is available
-    # (defensive), we cannot validate and assume no violation.
-    source_text = _find_claim_for_obj(decomp, obj.uid) or ""
-    surface_for_check = bare_surface if not brand_en else brand_en
-    # B-62-fix-v6 (PO 2026-06-22, feat/spo-subject-claim-recovery):
-    # When `brand_en` is set, `brand_resolver` has already canonicalized
-    # a known Korean transliteration (스페이스X → SpaceX) — skip the
-    # violation check entirely; the brand mapping is the authoritative
-    # decision.
-    # Otherwise pass `looks_like_brand=False` to detect_violation. The
-    # brand-shape regex was previously letting country anglicizations
-    # ("Japan" / "Korea" / "China") through as brand-shaped, which
-    # silently bypassed recovery. The verbatim-substring exemption
-    # inside detect_violation still legitimately keeps "SpaceX" when
-    # it appears literally in the source.
-    if brand_en:
-        violation = False
-    else:
-        violation = detect_violation(
-            surface=surface_for_check,
-            source=source_text,
-            looks_like_brand=False,
+    try:
+        resolved: ResolvedEntity = resolve_entity_via_gateway(
+            surface_seed,
+            surface_lang,
+            knowledge_space_id,
         )
-    needs_review = False
-    if violation:
-        # B-62-fix-v6 (PO 2026-06-22, feat/spo-subject-claim-recovery):
-        # DETERMINISTIC Korean subject recovery — replace the LLM's
-        # English surface with the noun phrase parsed from the Korean
-        # claim using particle boundaries (은/는/이/가/께서/에서). No
-        # LLM, no dictionary, no translation — pure text parsing.
-        # When recovery succeeds, we drop the English surface and keep
-        # the Korean form, NEEDS_REVIEW=False.
-        # When recovery fails (no particle in the claim — rare), we
-        # keep the LLM surface and flag NEEDS_REVIEW=True. This is
-        # the only genuine HITL case left in the loop.
-        recovered = recover_korean_subject_from_claim(source_text)
-        if recovered:
-            logger.info(
-                "B-62-fix-v6 claim-recovery: obj=%s replaced LLM "
-                "surface %r with Korean %r (parsed from claim %r)",
-                obj.uid, surface, recovered, source_text[:120],
-            )
-            surface = recovered
-            # B-62-fix-v6: also override the LLM-supplied entity name
-            # passed into the resolver. Without this, the downstream
-            # `pick_natural_primary` sees `llm_name="Japan"` and the
-            # brand-shape regex re-promotes "Japan" over the recovered
-            # Korean "일본" — undoing the recovery. Threading the
-            # recovered Korean into both surface AND candidate_name
-            # makes the resolver's natural-primary picker land on the
-            # Korean form. The original English LLM name lives on in
-            # `name_en` so cross-language alias / co-mention still works.
-            candidate_name_override = recovered
-            needs_review = False
-        else:
-            logger.warning(
-                "B-62-fix-v6 claim-recovery FAILED: obj=%s claim=%r "
-                "has no subject particle; keeping LLM surface %r and "
-                "flagging needs_review=True.",
-                obj.uid, source_text[:120], surface,
-            )
-            needs_review = True
-            candidate_name_override = None
-    else:
-        candidate_name_override = None
+    except Exception as exc:  # noqa: BLE001 - gateway must never raise out
+        logger.exception("resolution_gateway failed for %r: %s", obj.name, exc)
+        return None, resolved_class, False
 
-    surface_lang = _detect_lang(surface) if surface else None
-    # Point-2 instrumentation kept (DEBUG-gated, zero prod cost).
+    # Map ResolvedEntity → GatewayMatchResult adapter so the rest of the
+    # processor (summaries, uid_map, payload serializer) keeps working.
+    if resolved.source in ("exact", "embedding"):
+        gmr = GatewayMatchResult(
+            matched_object_uid=resolved.entity_id,
+            new_object_uid=None,
+            created_new=False,
+            decision_reason=f"gateway_{resolved.source}",
+            primary_label=resolved.canonical_name or surface_seed,
+            entity_type=resolved.entity_type,
+            confidence=resolved.confidence,
+            source=resolved.source,
+        )
+    elif resolved.source in ("candidate", "new"):
+        # ★ 1c-ii: gateway has already persisted the candidate entity to
+        # ES and returned the fresh entity_id. created_new=True so the
+        # downstream telemetry / Decide UI counts it as a new entity.
+        gmr = GatewayMatchResult(
+            matched_object_uid=None,
+            new_object_uid=resolved.entity_id or new_uid(),
+            created_new=True,
+            decision_reason=f"gateway_{resolved.source}",
+            primary_label=resolved.canonical_name or surface_seed,
+            entity_type=resolved.entity_type,
+            confidence=resolved.confidence,
+            source=resolved.source,
+        )
+    else:
+        # Defensive: unknown source — emit a soft create_new with a fresh uid
+        # so the pipeline doesn't lose the entity.
+        gmr = GatewayMatchResult(
+            matched_object_uid=None,
+            new_object_uid=new_uid(),
+            created_new=True,
+            decision_reason=f"gateway_unknown_source_{resolved.source}",
+            primary_label=resolved.canonical_name or surface_seed,
+            entity_type=resolved.entity_type,
+            confidence=resolved.confidence,
+            source=resolved.source,
+        )
+
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
-            "B-62-v3-general MATCHER_INPUT obj_uid=%s candidate_name=%r "
-            "surface=%r surface_lang=%r llm_name_en=%r "
-            "raw_surface_from_map=%r brand_en=%r needs_review=%s",
-            obj.uid, obj.name, surface, surface_lang, obj.name_en,
-            raw_surface, brand_en, needs_review,
+            "REQ-004-1c GATEWAY obj_uid=%s candidate_name=%r surface=%r "
+            "surface_lang=%r → entity_id=%s source=%s primary=%r type=%s conf=%.3f",
+            obj.uid, obj.name, surface_seed, surface_lang,
+            gmr.matched_object_uid or gmr.new_object_uid, gmr.source,
+            gmr.primary_label, gmr.entity_type, gmr.confidence,
         )
-    candidate_name = candidate_name_override or obj.name
-    try:
-        result = match_or_create_object(
-            candidate_name,
-            resolved_class,
-            knowledge_space_id,
-            candidate_embedding=embedding_list,
-            surface=surface,
-            surface_lang=surface_lang,
-            llm_name_en=obj.name_en,
-        )
-    except Exception as exc:  # noqa: BLE001 - matcher never raises out to caller
-        logger.exception("matcher failed for %r: %s", obj.name, exc)
-        return None, resolved_class, needs_review
-    return result, resolved_class, needs_review
+    return gmr, resolved_class, False
 
 
-def _summarize_result(result: MatchResult) -> dict[str, Any]:
-    """Convert a MatchResult into a small dict for storage in JSONB."""
+def _summarize_result(result: GatewayMatchResult) -> dict[str, Any]:
+    """Convert a GatewayMatchResult into a small dict for storage in JSONB."""
     return {
         "matched_object_uid": result.matched_object_uid,
         "disambiguation_required": result.disambiguation_required,
@@ -327,7 +348,7 @@ def _summarize_result(result: MatchResult) -> dict[str, Any]:
 
 def _build_uid_mapping(
     decomp: StructureResult,
-    match_per_object: dict[str, MatchResult],
+    match_per_object: dict[str, GatewayMatchResult],
 ) -> dict[str, str]:
     """Map decomposer-issued obj-N uids to real Object UIDs.
 
@@ -436,6 +457,14 @@ def _remap_links(
 # Object values that DON'T match this pattern are literals
 # ("85.7 billion USD", "흑자", "1938-01-01") and stay untouched.
 _OBJ_PLACEHOLDER_RE = re.compile(r"^obj-\d+$", re.IGNORECASE)
+
+# REQ-004 STAGE 1c-iii: UUID4 shape check used to assert that an ACTION
+# fact's serialized object_value is a canonical entity_id (gateway-
+# resolved). Anything else (literal, placeholder leak) is stripped.
+_UUID_LIKE_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 def _extract_roles(
@@ -557,7 +586,7 @@ def _serialize_struct_fact(
     uid_map: dict[str, str] | None = None,
     fact_uid_map: dict[str, str] | None = None,
     violation_per_object: dict[str, bool] | None = None,
-    match_per_object: dict[str, MatchResult] | None = None,
+    match_per_object: dict[str, GatewayMatchResult] | None = None,
     decomp_objects: dict[str, StructureObject] | None = None,
 ) -> dict[str, Any]:
     """Pydantic StructureFact -> dict suitable for JSONB.
@@ -614,17 +643,46 @@ def _serialize_struct_fact(
         speaker = d.get("speaker_uid")
         if isinstance(speaker, str) and speaker in uid_map:
             d["speaker_uid"] = uid_map[speaker]
-    # B-62 structure-resolve + natural-spo-display: enrich the JSONB
-    # fact with canonical fields so validate.py persists them via
-    # insert_or_dedup_fact. The new map_predicate_to_type_and_label
-    # also computes the natural-English predicate_label used by recall.
-    raw_predicate = d.get("predicate") or ""
-    opl_code, opl_label, needs_review = map_predicate_to_type_and_label(
-        raw_predicate,
-    )
-    d["predicate_code"] = opl_code
-    d["predicate_label"] = opl_label
+    # REQ-004 STAGE 1c-iii — ★ literal 저장 경로 제거 (★ 핵심 acceptance).
+    # ACTION fact 의 object_value 는 ★ entity_id only (placeholder obj-N OR
+    # canonical UUID 또는 빈 문자열). literal (자연어 명사구) 가 잔재로 남으면
+    # ★ 통째로 비우고 ★ needs_review=True 로 플래그한다. v3 §2 verbatim:
+    #   "모든 entity 참조 = entity_id. ★ 문자열 저장 경로 제거."
+    # action_object_resolver (★ STAGE 1c-v 삭제) 와 LLM Path A 가 모두
+    # 못 잡은 잔재만 여기서 차단된다. legacy obj-N 잔재 (placeholder 가
+    # uid_map 에 없어 매핑 실패) 도 동일하게 비운다 — 그래야 ES strict
+    # mapping 의 keyword 인덱스가 의미 없는 placeholder 를 저장하지 않는다.
+    if d.get("fact_type") == "action":
+        obj_val_final = d.get("object_value")
+        if isinstance(obj_val_final, str) and obj_val_final.strip():
+            bare = obj_val_final.strip()
+            # entity_id 형태: placeholder obj-N 잔재 (uid_map 실패) 도 폐기
+            is_uuid_like = _UUID_LIKE_RE.match(bare) is not None
+            is_placeholder = _OBJ_PLACEHOLDER_RE.match(bare) is not None
+            if not is_uuid_like:
+                # placeholder 잔재 또는 literal → 둘 다 폐기 (★ literal 0)
+                logger.info(
+                    "REQ-004-1c-iii literal-strip: action fact %s "
+                    "object_value=%r (%s) → \"\" (★ entity_id only)",
+                    d.get("fact_uid") or d.get("uid"),
+                    bare[:80],
+                    "placeholder-leak" if is_placeholder else "literal",
+                )
+                d["object_value"] = ""
+                needs_review = True
+    # REQ-004 STAGE 1c-iv — predicate_mapper 폐기:
+    # ★ v3 §1: 모든 predicate = 자연어 verbatim (★ OPL 통제어 0).
+    # predicate_code / predicate_label / original_surface 모두 raw predicate
+    # 의 normalized surface 로 채운다. 통제어 매핑 / "RELATED_TO" fallback /
+    # english gloss 모두 사라짐 — 한국어가 들어오면 한국어로 저장된다.
+    # needs_review 는 OPL fallback 신호 대신 항상 False; predicate_violation
+    # 신호는 그대로 `detect_predicate_violation` 가 책임.
+    raw_predicate = (d.get("predicate") or "").strip()
+    normalized_predicate = re.sub(r"\s+", " ", raw_predicate)
+    d["predicate_code"] = normalized_predicate
+    d["predicate_label"] = normalized_predicate
     d["original_surface"] = raw_predicate
+    needs_review = False
     # B-62-fix-v3-general: OR-in the per-object verbatim-violation
     # flag. Either the subject obj OR (if the object_value is an
     # obj-N reference) the object obj's violation propagates to the
@@ -866,7 +924,7 @@ def _serialize_struct_fact(
 def _serialize_struct_object(
     o: StructureObject,
     uid_map: dict[str, str] | None = None,
-    match_per_object: dict[str, MatchResult] | None = None,
+    match_per_object: dict[str, GatewayMatchResult] | None = None,
 ) -> dict[str, Any]:
     """Pydantic StructureObject -> dict suitable for JSONB.
 
@@ -1048,7 +1106,7 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         )
 
         # Match each Object
-        match_per_object: dict[str, MatchResult] = {}
+        match_per_object: dict[str, GatewayMatchResult] = {}
         match_summaries: list[dict[str, Any]] = []
         disambig_pending: list[dict[str, Any]] = []
         kspace_id = str(job.knowledge_space_id)

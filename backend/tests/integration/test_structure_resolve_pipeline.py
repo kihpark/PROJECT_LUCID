@@ -8,15 +8,26 @@ source-append behavior.
 """
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock, patch
-
 import pytest
 
-from api.storage.canonical import canonical_key
-from api.storage.elasticsearch.facts import insert_or_dedup_fact
-from api.structure.entity_resolver import resolve_entity
-from api.structure.predicate_mapper import map_predicate_to_opl
+# REQ-004 STAGE 1c-iv: predicate_mapper 폐기. 이 테스트는 통제어 OPL
+# 매핑 / fallback 동작을 검증하던 B-62 invariant 테스트로, v3 (자연어
+# predicate verbatim) 와 무관해진다. ★ 모듈 단위 skip — 삭제 대신
+# skip 으로 두는 이유: PO 가 회귀 검증을 다시 원할 경우 history 가 남도록.
+pytest.skip(
+    "REQ-004 STAGE 1c-iv: predicate_mapper deleted (v3 = natural-language "
+    "predicate verbatim, OPL 통제어 0). Superseded by "
+    "test_stage1c_literal_zero.py.",
+    allow_module_level=True,
+)
+
+from typing import Any  # noqa: E402
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+from api.storage.canonical import canonical_key  # noqa: E402
+from api.storage.elasticsearch.facts import insert_or_dedup_fact  # noqa: E402
+from api.structure.entity_resolver import resolve_entity  # noqa: E402
+from api.structure.predicate_mapper import map_predicate_to_opl  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Korean capture -> Korean object preserved (B-53 surface invariant)

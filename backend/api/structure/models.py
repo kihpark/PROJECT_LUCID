@@ -19,13 +19,49 @@ Object matching, embedding, and ES persistence happen downstream (PR-3-2
 """
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from api.models.base import UID, LucidBaseModel
 from api.models.facts import FactType
 from api.models.objects import ObjectClass
+
+_log = logging.getLogger("lucid.structure.models")
+
+# REQ-004 STAGE 1c-iii — ★ schema 가드:
+# ACTION fact 의 object_value 는 ★ entity_id only (★ literal 0). LLM
+# placeholder (obj-N), canonical UUID, 또는 빈 문자열만 허용한다.
+# CLAIM / MEASUREMENT 무관 (CLAIM 의 object_value 는 의도적으로 발화
+# 내용 literal, MEASUREMENT 의 object_value 는 수치 표현 literal).
+#
+# ★ 이 validator 는 LLM-intermediate 단계 (decomposer 직출) 에서 동작한다
+# — 위반 시 ★ raise 하지 않고 ★ object_value 를 비우고 warning 만 남긴다.
+# 그 이유: claude_client 가 pydantic validation 실패 시 전체 envelope 을
+# `malformed_llm_output` 으로 폐기하기 때문 (capture-naver-fix 회귀 방지).
+# 진짜 종착점 가드 = processor `_serialize_struct_fact` 의 1c-iii literal-
+# strip 가 ES 저장 직전 한 번 더 차단한다.
+_OBJ_PLACEHOLDER_RE_MODELS = re.compile(r"^obj-\d+$", re.IGNORECASE)
+_UUID_LIKE_RE_MODELS = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _is_entity_id_shape(value: str | None) -> bool:
+    """True iff `value` is empty / placeholder obj-N / canonical UUID4."""
+    if value is None:
+        return True
+    bare = value.strip()
+    if not bare:
+        return True
+    if _OBJ_PLACEHOLDER_RE_MODELS.match(bare):
+        return True
+    if _UUID_LIKE_RE_MODELS.match(bare):
+        return True
+    return False
 
 ExtractionStatus = Literal["success", "no_facts_found"]
 FailureReason = Literal[
@@ -154,6 +190,42 @@ class StructureFact(LucidBaseModel):
     measurement_value: float | None = None
     measurement_unit: str | None = None
     as_of: str | None = None
+
+    # REQ-004 STAGE 1c-iii — ★ schema 가드 (★ ACTION literal=0 invariant).
+    # ★ pydantic model_validator: ACTION fact 의 object_value 가 literal 일
+    # 때 ★ raise 대신 ★ warning log + tags_suggested 에 "literal_object_v3"
+    # 태그 부여. 진짜 strip = processor `_serialize_struct_fact` 의 1c-iii
+    # 가드가 ES 저장 직전 수행. validator 의 목적은 ★ invariant 가시화
+    # (★ dogfood 측정 — 얼마나 자주 LLM 이 literal 을 흘리는가).
+    #
+    # ★ raise 하지 않는 이유:
+    #   - claude_client._build_result 가 validation 실패 시 전체 envelope 을
+    #     malformed_llm_output 으로 폐기 (capture-naver-fix 회귀).
+    #   - 1c PO directive: literal=0 acceptance 는 ★ ES 저장 경로 기준
+    #     (processor → ES), ★ LLM-intermediate 단계가 아니다.
+    @model_validator(mode="after")
+    def _v3_action_object_must_be_entity_id(self) -> "StructureFact":
+        if self.fact_type != "action":
+            return self
+        ov = self.object_value
+        if _is_entity_id_shape(ov):
+            return self
+        # literal detected — flag for downstream observability (★ 1c-iii)
+        bare = (ov or "").strip()
+        _log.info(
+            "REQ-004-1c-iii v3 schema guard: ACTION fact uid=%s carries "
+            "literal object_value=%r (★ will be stripped at serialize-time)",
+            getattr(self, "uid", "?"), bare[:80],
+        )
+        tags = list(self.tags_suggested or [])
+        if "literal_object_v3" not in tags:
+            tags.append("literal_object_v3")
+            # validate_assignment=True will not re-run this validator on
+            # the assignment because field-level validators are bypassed
+            # for tag mutation; we mutate via object.__setattr__ to skip
+            # the per-field validators that would re-check `tags_suggested`.
+            object.__setattr__(self, "tags_suggested", tags)
+        return self
     # m32a-stage2-role-channel (PO 2026-06-28 decision 4): 다항관계 의
     # 부가 참여자를 fact 속성으로 보존하는 channel. 1차 도입 = 3종
     # (recipient / instrument / location) 이지만 ★ enum 경직 금지 —
