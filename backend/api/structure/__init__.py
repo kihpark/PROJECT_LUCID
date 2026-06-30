@@ -13,11 +13,14 @@ from api.structure.models import (
 )
 from api.structure.object_matcher import MatchResult, match_or_create_object
 from api.structure.processor import process_extracted_job
+from api.structure.resolution_gateway import ENTITY_TYPE_V3, ResolvedEntity, resolve
 
 __all__ = [
+    "ENTITY_TYPE_V3",
     "FailureReason",
     "LinkCreationResult",
     "MatchResult",
+    "ResolvedEntity",
     "StructureDisambiguation",
     "StructureFact",
     "StructureFactFactLink",
@@ -29,4 +32,5 @@ __all__ = [
     "decompose_via_claude",
     "match_or_create_object",
     "process_extracted_job",
+    "resolve",
 ]
