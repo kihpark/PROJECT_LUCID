@@ -1,5 +1,5 @@
 """
-REQ-004 STAGE 1a — Entity resolution gateway 골격.
+REQ-004 STAGE 1b — Entity resolution gateway 가 5 resolver 기능 흡수.
 
 ★ v3 §2·§5 verbatim:
 - 모든 entity 참조 = entity_id (★ 문자열 저장 경로 제거)
@@ -7,11 +7,20 @@ REQ-004 STAGE 1a — Entity resolution gateway 골격.
 - 확신 → 기존 entity_id / 새것 → 새 entity / 애매 → 새 + "후보" (P2)
 - 타입 10종 분류 (+ confidence)
 
-★ STAGE 1a 범위: 골격 + embedding 연결. 기존 5 resolver 흡수는 STAGE 1b.
+★ STAGE 1b 범위 (★ PO verbatim):
+- 1b-i  exact match cascade (★ entity_resolver 의 5-tier 흡수, ★ 호출 X 로직 재구현)
+- 1b-ii LLM type 분류 (★ v3 10종 closed set, ★ stub 으로 시작)
+- 1b-iii brand alias 17개 + 한국어 particles strip 흡수 (★ pre-resolve normalize)
+- 1b-iv kNN 다단계 band (★ object_matcher 의 0.70-0.95 흡수)
+- 1b-v  action_object_resolver STOP guard ★ 유지 (★ 1c 에서 제거)
+
+★ DO NOT call 5 resolver from gateway (★ 로직만 재구현).
 """
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
+
+import re
 
 from elasticsearch import Elasticsearch
 
@@ -26,13 +35,77 @@ ENTITY_TYPE_V3 = Literal[
     "location",
 ]
 
+_ENTITY_TYPE_V3_SET: frozenset[str] = frozenset({
+    "person", "organization", "group",
+    "knowledge", "resource", "task", "concept", "event", "metric",
+    "location",
+})
+
+
+# ★ 1b-iii: brand_resolver 흡수 (★ 17개 한글→영문 brand alias verbatim)
+# ★ DO NOT call brand_resolver; ★ 로직 재구현.
+_KOREAN_BRAND_ALIAS: dict[str, str] = {
+    # Tech / aerospace
+    "스페이스X": "SpaceX",
+    "스페이스엑스": "SpaceX",
+    "오픈AI": "OpenAI",
+    "오픈에이아이": "OpenAI",
+    "아이비엠": "IBM",
+    "엔비디아": "Nvidia",
+    "구글": "Google",
+    "애플": "Apple",
+    "마이크로소프트": "Microsoft",
+    "메타": "Meta",
+    "테슬라": "Tesla",
+    "아마존": "Amazon",
+    "트위터": "Twitter",
+    "페이스북": "Facebook",
+    "인텔": "Intel",
+    # Add-2 for parity with brand_resolver curated list (17 spec):
+    "삼성": "Samsung",
+    "현대": "Hyundai",
+}
+
+
+# ★ 1b-iii: subject_recovery / entity_resolver 흡수 — 한국어 particles strip
+# ★ DO NOT call subject_recovery; ★ 로직 재구현.
+_KOREAN_PARTICLES_RE = re.compile(
+    r"(은|는|이|가|을|를|의|에|에서|로|으로|와|과|도|만|까지|부터|에게|한테)$"
+)
+
+
+def _normalize_surface(surface: str, lang: str) -> str:
+    """★ 1b-iii: pre-resolve surface 정규화.
+
+    Order:
+      1. strip whitespace
+      2. brand alias lookup (★ Korean transliteration → English canonical)
+      3. Korean particles strip (★ "한국은행이" → "한국은행")
+    """
+    if not surface:
+        return ""
+    s = surface.strip()
+    if not s:
+        return ""
+    # brand alias 우선 (★ exact lookup, ★ pre-particle-strip)
+    if s in _KOREAN_BRAND_ALIAS:
+        return _KOREAN_BRAND_ALIAS[s]
+    # 한국어 particles strip (★ at most one trailing particle)
+    if lang == "ko":
+        stripped = _KOREAN_PARTICLES_RE.sub("", s).strip()
+        # brand alias 재시도 (★ particle strip 후 다시 match 가능)
+        if stripped in _KOREAN_BRAND_ALIAS:
+            return _KOREAN_BRAND_ALIAS[stripped]
+        s = stripped or s
+    return s
+
 
 @dataclass
 class ResolvedEntity:
     """Gateway 의 단일 contract — 모든 호출이 이 type 반환."""
     entity_id: str
     canonical_name: str
-    entity_type: str  # ENTITY_TYPE_V3 (★ STAGE 1b 에서 closed enforcement)
+    entity_type: str  # ENTITY_TYPE_V3 (★ 1b-ii 부터 closed enforcement)
     confidence: float
     source: Literal["embedding", "exact", "new", "candidate"]
     # ★ "candidate" = 애매 → 새 entity + P2 사용자 통합 대기
@@ -46,34 +119,168 @@ def resolve(
     client: Optional[Elasticsearch] = None,
 ) -> ResolvedEntity:
     """
-    Single ingest-time entry point.
+    REQ-004 STAGE 1b — Gateway 가 5 resolver 기능 흡수.
 
-    Args:
-        surface: 추출된 자연어 표면 (예: '한국은행', 'Apple Inc.')
-        lang: 'ko' | 'en' | other
-        knowledge_space_id: KS scope
-        client: ES client (테스트 주입용)
+    Cascade:
+      0. surface 정규화 (★ 1b-iii: brand alias + KO particles strip)
+      1. exact match cascade (★ 1b-i: name / name_en / aliases / primary_label)
+      2. embedding kNN (★ 1a 보존 + 1b-iv 다단계 band)
+      3. LLM type 분류 + candidate fallback (★ 1b-ii)
 
-    Returns:
-        ResolvedEntity (★ entity_id 강제)
-
-    ★ STAGE 1a: 골격 + embedding 매칭만.
-    ★ STAGE 1b: 기존 5 resolver 흡수 + exact match cascade.
+    ★ Constraints:
+    - 5 resolver ★ 호출 X (★ 로직 재구현)
+    - action_object_resolver ★ STOP guard 유지 (★ 1b-v, 1c 에서 제거)
+    - ES insert ★ 안 함 (★ 1c 에서 저장 경로 통합)
     """
     if client is None:
         client = get_client()
 
-    # 1. embedding 으로 kNN 검색 (★ 1a 의 단일 path)
-    vec = get_embedding(surface)
-    if vec is not None:
+    normalized = _normalize_surface(surface, lang)
+    if not normalized:
+        return ResolvedEntity(
+            entity_id="",
+            canonical_name="",
+            entity_type="concept",
+            confidence=0.0,
+            source="candidate",
+        )
+
+    # ★ 1b-i: exact match cascade (★ entity_resolver 의 5-tier 흡수)
+    exact_hit = _exact_match_cascade(
+        client=client,
+        normalized=normalized,
+        knowledge_space_id=knowledge_space_id,
+    )
+    if exact_hit is not None:
+        return exact_hit
+
+    # ★ 1a 보존 + 1b-iv: embedding kNN 다단계 band
+    knn_hit = _embedding_knn_match(
+        client=client,
+        normalized=normalized,
+        knowledge_space_id=knowledge_space_id,
+    )
+    if knn_hit is not None:
+        return knn_hit
+
+    # ★ 1b-ii: LLM type 분류 (★ candidate 의 type 결정)
+    entity_type, type_confidence = _classify_type_with_llm(normalized, lang)
+
+    return ResolvedEntity(
+        entity_id="",  # ★ 1c 에서 ES insert 후 entity_id 채움
+        canonical_name=normalized,
+        entity_type=entity_type,
+        confidence=type_confidence,
+        source="candidate",
+    )
+
+
+# ---------------------------------------------------------------------------
+# ★ 1b-i: exact match cascade (★ entity_resolver 의 5-tier verbatim 흡수)
+# ---------------------------------------------------------------------------
+
+# ★ 1b-i 의 5-tier (★ entity_resolver 의 verbatim 흡수):
+#   1. primary_label
+#   2. name
+#   3. name_en
+#   4. aliases
+#   (★ co_mention_en 는 gateway 외부 — 1c 에서 caller 가 책임)
+_EXACT_FIELDS: tuple[str, ...] = (
+    "primary_label",
+    "name",
+    "name_en",
+    "aliases",
+)
+
+
+def _exact_match_cascade(
+    *,
+    client: Any,
+    normalized: str,
+    knowledge_space_id: str,
+) -> Optional[ResolvedEntity]:
+    """★ 1b-i: 5-tier exact-match path (★ entity_resolver._lookup_by_field 로직).
+
+    Returns ResolvedEntity(source="exact", confidence=1.0) on hit, else None.
+    ★ entity_resolver.py 호출 X — ★ 로직만 재구현.
+    """
+    for field in _EXACT_FIELDS:
+        try:
+            resp = client.search(
+                index=LUCID_OBJECTS,
+                size=1,
+                query={"bool": {"filter": [
+                    {"term": {"knowledge_space_id": knowledge_space_id}},
+                    {"term": {field: normalized}},
+                ]}},
+            )
+        except Exception:  # noqa: BLE001 — gateway 가 raise X (★ degrade quietly)
+            continue
+        hits = (resp.get("hits") or {}).get("hits") or []
+        if not hits:
+            continue
+        top = hits[0]
+        src = top.get("_source") or {}
+        # ★ entity_id = _id 우선, object_uid fallback (★ 두 path 모두 entity_resolver 에 존재)
+        entity_id = top.get("_id") or src.get("object_uid") or ""
+        # ★ entity_type: entity_type 필드 우선 (★ entity-layer-restore), class fallback
+        entity_type_raw = (
+            src.get("entity_type")
+            or src.get("class")
+            or "concept"
+        )
+        return ResolvedEntity(
+            entity_id=entity_id,
+            canonical_name=src.get("primary_label") or src.get("name") or normalized,
+            entity_type=_coerce_to_v3(entity_type_raw),
+            confidence=1.0,
+            source="exact",
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# ★ 1b-iv: embedding kNN 다단계 band (★ object_matcher 0.70-0.95 흡수)
+# ---------------------------------------------------------------------------
+
+# ★ object_matcher 의 DCR-001 / DR-065 threshold verbatim:
+#   AUTO_THRESHOLD_TIGHT = 0.98  (Person / Organization / Service)
+#   AUTO_THRESHOLD_STANDARD = 0.95
+#   DISAMBIG_FLOOR = 0.70
+# ★ Gateway 의 1a stub = 0.85 → 1b-iv 의 ★ 다단계 band 로 교체.
+#
+# ★ Gateway 가 candidate_class 를 모르므로 STANDARD threshold 사용.
+# ★ 1c 에서 caller 가 class hint 주입 시 TIGHT 적용.
+KNN_AUTO_THRESHOLD: float = 0.95   # ★ object_matcher AUTO_THRESHOLD_STANDARD
+KNN_DISAMBIG_FLOOR: float = 0.70   # ★ object_matcher DISAMBIG_FLOOR
+
+
+def _embedding_knn_match(
+    *,
+    client: Any,
+    normalized: str,
+    knowledge_space_id: str,
+) -> Optional[ResolvedEntity]:
+    """★ 1b-iv: embedding kNN 검색 + 다단계 band 판정.
+
+    Band:
+      score >= 0.95  → source="embedding" auto-merge
+      0.70 ≤ score < 0.95 → source="candidate" (★ disambig — P2 사용자 통합)
+      score < 0.70   → ★ no match (★ candidate via LLM classification)
+
+    ★ object_matcher.py 호출 X — ★ 로직만 재구현.
+    """
+    vec = get_embedding(normalized)
+    if vec is None:
+        return None
+
+    try:
         knn_resp = client.search(
             index=LUCID_OBJECTS,
             size=3,
-            query={
-                "bool": {
-                    "filter": [{"term": {"knowledge_space_id": knowledge_space_id}}],
-                }
-            },
+            query={"bool": {"filter": [
+                {"term": {"knowledge_space_id": knowledge_space_id}},
+            ]}},
             knn={
                 "field": "embedding",
                 "query_vector": list(vec),
@@ -81,28 +288,132 @@ def resolve(
                 "num_candidates": 50,
             },
         )
+    except Exception:  # noqa: BLE001
+        return None
 
-        hits = knn_resp.get("hits", {}).get("hits", [])
-        if hits:
-            top = hits[0]
-            score = top.get("_score", 0)
-            # ★ 1a 의 ★ stub threshold (1b 에서 정교화)
-            if score >= 0.85:
-                src = top["_source"]
-                return ResolvedEntity(
-                    entity_id=top["_id"],
-                    canonical_name=src.get("name") or surface,
-                    entity_type=src.get("class") or "concept",
-                    confidence=float(score),
-                    source="embedding",
-                )
+    hits = (knn_resp.get("hits") or {}).get("hits") or []
+    if not hits:
+        return None
 
-    # 2. fallback: 새 entity (★ candidate 표시 — P2)
-    # ★ STAGE 1a 는 ★ 실제 entity 생성 안 함 (★ 1c 에서 저장 경로 통합)
-    return ResolvedEntity(
-        entity_id="",  # ★ 1c 에서 ES insert 후 entity_id 채움
-        canonical_name=surface,
-        entity_type="concept",  # ★ 1b 에서 LLM 분류 통합
-        confidence=0.0,
-        source="candidate",
-    )
+    top = hits[0]
+    score = float(top.get("_score") or 0.0)
+    src = top.get("_source") or {}
+
+    # ★ Auto band: 0.95+
+    if score >= KNN_AUTO_THRESHOLD:
+        entity_id = top.get("_id") or src.get("object_uid") or ""
+        entity_type_raw = (
+            src.get("entity_type")
+            or src.get("class")
+            or "concept"
+        )
+        return ResolvedEntity(
+            entity_id=entity_id,
+            canonical_name=src.get("primary_label") or src.get("name") or normalized,
+            entity_type=_coerce_to_v3(entity_type_raw),
+            confidence=score,
+            source="embedding",
+        )
+
+    # ★ Disambig band: 0.70-0.95 (★ candidate + 후보 표시 — P2)
+    if score >= KNN_DISAMBIG_FLOOR:
+        # ★ 1b-iv 의 ★ 후보 표시: entity_id 비움 (★ caller 가 candidate 처리),
+        # canonical_name 은 top hit 의 surface 보존 (★ 사용자에게 보여줄 후보 label)
+        entity_type_raw = (
+            src.get("entity_type")
+            or src.get("class")
+            or "concept"
+        )
+        return ResolvedEntity(
+            entity_id="",
+            canonical_name=normalized,  # ★ 입력 surface 유지 (★ candidate 의 정체)
+            entity_type=_coerce_to_v3(entity_type_raw),
+            confidence=score,
+            source="candidate",
+        )
+
+    # ★ < 0.70 → ★ no match (★ LLM 분류 path 로 fallthrough)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# ★ 1b-ii: LLM type 분류 (★ v3 10종 closed set)
+# ---------------------------------------------------------------------------
+
+# ★ Heuristic hints (★ stub — 1b-ii final 에서 Claude structured output 으로 교체)
+# ★ Patterns are deliberate ★ closed-set safe (모두 v3 10종 안).
+_TYPE_HINT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # organization
+    ("organization", (
+        "주식회사", "협회", "법인", "기관", "위원회", "재단",
+        "ltd", "inc", "corp", "company", "co.", "llc", "gmbh",
+    )),
+    # location
+    ("location", (
+        "시", "도", "구", "동", "읍", "면", "리",
+        "city", "country", "state", "province",
+    )),
+    # person (★ titles / honorifics)
+    ("person", (
+        "씨", "님", "박사", "교수", "의원", "대통령", "총리", "장관",
+        "mr.", "ms.", "dr.", "prof.",
+    )),
+    # event
+    ("event", (
+        "회의", "회담", "정상회담", "컨퍼런스", "summit", "conference",
+        "meeting", "workshop",
+    )),
+    # metric
+    ("metric", (
+        "지수", "비율", "rate", "index", "ratio", "kpi",
+    )),
+    # task
+    ("task", (
+        "작업", "업무", "과제", "task", "todo",
+    )),
+    # resource (★ documents / artifacts)
+    ("resource", (
+        "보고서", "문서", "기사", "논문", "report", "document",
+        "paper", "article",
+    )),
+)
+
+
+def _classify_type_with_llm(surface: str, lang: str) -> tuple[str, float]:
+    """
+    ★ 1b-ii: LLM 가 v3 10종 closed set 안에서만 분류.
+
+    Returns (entity_type, confidence).
+    ★ STUB — 실제 LLM 호출 (★ Claude structured output) 통합 = 1b-ii final.
+
+    Heuristic stub:
+      - 명백한 패턴 매칭 → type + 0.6 confidence
+      - default → "concept" + 0.3 confidence (★ closed-set 안 안전 fallback)
+    """
+    if not surface:
+        return ("concept", 0.0)
+
+    s = surface.lower()
+    # 명백한 패턴 hint
+    for entity_type, patterns in _TYPE_HINT_PATTERNS:
+        for pat in patterns:
+            if pat in s:
+                return (entity_type, 0.6)
+
+    # default = concept (★ closed set 안 안전 fallback)
+    return ("concept", 0.3)
+
+
+def _coerce_to_v3(entity_type_raw: Any) -> str:
+    """★ ES 의 legacy class/entity_type 값을 ★ v3 10종 closed set 으로 강제.
+
+    ★ Out-of-set 값 (★ "PROCEDURE", "PROBLEM", "CT", "place" 등) → "concept".
+    ★ This is the v3 §3 closed-set enforcement at the gateway boundary.
+    """
+    if not isinstance(entity_type_raw, str):
+        return "concept"
+    candidate = entity_type_raw.strip().lower()
+    if candidate in _ENTITY_TYPE_V3_SET:
+        return candidate
+    # ★ legacy mapping (★ "place" → "location" 같은 안전 변환은 1c 에서 검토)
+    return "concept"
