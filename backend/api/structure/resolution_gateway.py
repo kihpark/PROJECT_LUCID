@@ -720,9 +720,11 @@ def _embedding_knn_match(
 # ★ Heuristic hints (★ stub — 1b-ii final 에서 Claude structured output 으로 교체)
 # ★ Patterns are deliberate ★ closed-set safe (모두 v3 10종 안).
 _TYPE_HINT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # organization
+    # organization (★ 한국 정당·정치조직 suffix 보강)
     ("organization", (
         "주식회사", "협회", "법인", "기관", "위원회", "재단",
+        # ★ 한국 정당 suffix — 'OO당' / 'OO혁신당' 등
+        "혁신당", "민주당", "국민의힘", "정당",
         "ltd", "inc", "corp", "company", "co.", "llc", "gmbh",
     )),
     # location
@@ -730,9 +732,12 @@ _TYPE_HINT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "시", "도", "구", "동", "읍", "면", "리",
         "city", "country", "state", "province",
     )),
-    # person (★ titles / honorifics)
+    # person (★ titles / honorifics — 한국 정치 직함 보강)
     ("person", (
         "씨", "님", "박사", "교수", "의원", "대통령", "총리", "장관",
+        # ★ M-Dogfood-A 보강: 한국 정치 직함
+        "사무처장", "사무총장", "원내대표", "대표", "청장", "위원장",
+        "국장", "차관", "지사", "시장", "구청장", "도지사", "당대표",
         "mr.", "ms.", "dr.", "prof.",
     )),
     # event
@@ -762,16 +767,49 @@ _LLM_CLASSIFY_SYSTEM_PROMPT = (
     "  person, organization, group, knowledge, resource, task, "
     "concept, event, metric, location\n\n"
     "★ v3 Carley 분류 기준:\n"
-    "- person: 사람 이름 (홍길동, Elon Musk)\n"
-    "- organization: 공식·법적 실체 (Samsung, 한국은행, 보건복지부)\n"
-    "- group: 비공식·창발 묶음 (지지층, 시민단체)\n"
+    "- person: 사람 이름 (홍길동, Elon Musk). ★ 한국 정치 맥락에서 직함이\n"
+    "  붙은 인명도 person — '신진창 사무처장', '점정식 의원', '이재명 대표',\n"
+    "  '김민석 국무총리', 'OO장관', 'OO청장', 'OO위원장', 'OO원내대표'.\n"
+    "  ★ 직함만 떼면 한국인 이름인지 보고 person 으로. 직함만 (★ '장관' 단독)\n"
+    "  은 person 아님 — concept / task 로.\n"
+    "- organization: 공식·법적 실체 (Samsung, 한국은행, 보건복지부). ★ 한국\n"
+    "  정당·정치조직도 organization — '조국혁신당', '더불어민주당',\n"
+    "  '국민의힘', '개혁신당', 'OO당', 'OO혁신당'. ★ 'OO당'·'OO혁신당' 패턴은\n"
+    "  거의 항상 organization. 시민단체·재단·위원회·협회도 organization.\n"
+    "- group: 비공식·창발 묶음 (지지층, 보수층, 진보 진영, 시민, 유권자).\n"
+    "  공식 명칭 없는 묶음만 group — 명칭 있으면 organization.\n"
     "- knowledge: 전문영역·노하우·정보자산 (반도체 기술, AI, 청사진)\n"
     "- resource: 예산·자원·물자·제품 (예산, 희토류, Vision Pro, 메모리 팹)\n"
-    "- task: 정책·절차·법안·역할·프로젝트 (탄핵 의결, 메가프로젝트, 종합계획)\n"
-    "- concept: 추상개념·주제 (자본주의, 민주주의)\n"
-    "- event: 명명된 사건 거점 (6·3부정선거, IMF사태, 팬데믹)\n"
-    "- metric: 지표 (GDP, MAU, 환율, 시세)\n"
-    "- location: 장소 (서울, 광주·전남, 미국)\n\n"
+    "- task: 정책·절차·법안·역할·프로젝트 (탄핵 의결, 메가프로젝트, 종합계획,\n"
+    "  연금개혁, 입법예고)\n"
+    "- concept: 추상개념·주제 (자본주의, 민주주의, 포퓰리즘)\n"
+    "- event: ★ 명명된 사건 거점만 — 고유명이 붙은 1회성 사건.\n"
+    "    OK: '6·3선거', '6·3부정선거', 'IMF 사태', '코로나 팬데믹',\n"
+    "        '9·11 테러', '12·3 비상계엄', '2024 총선', '대선'.\n"
+    "    ★ NOT event (★ 시간 표현은 event 아님 — when 속성으로 처리):\n"
+    "        '2016-2018년', '2016년', '작년', '어제', '오늘', '내일',\n"
+    "        '지난주', '3월', '1분기', '상반기'. ★ 이런 순수 시간 표현은\n"
+    "        분류 대상이 아니라 fact 의 when 속성으로 흡수돼야 한다.\n"
+    "        ★ 만약 분류 요청이 들어오면 confidence 낮게 (≤0.4) 두고\n"
+    "        type='concept' (★ 시간 자체는 entity 아니지만 10종 안에서\n"
+    "        가장 가까운 fallback).\n"
+    "- metric: 지표 (GDP, MAU, 환율, 시세, 지지율, 의석수)\n"
+    "- location: 장소 (서울, 광주·전남, 미국, 여의도, 국회)\n\n"
+    "Few-shot 예시:\n"
+    "  '신진창'           → person       (★ 한국인 이름)\n"
+    "  '점정식'           → person       (★ 한국인 이름)\n"
+    "  '신진창 사무처장'  → person       (★ 직함+이름 = person)\n"
+    "  '이재명 대표'      → person\n"
+    "  '김민석 국무총리'  → person\n"
+    "  '조국혁신당'       → organization (★ OO혁신당 = 정당)\n"
+    "  '더불어민주당'     → organization\n"
+    "  '국민의힘'         → organization\n"
+    "  '시민단체'         → group        (★ 명칭 없는 묶음)\n"
+    "  '6·3선거'          → event        (★ 명명된 사건)\n"
+    "  '12·3 비상계엄'    → event\n"
+    "  '2016-2018년'      → concept,0.3  (★ 시간 표현 = event 아님 = when 속성)\n"
+    "  '작년'             → concept,0.3  (★ 시간 표현)\n"
+    "  '국회'             → location\n\n"
     "Output ONLY a single JSON object: "
     '{"type": "<one_of_10>", "confidence": <0.0-1.0>}\n'
     "★ no prose, no explanation, no markdown fence."
