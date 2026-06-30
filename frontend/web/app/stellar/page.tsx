@@ -11,8 +11,10 @@ import { StellarView } from '@/components/StellarView';
 export const dynamic = 'force-dynamic';
 
 export const metadata = {
-  title: 'Lucid — Stellar View',
-  description: 'A 3D galaxy of your validated facts.',
+  // feat/i18n-ko-display-names-separation (★ PO 2026-06-30) — 한국어 표시명.
+  // 내부 라우트 (/stellar) 와 컴포넌트명 (StellarView) 은 코드네임 유지.
+  title: 'Lucid — 지식그래프',
+  description: '검증된 사실을 한눈에 보는 3D 지식그래프.',
 };
 
 export default function StellarRoute() {

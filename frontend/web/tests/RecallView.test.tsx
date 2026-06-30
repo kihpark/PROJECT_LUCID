@@ -103,7 +103,7 @@ describe('RecallView', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '한국은행 기준금리' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
 
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     const sig = await screen.findByTestId('recall-signature');
@@ -121,7 +121,7 @@ describe('RecallView', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'unknown question' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
 
     const sig = await screen.findByTestId('recall-signature');
     expect(sig.textContent).toBe('검증된 사실이 없습니다');
@@ -131,7 +131,7 @@ describe('RecallView', () => {
 
   it('Recall button is disabled when the input is empty', () => {
     render(<RecallView spaceId="ks-1" />);
-    const btn = screen.getByRole('button', { name: 'Recall' }) as HTMLButtonElement;
+    const btn = screen.getByRole('button', { name: '검색' }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
   });
 
@@ -167,7 +167,7 @@ describe('RecallView', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '철거' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     const card = await screen.findByTestId('recall-fact-fn-ko-label');
     // Korean label is visible inside the card.
     expect(card.textContent).toContain('철거하기로 결정한 것은');
@@ -212,7 +212,7 @@ describe('RecallView', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '중국' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
 
     const card = await screen.findByTestId('recall-fact-fn-original');
     // Original sentence is rendered verbatim.
@@ -257,7 +257,7 @@ describe('RecallView', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '중국' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
 
     const card = await screen.findByTestId('recall-fact-fn-pipe');
     // The raw pipe artefact is NOT shown as the card title.
@@ -351,7 +351,7 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     expect(
       await screen.findByTestId('recall-fact-fn-embed-high-subject'),
@@ -367,7 +367,7 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     expect(await screen.findAllByTestId('recall-badge-embedding')).toHaveLength(2);
     expect(screen.getAllByTestId('recall-badge-entity-link')).toHaveLength(1);
@@ -379,7 +379,7 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     await screen.findByTestId('recall-fact-fn-embed-high');
     // Limit to article-shape cards so the score "span" and dd cells
@@ -399,7 +399,7 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     const note = await screen.findByTestId('recall-threshold-note');
     expect(note).toHaveTextContent(/0\.72 이상/);
@@ -435,7 +435,7 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'x' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     expect(
       await screen.findByTestId('recall-fact-fn-orphan-subject'),
@@ -525,7 +525,7 @@ describe('RecallView — entity brief panel (B-41)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     // feat/recall-entity-bucket-cleanup — the separate entity-brief
     // panel is gone; the entity-scoped signal lives on the
@@ -552,7 +552,7 @@ describe('RecallView — entity brief panel (B-41)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     // feat/recall-entity-bucket-cleanup — the predicate-grouped fact
     // surface is gone. The same facts are already shown by the main
@@ -587,7 +587,7 @@ describe('RecallView — entity brief panel (B-41)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'Nobody' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     // feat/recall-entity-bucket-cleanup — the empty-entity message
     // ("이 엔티티에 대한 검증된 사실이 없습니다.") is gone. We still
@@ -737,7 +737,7 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '출생아' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     // feat/recall-entity-bucket-cleanup — the per-entity chip row
     // ("brief-fact-type-*") was merged into the page-level summary
@@ -764,7 +764,7 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '출생아' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     await screen.findByTestId('recall-fact-type-summary');
     // 1 action, 2 claim, 3 measurement — facets.fact_types from the
@@ -785,7 +785,7 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '출생아' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     const summary = await screen.findByTestId('recall-fact-type-summary');
     expect(summary).toHaveAttribute('data-active-filter', '');
@@ -809,7 +809,7 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'Legacy' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     await screen.findByTestId('recall-fact-type-summary');
     // LEGACY_ACTION_ONLY has no facets payload, so all chip counts on
@@ -839,7 +839,7 @@ describe('RecallView — entity brief fact_type breakdown', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '출생아' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     const summary = await screen.findByTestId('recall-fact-type-summary');
     expect(summary).not.toHaveTextContent(/주어로서/);
@@ -889,7 +889,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     expect(await screen.findByTestId('facet-panel')).toBeInTheDocument();
     expect(screen.getByTestId('facet-bucket-organization')).toHaveTextContent('SpaceX');
@@ -904,7 +904,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
 
     // Mock the second response (drill-down).
@@ -929,7 +929,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
 
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
@@ -952,7 +952,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
 
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
@@ -975,7 +975,7 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
 
     (api.recall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(FACETED);
@@ -1006,7 +1006,7 @@ describe('RecallView — left search controls (B-50)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
     // B-50-fix: initial call carries default controls. `matchKinds`
     // is intentionally absent — embedding is the search mode and
@@ -1123,7 +1123,7 @@ describe('RecallView — left search controls (B-50)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'BoK' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
 
     // Both rendered initially.
@@ -1203,7 +1203,7 @@ describe('RecallView — left search controls (B-50)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'SpaceX' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
 
     // Drill into uid-spacex
@@ -1281,7 +1281,7 @@ describe('RecallView — fact detail panel (B-48b)', () => {
     render(<RecallView spaceId="ks-1" />);
     switchToPowerMode();
     fireEvent.change(screen.getByLabelText('recall query'), { target: { value: 'BoK' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
   }
 
@@ -1580,7 +1580,7 @@ describe('RecallView — B-60 simple/power mode toggle', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '철거' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     const card = await screen.findByTestId('recall-fact-fn-simple-ko');
     // Korean label is visible — the predicateLabel() helper rendered.
@@ -1620,7 +1620,7 @@ describe('RecallView — B-60 simple/power mode toggle', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '철거' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detail);
     fireEvent.click(
@@ -1716,7 +1716,7 @@ describe('RecallView — fact detail MODIFY (feat/fact-detail-modify)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
     (api.getFactDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce(detailToEdit);
     fireEvent.click(
@@ -1821,7 +1821,7 @@ describe('RecallView — fact detail MODIFY (feat/fact-detail-modify)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'SpaceX' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalledTimes(1));
 
     const retracted = {
@@ -1937,7 +1937,7 @@ describe('RecallView — fact_type summary box + pagination', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: query },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await screen.findByTestId('recall-fact-type-summary');
   }
 
@@ -2050,7 +2050,7 @@ describe('RecallView — fact_type summary box + pagination', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'LG에너지솔루션' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
 
     await waitFor(() =>
       expect(
@@ -2108,7 +2108,7 @@ describe('RecallView — fact_type summary box + pagination', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '결과없는검색어' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await screen.findByTestId('recall-fact-type-summary');
 
     // The summary box still renders — it announces the all-zero state
@@ -2185,7 +2185,7 @@ describe('RecallView — fact-display-unification (Recall card uses shared badge
     });
     // The "Recall" string appears in multiple places (heading + button);
     // pin to the submit button specifically.
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() =>
       expect(screen.getByTestId('recall-signature')).toBeInTheDocument(),
     );
@@ -2558,7 +2558,7 @@ describe('RecallView — left-panel fact_type filters REMOVED (fix/r1-recall-red
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: '삼성전기' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await screen.findByTestId('recall-fact-type-summary');
   }
 
@@ -2654,7 +2654,7 @@ describe('RecallView — AI 브리핑 (fix/r1-recall-redesign)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: query },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await screen.findByTestId('recall-fact-type-summary');
   }
 
@@ -2744,7 +2744,7 @@ describe('RecallView — AI 브리핑 (fix/r1-recall-redesign)', () => {
     fireEvent.change(screen.getByLabelText('recall query'), {
       target: { value: 'LG에너지솔루션' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recall' }));
+    fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await screen.findByTestId('recall-fact-type-summary');
 
     await waitFor(() => {

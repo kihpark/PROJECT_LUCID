@@ -42,6 +42,7 @@ import {
   classifyClaimModality,
   MODALITY_LABEL,
 } from './StellarHoverCard';
+import { entityTypeLabelKo } from '@/lib/displayNames';
 
 const ACCENT = '#5EEAD4';
 const WHO_COLOR = '#5EEAD4';
@@ -190,7 +191,7 @@ export function StellarEntityCard({
               fontWeight: 600,
             }}
           >
-            STELLAR · 발언
+            지식그래프 · 발언
           </span>
           <button
             type="button"
@@ -249,11 +250,11 @@ export function StellarEntityCard({
           style={{ marginTop: 18, borderTop: `1px solid ${PANEL_BORDER}`, paddingTop: 14, display: 'flex', gap: 8 }}>
           <Link href={recallHref} data-testid="stellar-entity-card-claim-recall-link"
             style={{ flex: 1, background: 'rgba(94,234,212,0.08)', border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 8, padding: '8px 10px', fontSize: 12, fontWeight: 600, textAlign: 'center', textDecoration: 'none' }}>
-            RECALL 에서 보기
+            검색 에서 보기
           </Link>
           <Link href={ledgerHref} data-testid="stellar-entity-card-claim-ledger-link"
             style={{ flex: 1, background: 'rgba(94,234,212,0.08)', border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 8, padding: '8px 10px', fontSize: 12, fontWeight: 600, textAlign: 'center', textDecoration: 'none' }}>
-            LEDGER 에서 보기
+            기록 에서 보기
           </Link>
         </div>
       </aside>
@@ -340,7 +341,7 @@ export function StellarEntityCard({
             fontWeight: 600,
           }}
         >
-          STELLAR · ENTITY
+          지식그래프 · 엔티티
         </span>
         <button
           type="button"
@@ -370,9 +371,13 @@ export function StellarEntityCard({
       {entityType ? (
         <div
           data-testid="stellar-entity-card-type"
+          // feat/i18n-ko-display-names-separation — 표시 = 한국어 (사용자
+          // 노출 영문 token 0). 내부 data-attr 은 raw token 유지 (회귀 0,
+          // 테스트 / 디버그 hook 보존).
+          data-entity-type={entityType}
           style={{ marginTop: 4, fontSize: 11, color: TEXT_DIM }}
         >
-          {entityType}
+          {entityTypeLabelKo(entityType)}
         </div>
       ) : null}
 
@@ -397,27 +402,27 @@ export function StellarEntityCard({
             textTransform: 'uppercase',
           }}
         >
-          연결된 fact
+          연결된 사실
         </div>
         <div
           data-testid="stellar-entity-card-count-action"
           style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}
         >
-          <span style={{ color: TEXT_BODY }}>행동 fact</span>
+          <span style={{ color: TEXT_BODY }}>행동 사실</span>
           <span style={{ color: ACCENT, fontWeight: 600 }}>{counts.action}건</span>
         </div>
         <div
           data-testid="stellar-entity-card-count-claim"
           style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}
         >
-          <span style={{ color: TEXT_BODY }}>발언 fact</span>
+          <span style={{ color: TEXT_BODY }}>발언 사실</span>
           <span style={{ color: ACCENT, fontWeight: 600 }}>{counts.claim}건</span>
         </div>
         <div
           data-testid="stellar-entity-card-count-measurement"
           style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}
         >
-          <span style={{ color: TEXT_BODY }}>수치 fact</span>
+          <span style={{ color: TEXT_BODY }}>수치 사실</span>
           <span style={{ color: ACCENT, fontWeight: 600 }}>{counts.measurement}건</span>
         </div>
       </div>
@@ -449,7 +454,7 @@ export function StellarEntityCard({
             textDecoration: 'none',
           }}
         >
-          LEDGER 에서 보기
+          기록 에서 보기
         </Link>
         <Link
           href={recallHref}
@@ -467,7 +472,7 @@ export function StellarEntityCard({
             textDecoration: 'none',
           }}
         >
-          RECALL 에서 보기
+          검색 에서 보기
         </Link>
       </div>
 

@@ -548,7 +548,7 @@ function ColdStartHint() {
         gap: 8,
       }}
     >
-      <div style={{ fontSize: 14, color: ACCENT, letterSpacing: '0.08em' }}>STELLAR · EMPTY</div>
+      <div style={{ fontSize: 14, color: ACCENT, letterSpacing: '0.08em' }}>지식그래프 · 비어 있음</div>
       <div style={{ fontSize: 13 }}>그래프 비어 있음 — 캡처된 사실이 아직 없습니다.</div>
       <div style={{ fontSize: 11, color: TEXT_DIM }}>위의 synthetic 모드에서 데모 우주를 볼 수 있어요.</div>
     </div>
@@ -1350,7 +1350,7 @@ export function StellarView(props: StellarViewProps = {}) {
           fontFamily: 'Pretendard, sans-serif',
         }}
       >
-        발언(CLAIM) {showClaims ? '숨김' : '보기'}
+        발언 {showClaims ? '숨김' : '보기'}
       </button>
 
       <StellarLeftPanel

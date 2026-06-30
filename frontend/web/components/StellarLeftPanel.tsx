@@ -64,14 +64,17 @@ const rowStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
+// feat/i18n-ko-display-names-separation (★ PO 2026-06-30) — ★ 사용자
+// 노출 영문 코드 (WHO/WHAT/WHERE) 0. 내부 식별자 (`who`, `what`, …) 와
+// data-testid (`stellar-filter-entity-who`) 는 코드명 유지.
 const ENTITY_BUCKET_LABEL: Record<EntityBucket, string> = {
-  who: 'WHO · 사람/조직',
-  what: 'WHAT · 개념/사건',
-  where: 'WHERE · 장소',
+  who: '인물 (사람·조직)',
+  what: '대상 (개념·사건)',
+  where: '장소',
   // fix/stellar-ux-self-audit U2 — explicit bucket for entity_type missing
   // or unmapped. Previously the filter passed these through regardless of
   // the three known toggles → user could not hide them.
-  unknown: '기타 · unknown',
+  unknown: '기타',
 };
 
 export function StellarLeftPanel(props: StellarLeftPanelProps): React.ReactElement {
@@ -98,12 +101,12 @@ export function StellarLeftPanel(props: StellarLeftPanelProps): React.ReactEleme
       }}
     >
       <div>
-        <div style={{ ...sectionHeaderStyle, color: ACCENT }}>FILTER · 좌패널</div>
+        <div style={{ ...sectionHeaderStyle, color: ACCENT }}>필터</div>
       </div>
 
       {/* Section 1 — Entity bucket (★ 유일하게 남은 섹션). */}
       <div>
-        <div style={sectionHeaderStyle}>ENTITY</div>
+        <div style={sectionHeaderStyle}>엔티티</div>
         {(Object.keys(ENTITY_BUCKET_LABEL) as EntityBucket[]).map((bucket) => (
           <label key={bucket} style={rowStyle}>
             <input

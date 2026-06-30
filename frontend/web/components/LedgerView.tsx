@@ -371,7 +371,9 @@ export function LedgerView({ spaceId }: Props) {
   return (
     <main className="mx-auto max-w-3xl px-4 py-8" data-testid="ledger-view">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold mb-1">기록 (Ledger)</h1>
+        {/* feat/i18n-ko-display-names-separation (★ PO 2026-06-30) —
+          * LEDGER 코드네임 → 한국어 "기록". 영문 라벨 제거. */}
+        <h1 className="text-2xl font-semibold mb-1">기록</h1>
         <p className="text-sm text-text-secondary">
           최근 검증한 사실 — 시간순
         </p>

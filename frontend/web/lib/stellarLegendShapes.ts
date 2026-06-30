@@ -54,14 +54,20 @@ export interface LegendSpec {
   color: string;
 }
 
-/** ★ Single source of truth. Order = visible legend order. */
+/** ★ Single source of truth. Order = visible legend order.
+ *
+ *  feat/i18n-ko-display-names-separation (★ PO 2026-06-30): LEGEND row 의
+ *  `label` 은 ★ 한국어만 (영문 코드 WHO/WHAT/RESOURCE 등 노출 0). 내부
+ *  식별자 (`bucket`, `subBucket`, `key`, `entity_types`) 는 코드네임
+ *  유지 — 회귀 0. */
 export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
-  // WHO — 형태 분리 (sphere / cube / diamond), 색 미세 분리 (teal / cyan / lime).
+  // WHO 묶음 — 형태 분리 (sphere / cube / diamond), 색 미세 분리.
+  // 라벨은 한국어 단일 토큰 (사람 / 조직 / 그룹).
   {
     key: 'person',
     bucket: 'WHO',
     subBucket: 'person',
-    label: 'WHO · 사람',
+    label: '사람',
     entity_types: ['person'],
     shape: 'sphere',
     color: ENTITY_COLORS.person,
@@ -70,7 +76,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     key: 'organization',
     bucket: 'WHO',
     subBucket: 'organization',
-    label: 'WHO · 조직',
+    label: '조직',
     entity_types: ['organization'],
     shape: 'cube',
     color: ENTITY_COLORS.organization,
@@ -79,18 +85,18 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     key: 'group',
     bucket: 'WHO',
     subBucket: 'group',
-    label: 'WHO · 그룹',
+    label: '그룹',
     entity_types: ['group'],
     shape: 'diamond',
     color: ENTITY_COLORS.group,
   },
-  // WHAT — ★ V1+ sub-bucket 분리 (RESOURCE / KNOWLEDGE / TASK). 색은 같은
-  // amber 공유 (PO 결정), 형태와 한국어 안내가 의미를 전달한다.
+  // WHAT 묶음 — sub-bucket 분리 (RESOURCE / KNOWLEDGE / TASK). 색은 같은
+  // amber 공유, 형태와 한국어 라벨이 의미 전달.
   {
     key: 'what-resource',
     bucket: 'WHAT',
     subBucket: 'RESOURCE',
-    label: 'WHAT/RESOURCE · 자원/제품',
+    label: '자원·제품',
     entity_types: ['resource', 'product'],
     shape: 'cube',
     color: ENTITY_COLORS.product,
@@ -99,7 +105,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     key: 'what-knowledge',
     bucket: 'WHAT',
     subBucket: 'KNOWLEDGE',
-    label: 'WHAT/KNOWLEDGE · 개념/지식',
+    label: '개념·지식',
     entity_types: ['concept', 'knowledge'],
     shape: 'sphere',
     color: ENTITY_COLORS.concept,
@@ -108,7 +114,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     key: 'what-task',
     bucket: 'WHAT',
     subBucket: 'TASK',
-    label: 'WHAT/TASK · 행위/역할',
+    label: '행위·역할',
     // procedure / service / problem / metric — backend taxonomy 의 "task"
     // family. ★ entity_types 에 없는 새 토큰이 들어와도 unknown 으로 fallback
     // 하므로 안전. metric 도 여기에 끼워 두면 metric 노드가 LEGEND 한 자리에
@@ -121,7 +127,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
   {
     key: 'event',
     bucket: 'EVENT',
-    label: 'EVENT · 이벤트',
+    label: '사건',
     entity_types: ['event', 'artifact'],
     shape: 'roundedSquare',
     color: ENTITY_COLORS.event,
@@ -131,7 +137,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
   {
     key: 'place',
     bucket: 'WHERE',
-    label: 'WHERE · 장소',
+    label: '장소',
     entity_types: ['place', 'location', 'region', 'venue'],
     shape: 'pin',
     color: ENTITY_COLORS.place,
@@ -142,7 +148,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
   {
     key: 'claim',
     bucket: 'CLAIM',
-    label: '발언 · claim',
+    label: '발언',
     entity_types: [],
     shape: 'dot',
     color: CLAIM_NODE_COLOR,
@@ -152,7 +158,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
   {
     key: 'unknown',
     bucket: 'unknown',
-    label: '기타 · unknown',
+    label: '기타',
     entity_types: [],
     shape: UNKNOWN_SHAPE,
     color: UNKNOWN_COLOR,

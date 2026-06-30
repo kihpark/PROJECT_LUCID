@@ -133,14 +133,19 @@ describe('StellarLeftPanel (fix/stellar-leftpanel-simplify)', () => {
     expect(onChange).toHaveBeenCalledWith('where', false);
   });
 
-  it('ENTITY labels carry the human-readable Korean bucket names', () => {
+  it('엔티티 라벨 = 한국어 표시명 (영문 코드 WHO/WHAT/WHERE 0) — ★ feat/i18n-ko-display-names-separation (PO 2026-06-30)', () => {
     harness();
     const panel = screen.getByTestId('stellar-left-panel');
-    expect(panel.textContent).toContain('WHO');
-    expect(panel.textContent).toContain('사람/조직');
-    expect(panel.textContent).toContain('WHAT');
-    expect(panel.textContent).toContain('개념/사건');
-    expect(panel.textContent).toContain('WHERE');
+    // ★ 사용자 노출 = 한국어만.
+    expect(panel.textContent).toContain('인물');
+    expect(panel.textContent).toContain('대상');
     expect(panel.textContent).toContain('장소');
+    expect(panel.textContent).toContain('기타');
+    // ★ 영문 코드네임 노출 0.
+    expect(panel.textContent).not.toMatch(/WHO|WHAT|WHERE/);
+    // 내부 식별자 (data-testid) 는 코드명 유지 (회귀 0).
+    expect(screen.getByTestId('stellar-filter-entity-who')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-filter-entity-what')).toBeInTheDocument();
+    expect(screen.getByTestId('stellar-filter-entity-where')).toBeInTheDocument();
   });
 });

@@ -78,7 +78,10 @@ export function PendingQueueView({ spaceId }: Props) {
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       <header className="mb-6">
-        <h1 className="text-2xl font-light mb-4">Pending Queue</h1>
+        {/* feat/i18n-ko-display-names-separation (★ PO 2026-06-30) —
+          * /pending 라우트 = DECIDE (검증 대기열). 한국어 H1. 내부 컴포넌트 /
+          * 라우트는 코드명 유지. */}
+        <h1 className="text-2xl font-light mb-4">검증 대기열</h1>
         <div className="flex border-b border-border-subtle gap-1" role="tablist">
           {(['대기중', '자동수락'] as Tab[]).map((tab) => (
             <button
@@ -107,7 +110,7 @@ export function PendingQueueView({ spaceId }: Props) {
           />
           <section aria-label="Queue">
             {busy && page === null && (
-              <p className="text-text-secondary text-sm">Loading...</p>
+              <p className="text-text-secondary text-sm">불러오는 중…</p>
             )}
             {error && (
               <p role="alert" className="text-accent-error text-sm">
@@ -130,7 +133,7 @@ export function PendingQueueView({ spaceId }: Props) {
         <div className="rounded-lg border border-dashed border-border-subtle p-12 text-center">
           <p className="text-text-secondary">자동 수락된 항목이 여기 표시됩니다.</p>
           <p className="text-xs text-text-muted mt-2">
-            Auto-accepted facts are reviewed periodically and don&apos;t require manual validation.
+            자동 수락된 사실은 주기적으로 재검토되며 즉시 검증이 필요하지 않습니다.
           </p>
         </div>
       )}

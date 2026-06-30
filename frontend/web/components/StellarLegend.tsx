@@ -192,7 +192,7 @@ export function StellarLegend(props: StellarLegendProps = {}): React.ReactElemen
             fontWeight: 600,
           }}
         >
-          LEGEND · 범례
+          범례
         </span>
         <button
           type="button"

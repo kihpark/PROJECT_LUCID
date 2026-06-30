@@ -58,7 +58,12 @@ describe('StellarEntityCard render', () => {
       <StellarEntityCard entity={entity} allFacts={[entity]} onClose={() => {}} />,
     );
     expect(screen.getByTestId('stellar-entity-card-name').textContent).toBe('한국은행');
-    expect(screen.getByTestId('stellar-entity-card-type').textContent).toBe('organization');
+    // feat/i18n-ko-display-names-separation (★ PO 2026-06-30) — entity_type
+    // 표시 = 한국어 (organization → 조직). raw token 은 data-entity-type 으로
+    // 보존 (테스트 / 디버그 hook).
+    const typeEl = screen.getByTestId('stellar-entity-card-type');
+    expect(typeEl.textContent).toBe('조직');
+    expect(typeEl.getAttribute('data-entity-type')).toBe('organization');
   });
 
   it('shows fact counts by fact_type bucket', () => {
@@ -189,7 +194,9 @@ describe('v2 entity-node + links (★ fix/stellar-cards-entity-node-compat)', ()
       />,
     );
     expect(screen.getByTestId('stellar-entity-card-name').textContent).toBe('강재호');
-    expect(screen.getByTestId('stellar-entity-card-type').textContent).toBe('person');
+    // feat/i18n-ko-display-names-separation (★ PO 2026-06-30) — person → 사람.
+    expect(screen.getByTestId('stellar-entity-card-type').textContent).toBe('사람');
+    expect(screen.getByTestId('stellar-entity-card-type').getAttribute('data-entity-type')).toBe('person');
     expect(screen.getByTestId('stellar-entity-card-count-action').textContent).toContain(
       '3건',
     );

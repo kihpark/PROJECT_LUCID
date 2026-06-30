@@ -119,7 +119,7 @@ function PanelHeader({
           fontWeight: 600,
         }}
       >
-        STELLAR · EDGE · {count}건
+        지식그래프 · 관계 · {count}건
       </span>
       <button
         type="button"
