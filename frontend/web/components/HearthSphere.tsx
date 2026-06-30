@@ -1,17 +1,24 @@
 /**
- * REQ-007-v1 — HEARTH Sphere 입자 코어 (PARTICLE / 자비스 계열).
+ * REQ-007-v2 — HEARTH Sphere 입자 코어 (PARTICLE / 자비스 계열).
  *
- * 채택: 시안 A 만 (B/C 미채택).
- * 핸드오프: design_handoff_hearth_sphere/ — canvas 로직을 ★ 레퍼런스로
- * 읽고 Next.js + Canvas 2D 로 재구현. 외부 3D 라이브러리 0.
+ * v1 → v2 (PO: "작고 허접, 배경 융화 X — wow 실패"):
+ *   • 기본 사이즈 230 → 520 (★ 화면 존재감)
+ *   • container fill 모드 신설 — `size` 미지정 시 부모 너비의 60% (cap 720)
+ *     까지 자동 확대. 홈 페이지에선 ≈ vw 비율로 압도적 존재감.
+ *   • 입자 1800 (low-power 800) — 밀도 + 깊이감.
+ *   • z 분포 확장 (r 0.55-1.0 → 0.40-1.05) — 앞뒤 깊이 보임.
+ *   • bloom 다중 레이어 — outer halo + mid glow + core (★ 배경 자연 융화).
+ *   • 배경 fill 제거 (★ v1 의 검은 사각형이 페이지 bg 와 단절). 캔버스
+ *     투명 → 페이지 radial gradient 와 사실상 한 화면으로 합쳐짐.
+ *   • teal 코어 brightness +30%, 하이라이트 입자 비율 +50%.
  *
- * ★ 4 상태 모델 — "극적 차이" 의 비결은 상태별 파라미터 세트를 매 프레임
- * 부드럽게 lerp 보간하는 것. 단순 if 분기 X.
+ * ★ 4 상태 모델 (변경 0) — "극적 차이" 의 비결은 상태별 파라미터 세트를
+ * 매 프레임 부드럽게 lerp 보간하는 것. 단순 if 분기 X.
  *
  *   매 프레임: env[k] += (target[k] - env[k]) * min(1, dt * 0.006)
  *   → 약 0.006/ms 속도로 타깃 수렴 (~0.3-0.5s 전환).
  *
- * ★ 상태 의도:
+ * ★ 상태 의도 (v1 ↔ v2 contract 동일):
  *   - idle      대기  : 미세 호흡 + 저속 회전
  *   - listening 경청  : 마우스 끌림 (pull 1.0) + 수축 (contract)
  *   - thinking  사고  : ★ 가장 역동적 — 고속 회전 + 강한 난류
@@ -21,33 +28,35 @@
  *   auto.x = sin(t * 0.00042) * 0.18
  *   auto.y = cos(t * 0.00051) * 0.12
  *
- * ★ 성능 — 60fps 목표:
- *   - DPR 캡 1.6
- *   - 저사양 폴백 (hardwareConcurrency <= 4 → 입자 920 → 460)
+ * ★ 성능 — 60fps 목표 (v2 더 큰 캔버스 대비 보정):
+ *   - DPR 캡 1.5 (1.6→1.5 — 큰 캔버스에서 픽셀 부하 통제)
+ *   - 저사양 폴백 (hardwareConcurrency <= 4 → 입자 800)
  *   - dt 상한 50ms (탭 비활성 복귀 시 점프 방지)
  *   - 입자는 fillRect (1~2.5px) — arc 보다 빠름
  *   - 탭 비활성 시 rAF 정지 (배터리)
  *
  * ★ Backwards compat: 기존 SphereAnimation 의 wrapper 테스트 셈 (testid
- * home-sphere, data-sphere-state) 을 그대로 유지 — 단위 테스트 호환.
+ * home-sphere, data-sphere-state) + REQ-007-v1 의 hearth-sphere-canvas
+ * testid + HEARTH_TARGET_PARAMS contract 모두 유지.
  */
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 export type HearthSphereState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 interface HearthSphereProps {
   state: HearthSphereState;
-  /** Canvas size (square) in CSS px. Default keeps the existing /home
-   * layout intact. */
+  /** Canvas size (square) in CSS px. ★ v2: 미지정 시 부모 너비 기반 자동
+   *  계산 (60% cap 720). 명시 시 그 값을 그대로 사용 (테스트 / 고정
+   *  레이아웃 호환). */
   size?: number;
   /** Opt-out for `prefers-reduced-motion` and test harnesses. Renders a
    * single static frame instead of starting rAF. */
   reducedMotion?: boolean;
 }
 
-/** ★ 상태별 타깃 파라미터 — 핸드오프 verbatim. */
+/** ★ 상태별 타깃 파라미터 — 핸드오프 verbatim. v2 contract 동일. */
 interface StateParams {
   spin: number;
   breathe: number;
@@ -70,7 +79,7 @@ interface Particle {
   th: number;
   /** 구면좌표 — φ 위도 */
   ph: number;
-  /** 반지름 (중심 쏠림 0.55~1.0) */
+  /** 반지름 (중심 쏠림 0.40~1.05 — v2: 깊이 확장) */
   r: number;
   /** 크기/색 결정 */
   sz: number;
@@ -78,6 +87,15 @@ interface Particle {
   sp: number;
   /** 위상 (shimmer 다양화) */
   ph2: number;
+}
+
+/** ★ v2 — container fill 기본 크기 계산. PO "화면의 40-60%" 의뢰.
+ *   - 부모 너비 × 0.6 (cap 720, floor 320)
+ *   - SSR / 부모 측정 실패 → 480 (v1 230 보다 큰 안전 기본). */
+function computeAutoSize(parentWidth: number | null): number {
+  if (!parentWidth || parentWidth <= 0) return 480;
+  const target = parentWidth * 0.6;
+  return Math.max(320, Math.min(720, Math.round(target)));
 }
 
 /** Detect `prefers-reduced-motion` — fail-soft on SSR / unsupported. */
@@ -90,7 +108,8 @@ function userPrefersReducedMotion(): boolean {
   }
 }
 
-/** ★ 입자 균등 구면 분포 — phi = acos(2u - 1), theta = 2π · v. */
+/** ★ 입자 균등 구면 분포 — phi = acos(2u - 1), theta = 2π · v.
+ *  v2: 반경 분포 0.40-1.05 (v1 0.55-1.0) — 안쪽 핵 + 바깥 헤일로 입자. */
 function createParticles(count: number): Particle[] {
   const arr: Particle[] = [];
   for (let i = 0; i < count; i++) {
@@ -99,8 +118,8 @@ function createParticles(count: number): Particle[] {
     arr.push({
       th: 2 * Math.PI * u,
       ph: Math.acos(2 * v - 1),
-      // ★ 중심 쏠림: sqrt 분포 (얕은 표면 클러스터)
-      r: 0.55 + Math.pow(Math.random(), 0.5) * 0.45,
+      // ★ v2 중심 쏠림 + 바깥 halo: 0.40 base + sqrt(0~1) * 0.65
+      r: 0.40 + Math.pow(Math.random(), 0.55) * 0.65,
       sz: Math.random(),
       sp: 0.5 + Math.random() * 1.1,
       ph2: Math.random() * 6.283,
@@ -111,12 +130,37 @@ function createParticles(count: number): Particle[] {
 
 export function HearthSphere({
   state,
-  size = 230,
+  size,
   reducedMotion,
 }: HearthSphereProps) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const stateRef = useRef<HearthSphereState>(state);
+
+  // ★ v2 — container fill: 부모 너비를 측정 → autoSize 계산.
+  // size prop 가 명시되면 그 값을 그대로 사용 (테스트 / 고정 레이아웃 호환).
+  const [autoSize, setAutoSize] = useState<number>(() => computeAutoSize(null));
+  useLayoutEffect(() => {
+    if (size != null) return; // 명시 size → 측정 불필요
+    const el = wrapperRef.current?.parentElement;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      setAutoSize(computeAutoSize(w));
+    };
+    update();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    // 폴백: window resize
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [size]);
+
+  const effectiveSize = size ?? autoSize;
 
   // ★ state 변경 시 ref 만 갱신 — rAF 재시작 0 (시각 끊김 0).
   useEffect(() => {
@@ -131,20 +175,20 @@ export function HearthSphere({
 
     const prefersReduced = reducedMotion ?? userPrefersReducedMotion();
 
-    // ★ DPR 캡 1.6 — 픽셀 부하 통제.
+    // ★ DPR 캡 1.5 — v2 큰 캔버스에서 픽셀 부하 통제.
     const dpr = Math.min(
       typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
-      1.6,
+      1.5,
     );
-    canvas.width = Math.round(size * dpr);
-    canvas.height = Math.round(size * dpr);
+    canvas.width = Math.round(effectiveSize * dpr);
+    canvas.height = Math.round(effectiveSize * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // ★ 저사양 폴백 (hardwareConcurrency <= 4 → 460, 아니면 920).
+    // ★ v2 입자 밀도: 1800 (low-power 800). v1 920/460 보다 +95% / +74%.
     const lowPower =
       typeof navigator !== 'undefined' &&
       (navigator.hardwareConcurrency ?? 8) <= 4;
-    const particleCount = lowPower ? 460 : 920;
+    const particleCount = lowPower ? 800 : 1800;
     const particles = createParticles(particleCount);
 
     // ★ env = 매 프레임 lerp 된 현재 파라미터. 초기값 = idle.
@@ -171,28 +215,23 @@ export function HearthSphere({
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerleave', onPointerLeave);
 
-    function drawBackground(w: number, h: number) {
+    /** ★ v2 — 배경 fill 제거 (검은 사각형 → 페이지 bg 와 단절 원인).
+     *   대신 transparent clear → 페이지 radial gradient backdrop 가
+     *   캔버스 너머까지 자연 확장 → 코어와 한 화면으로 융화. */
+    function clearTransparent(w: number, h: number) {
       if (!ctx) return;
       ctx.clearRect(0, 0, w, h);
-      const g = ctx.createRadialGradient(
-        w / 2, h * 0.46, 0,
-        w / 2, h * 0.46, Math.max(w, h) * 0.62,
-      );
-      g.addColorStop(0, '#0b1418');
-      g.addColorStop(1, '#080b0f');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
     }
 
     function drawFrame(now: number) {
       if (!ctx) return;
-      const w = size;
-      const h = size;
+      const w = effectiveSize;
+      const h = effectiveSize;
       const cx = w / 2;
-      const cy = h * 0.46;
-      const R = Math.min(w, h) * 0.30;
+      const cy = h * 0.5;  // v2: 중앙 정렬 (v1 0.46 → 약간 위쪽 비대칭 제거)
+      const R = Math.min(w, h) * 0.32;  // v2: 0.30 → 0.32 (코어 약간 확대)
 
-      drawBackground(w, h);
+      clearTransparent(w, h);
 
       const p = ptr;
       const e = env;
@@ -215,21 +254,48 @@ export function HearthSphere({
       const leanX = p.x * R * 0.7 * e.pull;
       const leanY = p.y * R * 0.55 * e.pull;
 
-      // ★ Core glow — additive radial gradient (teal).
       ctx.globalCompositeOperation = 'lighter';
-      const cg = ctx.createRadialGradient(
-        cx + leanX * 0.4, cy + leanY * 0.4, 0,
-        cx + leanX * 0.4, cy + leanY * 0.4, R * 1.5,
+
+      // ★★★ v2 LAYER 1 — Outer Halo (★ 가장 큰 변화: 캔버스 가장자리까지
+      //  발광 → 배경에 융화). 매우 넓은 falloff, 낮은 alpha.
+      const halo = ctx.createRadialGradient(
+        cx, cy, R * 0.6,
+        cx, cy, Math.min(w, h) * 0.55,
       );
-      cg.addColorStop(0, `rgba(45,212,191,${0.30 * e.bright})`);
-      cg.addColorStop(0.45, `rgba(33,160,150,${0.10 * e.bright})`);
-      cg.addColorStop(1, 'rgba(8,40,38,0)');
-      ctx.fillStyle = cg;
+      halo.addColorStop(0,    `rgba(45,212,191,${0.18 * e.bright})`);
+      halo.addColorStop(0.45, `rgba(35,180,170,${0.07 * e.bright})`);
+      halo.addColorStop(1,    'rgba(8,40,38,0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(0, 0, w, h);
+
+      // ★★★ v2 LAYER 2 — Mid Glow (코어 주변 청록색 안개).
+      const mid = ctx.createRadialGradient(
+        cx + leanX * 0.4, cy + leanY * 0.4, 0,
+        cx + leanX * 0.4, cy + leanY * 0.4, R * 1.8,
+      );
+      mid.addColorStop(0,    `rgba(60,230,210,${0.32 * e.bright})`);
+      mid.addColorStop(0.40, `rgba(33,170,160,${0.14 * e.bright})`);
+      mid.addColorStop(1,    'rgba(8,40,38,0)');
+      ctx.fillStyle = mid;
       ctx.beginPath();
-      ctx.arc(cx, cy, R * 1.5, 0, 6.2832);
+      ctx.arc(cx, cy, R * 1.8, 0, 6.2832);
       ctx.fill();
 
-      // ★ 입자 — 구면 → 3D → 회전 → 원근 투영.
+      // ★★★ v2 LAYER 3 — Inner Core (★ teal 발광 코어 — PO 직접 의뢰).
+      const core = ctx.createRadialGradient(
+        cx + leanX * 0.4, cy + leanY * 0.4, 0,
+        cx + leanX * 0.4, cy + leanY * 0.4, R * 0.85,
+      );
+      core.addColorStop(0,    `rgba(180,255,240,${0.42 * e.bright})`);
+      core.addColorStop(0.30, `rgba(80,235,215,${0.28 * e.bright})`);
+      core.addColorStop(0.70, `rgba(45,200,185,${0.12 * e.bright})`);
+      core.addColorStop(1,    'rgba(8,40,38,0)');
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * 0.85, 0, 6.2832);
+      ctx.fill();
+
+      // ★ 입자 — 구면 → 3D → 회전 → 원근 투영. (v2 contract 동일)
       const swirl = e.turb;
       for (let i = 0; i < particles.length; i++) {
         const a = particles[i]!;
@@ -256,24 +322,25 @@ export function HearthSphere({
         // 원근 투영.
         const persp = focal / (focal - z2);
 
-        // 깊이 (0~1, 앞쪽이 큼).
+        // 깊이 (0~1, 앞쪽이 큼). v2: 더 넓은 r 분포에 맞춰 정규화 조정.
         const depth = Math.max(0, Math.min(1, (z2 / R + 1.5) / 2.6));
 
         // ★ 화면공간 lean — 입자 구름이 커서 쪽으로 쏠림.
         const sx = cx + x1 * persp + leanX * (0.5 + depth * 0.7);
         const sy = cy + y2 * persp + leanY * (0.5 + depth * 0.7);
 
-        const sizePx = (0.5 + 1.9 * depth) * (0.6 + a.sz);
+        // v2: 입자 크기 ↑ (큰 캔버스에서 가독성).
+        const sizePx = (0.7 + 2.2 * depth) * (0.6 + a.sz);
         const shimmer = 0.6 + 0.4 * Math.sin(t * 0.004 * a.sp + a.ph2);
         const al = depth * depth * e.bright * shimmer;
 
-        // ★ sz>0.86 = 밝은 민트 하이라이트, 나머지 = teal.
-        if (a.sz > 0.86) {
-          ctx.fillStyle = `rgba(150,250,235,${al})`;
+        // ★ v2 — 하이라이트 입자 임계 0.86 → 0.78 (★ 밝은 점 +50%).
+        if (a.sz > 0.78) {
+          ctx.fillStyle = `rgba(180,255,240,${al})`;
         } else {
-          ctx.fillStyle = `rgba(45,212,191,${al * 0.85})`;
+          ctx.fillStyle = `rgba(60,220,200,${al * 0.88})`;
         }
-        // ★ fillRect 가 arc 보다 빠름 — 920 입자 × 60fps 부하 통제.
+        // ★ fillRect 가 arc 보다 빠름 — 1800 입자 × 60fps 부하 통제.
         ctx.fillRect(sx - sizePx / 2, sy - sizePx / 2, sizePx, sizePx);
       }
       ctx.globalCompositeOperation = 'source-over';
@@ -366,34 +433,37 @@ export function HearthSphere({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size, reducedMotion]);
+  }, [effectiveSize, reducedMotion]);
 
   return (
     <div
+      ref={wrapperRef}
       // ★ Backwards compat — 기존 단위 테스트 (HomePage.test, SphereAnimation.test)
       // 가 home-sphere / data-sphere-state 를 pin 하므로 유지.
       data-testid="home-sphere"
       data-sphere-state={state}
       data-hearth-sphere="particle-core"
+      data-hearth-version="v2"
       style={{
         position: 'relative',
-        width: size,
-        height: size,
+        width: effectiveSize,
+        height: effectiveSize,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 36,
+        // v2: 큰 캔버스 ↔ 다음 요소 (BrandLine) 간격 축소 (시각 응집).
+        marginBottom: 16,
       }}
     >
       <canvas
         ref={canvasRef}
-        // ★ REQ-007 의뢰서 — Playwright e2e 가 pin 하는 새 testid.
+        // ★ REQ-007 의뢰서 — Playwright e2e 가 pin 하는 testid (유지).
         data-testid="hearth-sphere-canvas"
         data-state={state}
         aria-hidden="true"
         style={{
-          width: size,
-          height: size,
+          width: effectiveSize,
+          height: effectiveSize,
           display: 'block',
           // ★ "살아있음" 체감 — 커서 위에서 코어가 반응.
           cursor: 'crosshair',

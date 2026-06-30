@@ -325,8 +325,29 @@ function ActiveRecallInput({
   );
 }
 
-/** Component 7 — 겸손 한 줄. */
-function HumilityLine({ facts }: { facts: number }) {
+/** Component 7 — 실데이터 지표 한 줄 (REQ-008 v2).
+ *
+ * v1 (legacy): "제가 아는 건 당신이 검증한 N개의 사실뿐입니다…" — facts
+ *   하나만 노출. PO: "사실 99 카피만 보임 → 실데이터 4 지표로 교체".
+ *
+ * v2 (REQ-008): "검증된 사실 N · 엔티티 M · 출처 P · 이번 주 +K" — 4 지표
+ *   모두 brief.totals 에서 직접. ★ 별도 endpoint 신설 0 (이미 /api/home/brief
+ *   가 4 필드 모두 노출 — Discovery D2 확인).
+ *
+ * ★ skeleton 처리: brief 가 fail-soft null 일 때만 placeholder 노출.
+ *   여기는 HomePopulated 안 (brief 가 보장됨) 이므로 항상 실값.
+ */
+function HumilityLine({
+  facts,
+  entities,
+  sources,
+  thisWeek,
+}: {
+  facts: number;
+  entities: number;
+  sources: number;
+  thisWeek: number;
+}) {
   return (
     <p
       data-testid="home-humility"
@@ -334,14 +355,28 @@ function HumilityLine({ facts }: { facts: number }) {
         marginTop: 15,
         marginBottom: 0,
         fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        fontSize: 12,
+        fontSize: 12.5,
         letterSpacing: '0.02em',
         color: TEXT_DIMMEST,
         textAlign: 'center',
       }}
     >
-      제가 아는 건 당신이 검증한 {facts}개의 사실뿐입니다. 그 경계 안에서
-      답하겠습니다.
+      검증된 사실{' '}
+      <span data-testid="home-humility-facts" style={{ color: '#aebfc2', fontWeight: 600 }}>
+        {facts}
+      </span>{' '}
+      · 엔티티{' '}
+      <span data-testid="home-humility-entities" style={{ color: '#aebfc2', fontWeight: 600 }}>
+        {entities}
+      </span>{' '}
+      · 출처{' '}
+      <span data-testid="home-humility-sources" style={{ color: '#aebfc2', fontWeight: 600 }}>
+        {sources}
+      </span>{' '}
+      · 이번 주{' '}
+      <span data-testid="home-humility-this-week" style={{ color: ACCENT, fontWeight: 600 }}>
+        +{thisWeek}
+      </span>
     </p>
   );
 }
@@ -737,7 +772,12 @@ function HomePopulated({
         spaceId={spaceId}
         onStateChange={onSphereState}
       />
-      <HumilityLine facts={brief.totals.facts} />
+      <HumilityLine
+        facts={brief.totals.facts}
+        entities={brief.totals.entities}
+        sources={brief.totals.sources}
+        thisWeek={brief.totals.this_week_validated}
+      />
       <TodayBriefingCard brief={brief} />
       <QuickStats brief={brief} />
     </div>
