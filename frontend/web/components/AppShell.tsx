@@ -22,6 +22,7 @@ import { clearToken, clearCurrentSpace } from '@/lib/auth';
 import { logoutUser } from '@/lib/api';
 import { useAuthMe } from '@/lib/useAuthMe';
 import { useHomeBrief } from '@/lib/useHomeBrief';
+import { sectionLabelKo } from '@/lib/displayNames';
 
 const ACCENT = '#3fe0c6';
 const BG = '#06080b';
@@ -365,18 +366,26 @@ export function AppShell({ children, userName, userEmail }: AppShellProps) {
   const name = userName ?? meName ?? defaultUserName();
   const email = userEmail ?? me?.email ?? defaultUserEmail();
 
+  // feat/i18n-ko-display-names-separation (★ PO 2026-06-30) —
+  // 표시 라벨은 내부 코드네임 (HEARTH / RECALL / STELLAR / DECIDE / LEDGER)
+  // 을 sectionLabelKo() 로 한국어 매핑 → 영문 코드 노출 0.
+  // 내부 라우트 (/home, /recall, /stellar, /pending, /ledger) 는 코드네임
+  // 유지 (회귀 0).
   const nav: NavItem[] = [
-    { href: '/home', label: '홈' },
-    { href: '/recall', label: 'Recall' },
+    { href: '/home', label: sectionLabelKo('HEARTH') },
+    { href: '/recall', label: sectionLabelKo('RECALL') },
     // B-62 — Stellar 3D view is a top-level navigation target so PO can
     // jump in from anywhere without hand-typing the URL. No badge — there
     // are no count semantics on the canvas (recall has search, stellar
     // has the whole graph slice).
-    { href: '/stellar', label: 'Stellar' },
+    { href: '/stellar', label: sectionLabelKo('STELLAR') },
     // feat/hearth-oracle-merge — "어시스턴트" tab removed. ORACLE is now
     // absorbed into HEARTH (the /home sphere). The /assistant route
     // redirects to /home for backwards compatibility with deep links.
-    { href: '/pending', label: '검증', count: pendingCount },
+    { href: '/pending', label: sectionLabelKo('DECIDE'), count: pendingCount },
+    // feat/i18n-ko-display-names-separation — LEDGER (/ledger) 가 nav 의
+    // primary 위치에서 노출되어야 한다는 PO 의뢰 (acceptance #1).
+    { href: '/ledger', label: sectionLabelKo('LEDGER') },
   ];
 
   function isActive(href: string): boolean {

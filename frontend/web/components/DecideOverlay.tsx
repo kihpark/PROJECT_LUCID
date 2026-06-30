@@ -242,7 +242,10 @@ export function DecideOverlay({
     <div className="mx-auto max-w-3xl px-4 py-8">
       <header className="mb-6">
         <div className="flex items-baseline justify-between gap-4 mb-2">
-          <h1 className="text-xl font-light">Decide</h1>
+          {/* feat/i18n-ko-display-names-separation (★ PO 2026-06-30) —
+            * DECIDE 코드네임 → 한국어 표시 "검증". 내부 컴포넌트명 /
+            * data-testid 는 코드명 유지. */}
+          <h1 className="text-xl font-light">검증</h1>
         </div>
         <p className="text-sm text-text-secondary">
           <a

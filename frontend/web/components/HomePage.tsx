@@ -891,7 +891,7 @@ function GettingStartedCard() {
             color: TEXT_TINY,
           }}
         >
-          GETTING STARTED
+          시작하기
         </span>
       </header>
       {steps.map(([title, desc], idx) => (

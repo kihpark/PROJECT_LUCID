@@ -109,17 +109,26 @@ describe('AppShell', () => {
 
     const nav = screen.getByTestId('app-shell-nav');
     expect(nav).toBeInTheDocument();
-    // four nav items in this order: 홈 / Recall / Stellar / 검증 (B-62)
+    // feat/i18n-ko-display-names-separation (★ PO 2026-06-30) — nav 표시명은
+    // 한국어 (HEARTH→홈 / RECALL→검색 / STELLAR→지식그래프 / DECIDE→검증 /
+    // LEDGER→기록). 영문 코드네임 노출 0. data-testid 는 라우트 token
+    // 그대로 유지 (회귀 0).
     expect(screen.getByTestId('app-shell-nav-home')).toHaveTextContent('홈');
     expect(screen.getByTestId('app-shell-nav-recall')).toHaveTextContent(
-      'Recall',
+      '검색',
     );
     expect(screen.getByTestId('app-shell-nav-stellar')).toHaveTextContent(
-      'Stellar',
+      '지식그래프',
     );
     expect(screen.getByTestId('app-shell-nav-pending')).toHaveTextContent(
       '검증',
     );
+    expect(screen.getByTestId('app-shell-nav-ledger')).toHaveTextContent(
+      '기록',
+    );
+    // ★ 사용자 노출 영문 코드 0 — nav 텍스트에 코드네임 부재 검증.
+    expect(nav.textContent).not.toMatch(/RECALL|STELLAR|HEARTH|HARVEST|DECIDE|LEDGER/);
+    expect(nav.textContent).not.toMatch(/Recall|Stellar|Hearth|Harvest|Decide|Ledger/);
 
     expect(
       screen.getByTestId('app-shell-profile-trigger'),

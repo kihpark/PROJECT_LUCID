@@ -2309,7 +2309,10 @@ export function RecallView({ spaceId }: Props) {
     <div className="px-4 py-6 mx-auto max-w-7xl" data-recall-mode={mode}>
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-light">Recall</h1>
+          {/* feat/i18n-ko-display-names-separation (★ PO 2026-06-30) —
+            * RECALL 코드네임 → 한국어 표시 "검색". 내부 컴포넌트명 / API /
+            * data-testid (recall-*) 는 코드명 유지 (회귀 0). */}
+          <h1 className="text-2xl font-light">검색</h1>
           <p className="text-sm text-text-secondary">
             그래프 안의 사실만 답합니다. 그래프 밖은 답하지 않습니다.
           </p>
@@ -2397,7 +2400,7 @@ export function RecallView({ spaceId }: Props) {
           )}
         </div>
         <ActionButton type="submit" variant="primary" disabled={busy || !query.trim()}>
-          {busy ? '검색 중…' : 'Recall'}
+          {busy ? '검색 중…' : '검색'}
         </ActionButton>
       </form>
 
