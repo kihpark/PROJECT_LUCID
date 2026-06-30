@@ -34,12 +34,39 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from typing import Any
 
 from api.storage.elasticsearch.client import LUCID_OBJECTS, get_client
-from api.structure.entity_resolver import _detect_lang, _looks_like_brand
+
+
+# REQ-004 STAGE 1d (PO 2026-06-30): entity_resolver.py DELETE 와 함께 옛
+# import 끊김. 두 helper 는 이 script 만 쓰므로 inline (★ 5-10 lines, 다른
+# 의존 0). gateway 의 normalize 와는 의도가 달라 (★ B-62-fix 의 brand-defense
+# vs gateway 의 surface 정규화) 별도 유지.
+_BRAND_SHAPE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,15}$")
+
+
+def _detect_lang(text: str) -> str:
+    """Crude heuristic — Hangul 한 글자라도 있으면 ko, 아니면 en."""
+    if not text:
+        return "en"
+    for ch in text:
+        if "가" <= ch <= "힣" or "ᄀ" <= ch <= "ᇿ" or "㄰" <= ch <= "㆏":
+            return "ko"
+    return "en"
+
+
+def _looks_like_brand(text: str | None) -> bool:
+    """B-62-fix: single Latin token, 2-16 chars = brand. 공백 있으면 X."""
+    if not text:
+        return False
+    s = str(text).strip()
+    if not s:
+        return False
+    return bool(_BRAND_SHAPE_RE.match(s))
 
 logger = logging.getLogger("lucid.scripts.relabel_legacy")
 
