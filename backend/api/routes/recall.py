@@ -974,7 +974,12 @@ def _facets_for(
 @router.get("/recall", response_model=RecallResponse)
 def recall(
     space_id: uuid.UUID,
-    q: str = Query(..., min_length=1, max_length=2000, description="Query"),
+    # ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 3) — entity-only scoped recall.
+    # 옛: `q` required (min_length=1) → autocomplete pick (q='', entity=[uid])
+    # 이 422 로 떨어졌다. fix: `q` optional. 둘 다 비면 _empty 로 단락,
+    # 둘 중 하나만 있어도 정상 작동 (entity-only = "이 entity 의 모든
+    # validated fact"; q-only = 기존 kNN search; 둘 다 = q kNN + entity AND filter).
+    q: str = Query(default="", max_length=2000, description="Query"),
     limit: int = Query(default=RECALL_DEFAULT_K, ge=1, le=RECALL_MAX_K),
     entity: list[str] = Query(default_factory=list, alias="entity"),
     include_retracted: bool = Query(
@@ -1041,31 +1046,59 @@ def recall(
     df = date_from if isinstance(date_from, datetime) else None
     dt = date_to if isinstance(date_to, datetime) else None
 
-    embedding = get_embedding(q)
-    if embedding is None:
-        return _empty("embedding_unavailable")
-
-    try:
-        hits = _knn_facts_validated_only(
-            list(embedding), str(ks.id), limit,
-            entity_filter_uids=list(entity_uids_in),
-            include_retracted=include_retracted_bool,
-            date_from=df,
-            date_to=dt,
-        )
-    except Exception as exc:  # noqa: BLE001 - degrade quietly
-        logger.warning("recall: ES kNN failed: %s", exc)
-        return _empty("es_unavailable")
+    # ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 3) — entity-only scoped recall.
+    # autocomplete pick (RecallView.onPickSuggestion) 은 q='' 로 entity uid
+    # 만 보낸다. kNN 은 q 가 비면 embedding 을 못 만들어 _empty 가 되지만,
+    # entity 가 있으면 그 entity 의 ALL validated facts 를 돌려주는 게
+    # 사용자 의도다. q + entity 둘 다 비면 기존처럼 empty.
+    q_norm = (q or "").strip()
+    if not q_norm and not entity_uids_in:
+        return _empty("no_query")
 
     facts: list[RecallFact] = []
-    for hit in hits:
-        score = float(hit.get("_score") or 0.0)
-        if score < threshold:
-            # Hits are sorted by score desc; first below-floor → stop.
-            break
-        fact = _hit_to_fact(hit)
-        if fact is not None:
-            facts.append(fact)
+
+    if not q_norm and entity_uids_in:
+        # entity-only path — _facts_for_entity 는 subject_uid / object_value
+        # 둘 다 (★ v3: object_value 가 entity uid) 잡아 준다. match_kind 는
+        # "entity_link" 로 두어 FE 가 🔗 badge 를 렌더하도록.
+        try:
+            seed_hits = _facts_for_entity(
+                list(entity_uids_in), str(ks.id), max_hits=limit * 3,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall: entity-only fetch failed: %s", exc)
+            seed_hits = []
+        for h in seed_hits:
+            fact = _hit_to_fact(h)
+            if fact is not None:
+                facts.append(
+                    fact.model_copy(update={"match_kind": "entity_link"})
+                )
+    else:
+        embedding = get_embedding(q_norm)
+        if embedding is None:
+            return _empty("embedding_unavailable")
+
+        try:
+            hits = _knn_facts_validated_only(
+                list(embedding), str(ks.id), limit,
+                entity_filter_uids=list(entity_uids_in),
+                include_retracted=include_retracted_bool,
+                date_from=df,
+                date_to=dt,
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade quietly
+            logger.warning("recall: ES kNN failed: %s", exc)
+            return _empty("es_unavailable")
+
+        for hit in hits:
+            score = float(hit.get("_score") or 0.0)
+            if score < threshold:
+                # Hits are sorted by score desc; first below-floor → stop.
+                break
+            fact = _hit_to_fact(hit)
+            if fact is not None:
+                facts.append(fact)
 
     # B-45-fix3: if no fact survives the kNN floor, try the entity
     # name path. Korean-text image facts often fail cross-lingual kNN

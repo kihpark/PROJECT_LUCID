@@ -77,14 +77,22 @@ interface Props {
 
 const OBJECT_REF_PATTERN = /^(?:obj-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
+// ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+// 옛: `${value} (미해석)` — UUID 가 화면에 노출됐다. v3 entity-id-only
+// 저장 구조 (object_value = entity uid) 에선 ★ 모든 entity 가 UUID 모양
+// 이라 사용자 화면 전체에 UUID 가 깔린다. fix: backend 가 label 을 못
+// 끌어온 경우 = "미해결 entity" 배지 (★ UUID X). v3 원칙: entity_id =
+// 내부 식별자, 표시 = canonical_name 만.
+const UNRESOLVED_ENTITY_LABEL = '미해결 entity';
+
 function resolveLabel(value: string | undefined, label: string | null | undefined): string {
   // Server-resolved label always wins.
   if (label) return label;
   if (!value) return '—';
-  // Backend signalled this looks like an entity uid but no label was
-  // found — surface a "(미해석)" marker matching FactCard's behaviour
-  // so the user sees the same recovery affordance everywhere.
-  if (OBJECT_REF_PATTERN.test(value)) return `${value} (미해석)`;
+  // Backend couldn't resolve the entity uid — surface a "미해결 entity"
+  // marker (★ UUID 노출 금지) so the user sees a recovery affordance
+  // without seeing the internal identifier.
+  if (OBJECT_REF_PATTERN.test(value)) return UNRESOLVED_ENTITY_LABEL;
   return value;
 }
 
@@ -536,10 +544,14 @@ function FactDetailModal({
           {(() => {
             const claimText = (fact.claim ?? '').trim();
             const reconstructed = !claimText || isReconstructedClaim(claimText);
+            // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1) — fact detail hero
+            // 도 UUID 노출 금지. 옛 fallback chain 의 끝 (fact.subject_uid /
+            // fact.object_value) 은 v3 entity-id-only 저장 구조 (B-35 canonical
+            // remap 후) 에선 ★ UUID. resolveLabel 로 통일.
             const subjectName =
-              subject?.name ?? fact.subject_label ?? fact.subject_uid;
+              subject?.name ?? resolveLabel(fact.subject_uid, fact.subject_label);
             const objectName =
-              object?.name ?? fact.object_label ?? fact.object_value;
+              object?.name ?? resolveLabel(fact.object_value, fact.object_label);
             const titleText = reconstructed
               ? `${subjectName} → ${predicateLabel(fact.predicate, fact.predicate_label)} → ${objectName}`
               : claimText;
@@ -691,7 +703,7 @@ function FactDetailModal({
                 className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
               >
                 <span className="font-medium">
-                  {subject?.name ?? fact.subject_label ?? fact.subject_uid}
+                  {subject?.name ?? resolveLabel(fact.subject_uid, fact.subject_label)}
                 </span>
                 {subject?.class && (
                   <span className="ml-2 text-xxs text-text-muted font-mono">
@@ -709,7 +721,7 @@ function FactDetailModal({
                 className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
               >
                 <span className="font-medium">
-                  {object?.name ?? fact.object_label ?? fact.object_value}
+                  {object?.name ?? resolveLabel(fact.object_value, fact.object_label)}
                 </span>
                 {object?.class && (
                   <span className="ml-2 text-xxs text-text-muted font-mono">
@@ -2071,9 +2083,13 @@ export function RecallView({ spaceId }: Props) {
     }
     return activeEntities.map((uid) => {
       const m = lookup.get(uid);
+      // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1) — chip fallback 도
+      // UUID 노출 금지. 옛: `m?.name ?? uid` → 첫 페이지 (facets 도착 전)
+      // 에 uid 가 chip 으로 깜빡 노출됐다. fix: backend 가 label 을 못
+      // 끌어오면 UNRESOLVED_ENTITY_LABEL.
       return {
         uid,
-        name: m?.name ?? uid,
+        name: m?.name ?? UNRESOLVED_ENTITY_LABEL,
         bucket: m?.bucket ?? '엔티티',
       };
     });

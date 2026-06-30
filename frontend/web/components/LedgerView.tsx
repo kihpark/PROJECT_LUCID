@@ -47,9 +47,16 @@ const PAGE_SIZE = 20;
 
 // Subject / object surface resolver — mirrors RecallView's resolveLabel
 // so a UUID/obj-N renders as the human-readable name when the server
-// supplied one, and falls back to a "(미해석)" marker otherwise.
+// supplied one, and falls back to a "미해결 entity" marker otherwise.
+//
+// ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+// 옛: `${value} (미해석)` — UUID 가 ledger 카드에 노출됐다. v3 entity-id-
+// only 저장 구조에선 ★ 모든 entity 가 UUID 모양. fix: backend 가 label 을
+// 못 끌어오면 "미해결 entity" 배지 only (★ UUID X).
 const OBJECT_REF_PATTERN =
   /^(?:obj-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+const UNRESOLVED_ENTITY_LABEL = '미해결 entity';
 
 function resolveLabel(
   value: string | undefined,
@@ -57,8 +64,15 @@ function resolveLabel(
 ): string {
   if (label) return label;
   if (!value) return '—';
-  if (OBJECT_REF_PATTERN.test(value)) return `${value} (미해석)`;
+  if (OBJECT_REF_PATTERN.test(value)) return UNRESOLVED_ENTITY_LABEL;
   return value;
+}
+
+// ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1) — entity deep-link 의 query
+// string 도 UUID 노출 면이다 (URL 바). label 이 없는 (미해결) entity 는
+// 링크 자체를 비워서 UUID 가 ?q= 에 실리지 않도록 한다.
+function isUnresolvedDisplay(display: string): boolean {
+  return display === UNRESOLVED_ENTITY_LABEL || display === '—';
 }
 
 // Pipe-claim artefact detection — same shape RecallView uses to surface
@@ -180,15 +194,25 @@ function LedgerCard({ fact }: LedgerCardProps) {
   const sourceUrls = (fact.source_uids ?? []).filter((s) =>
     s.startsWith('http'),
   );
-  // Deep-link target for entity refs — RECALL is the easiest stop on
-  // the entity trail since it has a built-in query box.
-  const subjectHref = `/recall?q=${encodeURIComponent(
-    fact.subject_label || fact.subject_uid,
-  )}`;
-  const objectHref = isObjectEntity
-    ? `/recall?q=${encodeURIComponent(fact.object_label || fact.object_value)}`
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1) — entity deep-link 의 query
+  // string 도 UUID 노출 면이다. 옛: `fact.subject_label || fact.subject_uid`
+  // → label 없으면 UUID 가 ?q= 에 실린다. fix: label 만 사용, 없으면
+  // 링크 자체를 비워서 UUID 가 URL 바에 노출되지 않게.
+  const subjectHref = !isUnresolvedDisplay(subjectDisplay) && fact.subject_label
+    ? `/recall?q=${encodeURIComponent(fact.subject_label)}`
+    : null;
+  const objectHref = isObjectEntity && fact.object_label
+    ? `/recall?q=${encodeURIComponent(fact.object_label)}`
     : null;
   const validatedAbsolute = new Date(fact.validated_at).toLocaleString();
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 4) — v3 SPO 표시.
+  // 옛 3-칼럼 grid (subject / predicate / object) 는 literal 가정 (object
+  // 가 literal 일 때만 의미가 있는 layout). v3 저장 = entity_id only,
+  // ACTION = `[subject canonical]─[predicate]→[object canonical]` (이름
+  // 조합) 이 PO 의 mental model. action fact 는 arrow row 로 렌더하고,
+  // claim / measurement / object-literal action 은 옛 3-칼럼 유지.
+  const isActionFact = fact.fact_type === 'action' || fact.fact_type == null;
+  const showV3Arrow = isActionFact && isObjectEntity;
   return (
     <article
       data-testid={`ledger-fact-${fact.fact_uid}`}
@@ -222,40 +246,93 @@ function LedgerCard({ fact }: LedgerCardProps) {
         )}
       </p>
       <FactTypeStrip fact={fact} factUid={fact.fact_uid} lang="kr" />
-      <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-2 mb-3">
-        <div>
-          <dt className="opacity-60">subject</dt>
-          <dd>
+      {showV3Arrow ? (
+        // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 4) — v3 ACTION 표시.
+        // `[subject canonical]─[predicate]→[object canonical]` 이름 조합.
+        <div
+          data-testid={`ledger-fact-${fact.fact_uid}-v3-arrow`}
+          className="text-sm flex flex-wrap items-center gap-2 mb-3"
+        >
+          {subjectHref ? (
             <Link
               href={subjectHref}
               data-testid={`ledger-fact-${fact.fact_uid}-subject-link`}
-              className="text-accent-cool hover:underline"
+              className="font-medium text-accent-cool hover:underline"
             >
               {subjectDisplay}
             </Link>
-          </dd>
+          ) : (
+            <span
+              data-testid={`ledger-fact-${fact.fact_uid}-subject`}
+              className="font-medium"
+            >
+              {subjectDisplay}
+            </span>
+          )}
+          <span className="text-text-muted font-mono text-xs">
+            ─[{predicateLabel(fact.predicate, fact.predicate_label)}]→
+          </span>
+          {objectHref ? (
+            <Link
+              href={objectHref}
+              data-testid={`ledger-fact-${fact.fact_uid}-object-link`}
+              className="font-medium text-accent-cool hover:underline"
+            >
+              {objectDisplay}
+            </Link>
+          ) : (
+            <span
+              data-testid={`ledger-fact-${fact.fact_uid}-object`}
+              className="font-medium"
+            >
+              {objectDisplay}
+            </span>
+          )}
         </div>
-        <div>
-          <dt className="opacity-60">predicate</dt>
-          <dd>{predicateLabel(fact.predicate, fact.predicate_label)}</dd>
-        </div>
-        <div>
-          <dt className="opacity-60">object</dt>
-          <dd>
-            {objectHref ? (
-              <Link
-                href={objectHref}
-                data-testid={`ledger-fact-${fact.fact_uid}-object-link`}
-                className="text-accent-cool hover:underline"
-              >
-                {objectDisplay}
-              </Link>
-            ) : (
-              <span>{objectDisplay}</span>
-            )}
-          </dd>
-        </div>
-      </dl>
+      ) : (
+        <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-2 mb-3">
+          <div>
+            <dt className="opacity-60">subject</dt>
+            <dd>
+              {subjectHref ? (
+                <Link
+                  href={subjectHref}
+                  data-testid={`ledger-fact-${fact.fact_uid}-subject-link`}
+                  className="text-accent-cool hover:underline"
+                >
+                  {subjectDisplay}
+                </Link>
+              ) : (
+                <span data-testid={`ledger-fact-${fact.fact_uid}-subject`}>
+                  {subjectDisplay}
+                </span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="opacity-60">predicate</dt>
+            <dd>{predicateLabel(fact.predicate, fact.predicate_label)}</dd>
+          </div>
+          <div>
+            <dt className="opacity-60">object</dt>
+            <dd>
+              {objectHref ? (
+                <Link
+                  href={objectHref}
+                  data-testid={`ledger-fact-${fact.fact_uid}-object-link`}
+                  className="text-accent-cool hover:underline"
+                >
+                  {objectDisplay}
+                </Link>
+              ) : (
+                <span data-testid={`ledger-fact-${fact.fact_uid}-object`}>
+                  {objectDisplay}
+                </span>
+              )}
+            </dd>
+          </div>
+        </dl>
+      )}
       {sourceUrls.length > 0 && (
         <footer className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xxs text-text-muted">
           <span>sources:</span>

@@ -161,6 +161,21 @@ export async function wipeAndSeed(
   page: Page,
   facts: TestFact[],
 ): Promise<void> {
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30) — /ledger 같은 서버 컴포넌트는
+  // `next/headers().get('cookie')` 로 spaceId 를 읽는다. addInitScript
+  // 의 `document.cookie` 는 클라이언트 사이드에서만 설정되어 서버 fetch
+  // 에는 안 실린다. context.addCookies 로 브라우저 레벨에 설정해야
+  // 서버에 전달된다.
+  await page.context().addCookies([
+    {
+      name: 'lucid_space_id',
+      value: SEED_SPACE_ID,
+      domain: 'localhost',
+      path: '/',
+      sameSite: 'Lax',
+    },
+  ]);
+
   // 1. Seed localStorage / cookie BEFORE navigation so getCurrentSpace()
   //    finds the space id and StellarView reads 'real' mode.
   await page.addInitScript((spaceId: string) => {
@@ -278,6 +293,48 @@ export async function wipeAndSeed(
         'Access-Control-Allow-Headers': '*',
       },
       body: JSON.stringify(body),
+    });
+  });
+
+  // ── /api/spaces/{ks}/ledger — LEDGER view source ───────────────────
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30) — ledger 표시층 e2e 검증에 필요.
+  await page.route(/\/api\/spaces\/[^/]+\/ledger(\?.*)?$/, async (route) => {
+    const ledgerItems = fullFacts.map((f) => ({
+      fact_uid: f.fact_uid,
+      claim: f.claim,
+      claim_en: null,
+      subject_uid: f.subject_uid,
+      subject_label: f.subject_label,
+      predicate: f.predicate,
+      predicate_label: f.predicate_label,
+      object_value: f.object_value,
+      object_label: f.object_label,
+      source_uids: f.source_uids,
+      validated_at: f.validated_at,
+      knowledge_space_id: f.knowledge_space_id,
+      fact_type: f.fact_type,
+      speaker_label: f.speaker_label,
+      speech_act: f.speech_act,
+      content_claim: f.content_claim,
+      metric: f.metric,
+      measurement_value: f.measurement_value,
+      measurement_unit: f.measurement_unit,
+      as_of: f.as_of,
+    }));
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+      },
+      body: JSON.stringify({
+        facts: ledgerItems,
+        total: ledgerItems.length,
+        limit: 20,
+        offset: 0,
+      }),
     });
   });
 

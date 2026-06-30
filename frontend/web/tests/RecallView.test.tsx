@@ -406,7 +406,9 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
     expect(note).toHaveTextContent(/엔티티 연결로 추가된 1건/);
   });
 
-  it('marks an unresolved UUID subject with the (미해석) marker', async () => {
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+  // 옛: "deadbeef-... (미해석)" — uid 표시. 새: "미해결 entity" only.
+  it('marks an unresolved UUID subject with the "미해결 entity" placeholder (★ UUID X)', async () => {
     const unresolved: RecallResponse = {
       signature: 'As far as I know — 그래프에 1개 검증 사실이 있습니다',
       total: 1,
@@ -437,9 +439,9 @@ describe('RecallView — entity label + sort + badges (B-40)', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '검색' }));
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
-    expect(
-      await screen.findByTestId('recall-fact-fn-orphan-subject'),
-    ).toHaveTextContent(/\(미해석\)/);
+    const subjectCell = await screen.findByTestId('recall-fact-fn-orphan-subject');
+    expect(subjectCell).toHaveTextContent('미해결 entity');
+    expect(subjectCell).not.toHaveTextContent('deadbeef');
   });
 });
 

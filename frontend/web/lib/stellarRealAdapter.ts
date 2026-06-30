@@ -78,6 +78,12 @@ interface AccState {
   actionEdgeIndex: Map<string, StellarLink>;
 }
 
+// ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+// STELLAR 노드 라벨도 backend resolve 결과를 그대로 쓴다. 옛: label 이
+// 없으면 `uid.slice(0, 8)` 로 UUID prefix 8 chars 를 표시 → ★ UUID 노출.
+// fix: "미해결 entity" 로 교체.
+const UNRESOLVED_ENTITY_LABEL = '미해결 entity';
+
 function ensureEntity(
   acc: AccState,
   uid: string,
@@ -86,7 +92,7 @@ function ensureEntity(
 ): StellarNode {
   const existing = acc.entities.get(uid);
   if (existing) {
-    if (!existing.label || existing.label === existing.id.slice(0, 8)) {
+    if (!existing.label || existing.label === UNRESOLVED_ENTITY_LABEL) {
       if (label) existing.label = label;
     }
     if (!existing.entity_type && entityType) {
@@ -98,7 +104,7 @@ function ensureEntity(
   }
   const node: StellarNode = {
     id: uid,
-    label: label || uid.slice(0, 8),
+    label: label || UNRESOLVED_ENTITY_LABEL,
     kind: 'entity',
     cluster: 0,
     weight: 1,
