@@ -2121,25 +2121,24 @@ export function RecallView({ spaceId }: Props) {
     await runRecall(q, []);
   };
 
-  // feat/recall-search-entity-autocomplete — pick a suggestion: fill
-  // the input AND fire recall against the picked label immediately.
-  // The userTyped flag is reset so the suggestion-fetch effect doesn't
-  // refire on the programmatic setQuery and reopen the dropdown.
+  // hotfix/autocomplete-entity-id (PO 2026-06-30 결정 #6) — autocomplete
+  // pick = entity_id 기반 검색 (★ 옛: primary_label 텍스트 픽업 → semantic
+  // intent 깨짐). 사용자가 entity 를 고르면 q='' 로 두고 entity[] 필터에
+  // entity_id 넣어 entity-scoped recall. label 은 input 표시용 only.
   const onPickSuggestion = async (s: EntitySuggestion) => {
-    const picked = s.primary_label;
-    setQuery(picked);
+    setQuery(s.primary_label);  // ★ display only
     setSuggestions([]);
     setSuggestionsOpen(false);
     setActiveSuggestionIdx(-1);
     setUserTyped(false);  // suppress the next fetch (programmatic set)
-    setSubmittedQuery(picked);
-    setActiveEntities([]);
+    setSubmittedQuery('');  // ★ entity-scoped: q 비움
+    setActiveEntities([s.entity_id]);  // ★ entity_id 로 검색
     setFactTypeFilter(null);
     setDisplayLimit(PAGE_SIZE);
     // fix/r1-recall-redesign — same briefing reset as onSubmit.
     setBriefing(null);
     setBriefingError(null);
-    await runRecall(picked, []);
+    await runRecall('', [s.entity_id]);
   };
 
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

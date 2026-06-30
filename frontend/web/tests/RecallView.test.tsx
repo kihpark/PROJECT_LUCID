@@ -2428,7 +2428,10 @@ describe('RecallView entity autocomplete', () => {
     expect(await screen.findByTestId('recall-entity-suggestion-obj-bok')).toHaveTextContent('한국은행');
   });
 
-  it('clicking a suggestion fills the input and fires Recall with the picked label', async () => {
+  // hotfix/autocomplete-entity-id (PO 2026-06-30 결정 #6) — pick =
+  // entity-scoped recall (q='' + entity[]=[entity_id]). 옛 spec (label
+  // 픽업 → q=label) 폐기. label 은 input 표시용 only.
+  it('clicking a suggestion fires entity-scoped recall (q empty, entity_id filter)', async () => {
     (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
       { entity_id: 'obj-bok', primary_label: '한국은행', primary_lang: 'ko', score: 8.2 },
     ]);
@@ -2441,14 +2444,15 @@ describe('RecallView entity autocomplete', () => {
     fireEvent.mouseDown(item);
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     const recallCall = (api.recall as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(recallCall[1]).toBe('한국은행');
+    expect(recallCall[1]).toBe('');           // ★ q 는 비움
+    expect(recallCall[2].entity).toEqual(['obj-bok']); // ★ entity_id 로 필터
     // Suggestions dropdown closes after pick.
     await waitFor(() =>
       expect(screen.queryByTestId('recall-entity-suggestions')).toBeNull(),
     );
   });
 
-  it('arrow keys move the active suggestion, Enter picks it', async () => {
+  it('arrow keys + Enter fires entity-scoped recall on the active suggestion', async () => {
     (api.searchEntitySuggestions as ReturnType<typeof vi.fn>).mockResolvedValue([
       { entity_id: 'obj-a', primary_label: '한국은행', primary_lang: 'ko', score: 8.2 },
       { entity_id: 'obj-b', primary_label: '한국전력', primary_lang: 'ko', score: 6.0 },
@@ -2469,7 +2473,8 @@ describe('RecallView entity autocomplete', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(api.recall).toHaveBeenCalled());
     const recallCall = (api.recall as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(recallCall[1]).toBe('한국전력');
+    expect(recallCall[1]).toBe('');           // ★ q 비움
+    expect(recallCall[2].entity).toEqual(['obj-b']); // ★ entity_id 로 필터
   });
 
   it('Esc closes the suggestions dropdown', async () => {
