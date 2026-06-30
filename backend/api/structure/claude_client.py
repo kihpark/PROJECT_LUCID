@@ -21,7 +21,7 @@ import re
 import time
 from typing import Any
 
-from api.structure.models import StructureResult
+from api.structure.models import StructureResult, V3LiteralObjectError
 from api.structure.prompts import (
     FEW_SHOT_EXAMPLES,
     SYSTEM_PROMPT,
@@ -180,6 +180,38 @@ def _parse_json_safely(text: str) -> dict[str, Any] | None:
     if not isinstance(parsed, dict):
         return None
     return parsed
+
+
+def _has_v3_literal_error(exc: BaseException) -> bool:
+    """True iff `exc` or any cause/context chain element is V3LiteralObjectError.
+
+    Pydantic wraps validator errors inside `ValidationError`. The
+    original `ValueError` (our `V3LiteralObjectError`) is reachable
+    via `__cause__` / `__context__`, and pydantic v2 also exposes it
+    inside `exc.errors()[i]['ctx']['error']`. STAGE 1c-vii propagates
+    these so the SourceJob fails explicitly rather than silently
+    falling back to malformed_llm_output.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, V3LiteralObjectError):
+            return True
+        # ValidationError.errors() exposes the wrapped ValueError under
+        # ctx.error for each entry. Walk that list too.
+        errors_fn = getattr(cur, "errors", None)
+        if callable(errors_fn):
+            try:
+                for err in errors_fn():
+                    ctx = (err or {}).get("ctx") if isinstance(err, dict) else None
+                    inner = (ctx or {}).get("error") if isinstance(ctx, dict) else None
+                    if isinstance(inner, V3LiteralObjectError):
+                        return True
+            except Exception:  # noqa: BLE001
+                pass
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 def _empty_failure(reason: str) -> dict[str, Any]:
@@ -397,6 +429,19 @@ def _build_result(
     try:
         result = StructureResult.model_validate(parsed)
     except Exception as exc:  # noqa: BLE001 - schema mismatch -> empty failure
+        # REQ-004 STAGE 1c-vii (★ PO 2026-06-30): V3LiteralObjectError
+        # 는 ★ propagate. silent fallback 폐기 — capture 작업이 명시적으로
+        # STRUCTURE_FAILED 로 표시되어야 호출부 (gateway) 가 강제된다.
+        # pydantic 은 validator 의 ValueError 를 ValidationError 로
+        # wrap 하므로 errors() 리스트의 ctx.error 또는 __cause__ 체인을
+        # 함께 확인한다.
+        if _has_v3_literal_error(exc):
+            logger.error(
+                "REQ-004-1c-vii V3LiteralObjectError propagating from "
+                "StructureResult validation (capture job will be "
+                "STRUCTURE_FAILED): %s", exc,
+            )
+            raise
         # Faithful-decomp PR (PO 2026-06-23): on validation failure
         # log e.errors() so the field-level cause is visible in prod
         # logs. Without this, the prior "%s" formatting truncated the

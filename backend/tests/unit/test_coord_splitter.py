@@ -67,7 +67,12 @@ def _fact(
     predicate: str,
     object_value: str,
     tags: list[str] | None = None,
+    fact_type: str = "claim",
 ) -> StructureFact:
+    # ★ STAGE 1c-vii (★ PO 2026-06-30): ACTION + literal object_value 는
+    # validator 가 raise — coord_splitter fixture 는 발화 내용 literal
+    # ("SpaceX IPO" 등) 을 가짐. CLAIM 으로 우회. splitter 로직은 fact_type
+    # 에 무관하므로 회귀 위험 X.
     return StructureFact.model_validate(
         {
             "uid": uid,
@@ -79,6 +84,7 @@ def _fact(
             "negation_flag": False,
             "negation_scope": None,
             "tags_suggested": tags or [],
+            "fact_type": fact_type,
         },
     )
 

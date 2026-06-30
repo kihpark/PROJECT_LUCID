@@ -36,7 +36,11 @@ def _fact(
     claim: str = "x",
     subject_surface: str | None = None,
     object_surface: str | None = None,
+    fact_type: str = "claim",
 ) -> StructureFact:
+    # ★ STAGE 1c-vii: ACTION + literal object_value 는 validator 가 raise.
+    # 이 fixture 의 검증 대상은 surface/predicate_violation 이므로 fact_type
+    # 은 무관 → default 를 ``claim`` 으로 변경해 literal 보존.
     return StructureFact.model_validate(
         {
             "uid": "fn-1",
@@ -50,6 +54,7 @@ def _fact(
             "negation_flag": False,
             "negation_scope": None,
             "tags_suggested": [],
+            "fact_type": fact_type,
         },
     )
 

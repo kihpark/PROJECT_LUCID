@@ -15,13 +15,17 @@ from api.structure.processor import _serialize_struct_fact
 
 
 def _struct(**overrides) -> StructureFact:
+    # ★ STAGE 1c-vii (★ PO 2026-06-30): default ACTION + literal object_value
+    # 는 validator 가 raise. fact_type 자체를 검증하는 fixture 이므로
+    # default action 을 유지하기 위해 object_value 를 obj-N placeholder
+    # 로 변경 (entity_id shape — validator 통과).
     payload = {
         "uid": "fn-1",
         "type": "proposition",
         "claim": "x",
         "subject_uid": "obj-1",
         "predicate": "p",
-        "object_value": "literal",
+        "object_value": "obj-2",
         "negation_flag": False,
         "negation_scope": None,
         "tags_suggested": [],
@@ -74,9 +78,17 @@ def test_action_fact_has_no_speaker_fields():
 def test_serialize_struct_fact_defaults_fact_type_action():
     """The serializer back-compat-fills fact_type when the LLM omits
     it on a legacy payload. ES facet aggregation gets cleaner buckets
-    when every doc carries a value."""
+    when every doc carries a value.
+
+    ★ STAGE 1c-vii (★ PO 2026-06-30): pass uid_map so the placeholder
+    obj-2 resolves to a canonical UUID — strict-reject 가드를 만족.
+    """
     f = _struct()
-    d = _serialize_struct_fact(f)
+    uid_map = {
+        "obj-1": "11111111-1111-1111-1111-111111111111",
+        "obj-2": "22222222-2222-2222-2222-222222222222",
+    }
+    d = _serialize_struct_fact(f, uid_map=uid_map)
     assert d["fact_type"] == "action"
     # Claim-only fields are emitted as None (not missing) so the
     # mapping projection in routes/recall.py reads None instead of

@@ -58,7 +58,12 @@ from api.structure.completeness_validator import (
 from api.structure.decomposer import decompose
 from api.structure.fact_dedup import dedup_facts, filter_links_by_fact_uids
 from api.structure.link_creator import LinkCreationResult, create_links
-from api.structure.models import StructureFact, StructureObject, StructureResult
+from api.structure.models import (
+    StructureFact,
+    StructureObject,
+    StructureResult,
+    V3LiteralObjectError,
+)
 # REQ-004 STAGE 1c — caller migration:
 # ★ 5 resolver (entity_resolver / brand_resolver / subject_recovery /
 #   object_matcher / predicate_mapper / action_object_resolver) 호출 제거.
@@ -643,33 +648,34 @@ def _serialize_struct_fact(
         speaker = d.get("speaker_uid")
         if isinstance(speaker, str) and speaker in uid_map:
             d["speaker_uid"] = uid_map[speaker]
-    # REQ-004 STAGE 1c-iii — ★ literal 저장 경로 제거 (★ 핵심 acceptance).
-    # ACTION fact 의 object_value 는 ★ entity_id only (placeholder obj-N OR
-    # canonical UUID 또는 빈 문자열). literal (자연어 명사구) 가 잔재로 남으면
-    # ★ 통째로 비우고 ★ needs_review=True 로 플래그한다. v3 §2 verbatim:
-    #   "모든 entity 참조 = entity_id. ★ 문자열 저장 경로 제거."
-    # action_object_resolver (★ STAGE 1c-v 삭제) 와 LLM Path A 가 모두
-    # 못 잡은 잔재만 여기서 차단된다. legacy obj-N 잔재 (placeholder 가
-    # uid_map 에 없어 매핑 실패) 도 동일하게 비운다 — 그래야 ES strict
-    # mapping 의 keyword 인덱스가 의미 없는 placeholder 를 저장하지 않는다.
+    # REQ-004 STAGE 1c-vii — ★ STRICT REJECT (★ PO 2026-06-30).
+    # ACTION fact 의 object_value 는 ★ entity_id only (canonical UUID4 또는
+    # 빈 문자열). literal (자연어 명사구) 또는 placeholder 잔재 (obj-N 가
+    # uid_map 으로 canonical UUID 변환 안 됨) 가 ES 저장 직전까지 살아남으면
+    # ★ V3LiteralObjectError 를 raise — 1c-iii 의 silent strip 폐기.
+    # PO 결정 (2026-06-30): "strip 약함 — 근본 차단 아님. gateway 우회 경로가
+    # 살아있어도 에러 안 나서 못 잡음. reject = literal 들어오면 예외 →
+    # 호출부 gateway 강제 = ★ V3 진짜 차단."
+    #
+    # 호출 site (process_extracted_job) 의 try/except 가 잡아서 job.status =
+    # STRUCTURE_FAILED + V3 위반 메시지로 표시한다. silent drop / skip 금지.
     if d.get("fact_type") == "action":
         obj_val_final = d.get("object_value")
         if isinstance(obj_val_final, str) and obj_val_final.strip():
             bare = obj_val_final.strip()
-            # entity_id 형태: placeholder obj-N 잔재 (uid_map 실패) 도 폐기
             is_uuid_like = _UUID_LIKE_RE.match(bare) is not None
             is_placeholder = _OBJ_PLACEHOLDER_RE.match(bare) is not None
             if not is_uuid_like:
-                # placeholder 잔재 또는 literal → 둘 다 폐기 (★ literal 0)
-                logger.info(
-                    "REQ-004-1c-iii literal-strip: action fact %s "
-                    "object_value=%r (%s) → \"\" (★ entity_id only)",
-                    d.get("fact_uid") or d.get("uid"),
-                    bare[:80],
-                    "placeholder-leak" if is_placeholder else "literal",
+                fact_uid = d.get("fact_uid") or d.get("uid") or "?"
+                kind = "placeholder-leak" if is_placeholder else "literal"
+                raise V3LiteralObjectError(
+                    f"★ V3 위반 (STAGE 1c-vii serialize-time reject): "
+                    f"ACTION fact {fact_uid!r} 의 object_value={bare[:80]!r} "
+                    f"({kind}) — entity_id (UUID4) 가 아닙니다. "
+                    f"★ 호출부가 resolution_gateway.resolve() 통과 안 함 "
+                    f"또는 uid_map 에 placeholder 가 누락됨. "
+                    f"gateway.resolve() 사용 강제."
                 )
-                d["object_value"] = ""
-                needs_review = True
     # REQ-004 STAGE 1c-iv — predicate_mapper 폐기:
     # ★ v3 §1: 모든 predicate = 자연어 verbatim (★ OPL 통제어 0).
     # predicate_code / predicate_label / original_surface 모두 raw predicate
@@ -1086,6 +1092,19 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
                     "knowledge_space_id": str(job.knowledge_space_id),
                 },
             )
+        except V3LiteralObjectError as exc:
+            # REQ-004 STAGE 1c-vii (★ PO 2026-06-30): V3 위반 시 캡처
+            # 작업을 명시적으로 실패 처리. silent drop / skip 금지.
+            logger.error(
+                "REQ-004-1c-vii V3 violation at decompose for job %s: %s",
+                job_id, exc,
+            )
+            _record_failure(
+                session,
+                job,
+                f"V3 위반 (entity_id 강제): {exc}",
+            )
+            return
         except Exception as exc:  # noqa: BLE001
             logger.exception("decompose failed for job %s", job_id)
             _record_failure(session, job, f"decompose error: {type(exc).__name__}")
@@ -1158,17 +1177,32 @@ def process_extracted_job(job_id: uuid.UUID | str) -> None:
         # (from claim_recovery / brand_resolver / pick_natural_primary)
         # propagates to the Decide UI payload.
         decomp_objects_by_uid = {o.uid: o for o in decomp.objects}
-        facts_payload = [
-            _serialize_struct_fact(
-                f,
-                uid_map=uid_map,
-                fact_uid_map=fact_uid_map,
-                violation_per_object=violation_per_object,
-                match_per_object=match_per_object,
-                decomp_objects=decomp_objects_by_uid,
+        try:
+            facts_payload = [
+                _serialize_struct_fact(
+                    f,
+                    uid_map=uid_map,
+                    fact_uid_map=fact_uid_map,
+                    violation_per_object=violation_per_object,
+                    match_per_object=match_per_object,
+                    decomp_objects=decomp_objects_by_uid,
+                )
+                for f in decomp.facts
+            ]
+        except V3LiteralObjectError as exc:
+            # REQ-004 STAGE 1c-vii (★ PO 2026-06-30): serialize-time
+            # reject. ★ propagate to job-level failure. silent strip / skip
+            # 금지 — 호출부 (gateway / uid_map 빌더) 가 강제로 고쳐져야 한다.
+            logger.error(
+                "REQ-004-1c-vii V3 violation at _serialize_struct_fact "
+                "for job %s: %s", job_id, exc,
             )
-            for f in decomp.facts
-        ]
+            _record_failure(
+                session,
+                job,
+                f"V3 위반 (entity_id 강제): {exc}",
+            )
+            return
         # fix/fact-dedup-on-structure-output (PO 2026-06-27): drop facts
         # whose canonical (subject, predicate_code, object) tuple has
         # already been seen earlier in the payload. PO live evidence

@@ -50,10 +50,10 @@ def _make_decomp(n_facts: int = 1, n_objects: int = 1) -> StructureResult:
     ]
     # REQ-004 STAGE 1c migration: each fact gets a UNIQUE predicate so
     # the dedup pass (which canonicalizes on
-    # (subject, predicate, object_canonical)) does not collapse them
-    # after the 1c-iii literal-strip zeroes ACTION object_value. The
-    # previous fixture relied on object_value diversity which is now
-    # nulled for ACTION facts (★ entity_id only invariant).
+    # (subject, predicate, object_canonical)) does not collapse them.
+    # ★ STAGE 1c-vii (★ PO 2026-06-30): ACTION + literal object_value 는
+    # validator 가 raise — 옛 `value-{i}` literal fixture 폐기. CLAIM
+    # fact_type 으로 우회해 발화 내용 literal 보존 (CLAIM 의도).
     facts = [
         StructureFact(
             uid=f"fn-{i}", type_="proposition", claim=f"Claim {i}",
@@ -61,6 +61,7 @@ def _make_decomp(n_facts: int = 1, n_objects: int = 1) -> StructureResult:
             object_value=f"value-{i}",
             negation_flag=False, negation_scope=None,
             tags_suggested=[],
+            fact_type="claim",
         )
         for i in range(1, n_facts + 1)
     ]

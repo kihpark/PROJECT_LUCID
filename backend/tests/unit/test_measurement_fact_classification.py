@@ -24,13 +24,17 @@ from api.structure.processor import _serialize_struct_fact
 
 
 def _struct(**overrides) -> StructureFact:
+    # ★ STAGE 1c-vii: default ACTION + literal "literal" 는 validator 가
+    # raise. object_value 를 obj-N placeholder shape 으로 변경 — validator
+    # 통과 + default action 유지 (test_action_fact_has_no_measurement_fields
+    # 검증).
     payload = {
         "uid": "fn-1",
         "type": "proposition",
         "claim": "x",
         "subject_uid": "obj-1",
         "predicate": "p",
-        "object_value": "literal",
+        "object_value": "obj-2",
         "negation_flag": False,
         "negation_scope": None,
         "tags_suggested": [],
@@ -226,9 +230,17 @@ def test_serialize_struct_fact_defaults_measurement_fields_none():
     the serializer back-compat-fills them to None (not missing). ES
     `double` / `keyword` indexing reads None as missing, the recall
     facet doesn't bucket it, and the FactCard branches on
-    fact_type=='measurement' before reading them."""
+    fact_type=='measurement' before reading them.
+
+    ★ STAGE 1c-vii: ACTION default 의 placeholder obj-2 를 canonical
+    UUID 로 매핑해 serialize strict reject 통과.
+    """
     f = _struct()  # action default
-    d = _serialize_struct_fact(f)
+    uid_map = {
+        "obj-1": "11111111-1111-1111-1111-111111111111",
+        "obj-2": "22222222-2222-2222-2222-222222222222",
+    }
+    d = _serialize_struct_fact(f, uid_map=uid_map)
     assert d["fact_type"] == "action"
     assert d["metric"] is None
     assert d["measurement_value"] is None

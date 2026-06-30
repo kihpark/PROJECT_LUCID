@@ -64,10 +64,12 @@ def test_decompose_with_mocked_anthropic_returns_structured_result(monkeypatch):
              "name_en": "Alice", "properties": {}},
         ],
         "facts": [
+            # ★ STAGE 1c-vii: ACTION + literal "Acme" raises. claim 으로 우회.
             {"uid": "fn-1", "type": "proposition", "claim": "Alice founded Acme.",
              "subject_uid": "obj-1", "predicate": "founded",
              "object_value": "Acme", "negation_flag": False,
-             "negation_scope": None, "tags_suggested": []},
+             "negation_scope": None, "tags_suggested": [],
+             "fact_type": "claim"},
         ],
         "fact_object_links": [
             {"fact_uid": "fn-1", "object_uid": "obj-1",
@@ -204,23 +206,29 @@ def test_decompose_naver_mnews_payload_with_null_subjects_recovers_facts(monkeyp
             {"uid": "obj-2", "class": "organization", "name": "삼성전자"},
         ],
         "facts": [
+            # ★ STAGE 1c-vii: ACTION + literal object_value 는 raise.
+            # 발화 내용 literal 검증이므로 fact_type=claim 으로 우회.
             {"uid": "fn-1", "type": "proposition",
              "claim": "코스피가 7월 이후 최고치를 기록했다.",
              "subject_uid": "obj-1", "predicate": "기록했다",
-             "object_value": "최고치"},
+             "object_value": "최고치",
+             "fact_type": "claim"},
             # Ellipsis: the LLM emitted subject_uid: null here.
             {"uid": "fn-2", "type": "proposition",
              "claim": "거래대금도 늘어났다.",
              "subject_uid": None, "predicate": "늘어났다",
-             "object_value": "거래대금"},
+             "object_value": "거래대금",
+             "fact_type": "claim"},
             {"uid": "fn-3", "type": "proposition",
              "claim": "삼성전자가 강세를 보였다.",
              "subject_uid": "obj-2", "predicate": "보였다",
-             "object_value": "강세"},
+             "object_value": "강세",
+             "fact_type": "claim"},
             {"uid": "fn-4", "type": "proposition",
              "claim": "7월 이후 최고치였다.",
              "subject_uid": None, "predicate": "였다",
-             "object_value": "최고치"},
+             "object_value": "최고치",
+             "fact_type": "claim"},
         ],
         "fact_object_links": [
             {"fact_uid": "fn-1", "object_uid": "obj-1", "link_type": "involves"},

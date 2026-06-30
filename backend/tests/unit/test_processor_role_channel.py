@@ -105,11 +105,17 @@ def test_extract_roles_uid_map_applied_literal_passthrough():
 
 def test_serialize_writes_fact_object_role_field():
     """End-to-end: _serialize_struct_fact emits the `fact_object_role`
-    key on the serialized doc, populated by _extract_roles."""
+    key on the serialized doc, populated by _extract_roles.
+
+    ★ STAGE 1c-vii: ACTION default 의 object_value 는 canonical UUID4 강제
+    — uid_map 의 값을 UUID4 shape 으로 변경해 serialize strict reject 통과.
+    fact_object_role 값 (recipient) 은 UUID4 가드 대상 아님이므로 sentinel
+    그대로 유지.
+    """
     f = _fact(roles={"recipient": "obj-3"})
     uid_map = {
-        "obj-1": "obj-canonical-mose-tan",
-        "obj-2": "obj-canonical-election",
+        "obj-1": "11111111-1111-1111-1111-111111111111",
+        "obj-2": "22222222-2222-2222-2222-222222222222",
         "obj-3": "obj-canonical-trump",
     }
     d = _serialize_struct_fact(f, uid_map=uid_map)
@@ -118,7 +124,15 @@ def test_serialize_writes_fact_object_role_field():
 
 def test_serialize_simple_spo_writes_empty_role_dict():
     """Plain SPO fact (no roles) — serialized doc still has the field
-    as {} so ES mapping never sees null."""
+    as {} so ES mapping never sees null.
+
+    ★ STAGE 1c-vii: ACTION default 의 object_value obj-2 를 UUID4 로
+    매핑해 serialize strict reject 통과.
+    """
     f = _fact()  # no roles
-    d = _serialize_struct_fact(f, uid_map={"obj-1": "obj-canonical-x"})
+    uid_map = {
+        "obj-1": "11111111-1111-1111-1111-111111111111",
+        "obj-2": "22222222-2222-2222-2222-222222222222",
+    }
+    d = _serialize_struct_fact(f, uid_map=uid_map)
     assert d["fact_object_role"] == {}
