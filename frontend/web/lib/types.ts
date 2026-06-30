@@ -287,11 +287,28 @@ export interface EntityFacetItem {
   count: number;
 }
 
+// fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ — PO 2026-06-30):
+// v3 closed set 10 class 1:1 bucket. 옛 4 bucket 시절 "기타 비대" 해소.
+// `other` 는 unknown / heuristic fallback 만 받는다. 모든 필드 optional
+// 로 두어 옛 backend (4 bucket) 응답도 깨지지 않게 호환.
 export interface EntityFacets {
-  organization: EntityFacetItem[];
-  person: EntityFacetItem[];
-  place: EntityFacetItem[];
-  other: EntityFacetItem[];
+  // WHO
+  person?: EntityFacetItem[];
+  organization?: EntityFacetItem[];
+  group?: EntityFacetItem[];
+  // WHAT
+  knowledge?: EntityFacetItem[];
+  resource?: EntityFacetItem[];
+  task?: EntityFacetItem[];
+  concept?: EntityFacetItem[];
+  event?: EntityFacetItem[];
+  metric?: EntityFacetItem[];
+  // WHERE
+  location?: EntityFacetItem[];
+  // ★ legacy alias — pre-fix backend 가 보낸 4 bucket 응답 호환.
+  // 새 backend 는 절대 emit 하지 않음 (place → location 으로 alias).
+  place?: EntityFacetItem[];
+  other?: EntityFacetItem[];
 }
 
 export interface PredicateFacetItem {

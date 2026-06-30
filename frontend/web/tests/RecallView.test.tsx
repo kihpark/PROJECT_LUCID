@@ -897,7 +897,11 @@ describe('RecallView — facets + drill-down (B-49)', () => {
     expect(screen.getByTestId('facet-bucket-organization')).toHaveTextContent('SpaceX');
     expect(screen.getByTestId('facet-bucket-organization')).toHaveTextContent('Goldman Sachs');
     expect(screen.getByTestId('facet-bucket-person')).toHaveTextContent('Elon Musk');
-    expect(screen.getByTestId('facet-bucket-place')).toHaveTextContent('(없음)');
+    // fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪) — empty bucket
+    // 은 render skip (★ 비대 가드). place / location 모두 0 이므로 X.
+    expect(screen.queryByTestId('facet-bucket-place')).toBeNull();
+    expect(screen.queryByTestId('facet-bucket-location')).toBeNull();
+    expect(screen.queryByTestId('facet-bucket-task')).toBeNull();
     expect(screen.getByTestId('facet-predicate-total_funds_raised')).toBeInTheDocument();
   });
 

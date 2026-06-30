@@ -71,6 +71,21 @@ describe('displayNames — entityTypeLabelKo helper', () => {
     expect(entityTypeLabelKo('concept')).toBe('개념');
     expect(entityTypeLabelKo('knowledge')).toBe('지식');
   });
+  // fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ — PO 2026-06-30):
+  // v3 closed set 10 class 모두 한국어 매핑이 있어야 한다 (★ "기타"
+  // fallback 없이).
+  it('★ v3 closed set 10 class verbatim 매핑', () => {
+    expect(entityTypeLabelKo('person')).toBe('사람');
+    expect(entityTypeLabelKo('organization')).toBe('조직');
+    expect(entityTypeLabelKo('group')).toBe('그룹');
+    expect(entityTypeLabelKo('knowledge')).toBe('지식');
+    expect(entityTypeLabelKo('resource')).toBe('자원');
+    expect(entityTypeLabelKo('task')).toBe('행위');
+    expect(entityTypeLabelKo('concept')).toBe('개념');
+    expect(entityTypeLabelKo('event')).toBe('사건');
+    expect(entityTypeLabelKo('metric')).toBe('지표');
+    expect(entityTypeLabelKo('location')).toBe('장소');
+  });
   it('null / 빈문자열 / unknown → "기타"', () => {
     expect(entityTypeLabelKo(null)).toBe('기타');
     expect(entityTypeLabelKo(undefined)).toBe('기타');
