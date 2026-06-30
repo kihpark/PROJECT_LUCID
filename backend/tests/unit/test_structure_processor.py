@@ -13,7 +13,8 @@ from api.structure.models import (
     StructureObject,
     StructureResult,
 )
-from api.structure.object_matcher import MatchResult
+from api.structure.object_matcher import MatchResult  # noqa: F401 — legacy; kept for back-compat with helper fixtures below
+from api.structure.resolution_gateway import ResolvedEntity
 from api.structure.processor import process_extracted_job
 
 # B-48a: shape check for canonical UUID4 fact_uids emitted by the
@@ -47,10 +48,16 @@ def _make_decomp(n_facts: int = 1, n_objects: int = 1) -> StructureResult:
         )
         for i in range(1, n_objects + 1)
     ]
+    # REQ-004 STAGE 1c migration: each fact gets a UNIQUE predicate so
+    # the dedup pass (which canonicalizes on
+    # (subject, predicate, object_canonical)) does not collapse them
+    # after the 1c-iii literal-strip zeroes ACTION object_value. The
+    # previous fixture relied on object_value diversity which is now
+    # nulled for ACTION facts (★ entity_id only invariant).
     facts = [
         StructureFact(
             uid=f"fn-{i}", type_="proposition", claim=f"Claim {i}",
-            subject_uid="obj-1", predicate="has_property",
+            subject_uid="obj-1", predicate=f"has_property_{i}",
             object_value=f"value-{i}",
             negation_flag=False, negation_scope=None,
             tags_suggested=[],
@@ -115,11 +122,14 @@ def test_happy_path_sets_structured_and_writes_telemetry():
     session.get.return_value = job
     decomp = _make_decomp(n_facts=2, n_objects=1)
 
-    match_result = MatchResult(
-        matched_object_uid="obj-real-1",
-        disambiguation_required=False,
-        candidates=[], created_new=False,
-        new_object_uid=None, decision_reason="exact_match",
+    # REQ-004 STAGE 1c migration: patch resolve_entity_via_gateway
+    # returning ResolvedEntity (source="exact" → exact_match equivalent).
+    match_result = ResolvedEntity(
+        entity_id="obj-real-1",
+        canonical_name="ResolvedName",
+        entity_type="concept",
+        confidence=1.0,
+        source="exact",
     )
 
     with patch(
@@ -131,7 +141,7 @@ def test_happy_path_sets_structured_and_writes_telemetry():
         "api.structure.processor.get_embedding",
         return_value=[0.1] * 1536,
     ), patch(
-        "api.structure.processor.match_or_create_object",
+        "api.structure.processor.resolve_entity_via_gateway",
         return_value=match_result,
     ):
         process_extracted_job(job.id)
@@ -179,12 +189,18 @@ def test_disambig_pending_recorded_in_metadata():
     session = MagicMock()
     session.get.return_value = job
     decomp = _make_decomp(n_facts=1, n_objects=1)
-    match_result = MatchResult(
-        matched_object_uid=None,
-        disambiguation_required=True,
-        candidates=[],
-        created_new=False, new_object_uid=None,
-        decision_reason="exact_match_multi",
+    # REQ-004 STAGE 1c migration: gateway "candidate" source is the
+    # closest analog of the legacy "disambiguation_required" — the
+    # gateway absorbs ambiguity into a new candidate entity (created_new
+    # path) rather than emitting a disambig queue. test_disambig_pending
+    # therefore now exercises the created_new path; the assertion below
+    # has been relaxed accordingly.
+    match_result = ResolvedEntity(
+        entity_id="cand-1",
+        canonical_name="삼성",
+        entity_type="organization",
+        confidence=0.8,
+        source="candidate",
     )
     with patch(
         "api.structure.processor.make_sessionmaker",
@@ -195,14 +211,16 @@ def test_disambig_pending_recorded_in_metadata():
         "api.structure.processor.get_embedding",
         return_value=[0.1] * 1536,
     ), patch(
-        "api.structure.processor.match_or_create_object",
+        "api.structure.processor.resolve_entity_via_gateway",
         return_value=match_result,
     ):
         process_extracted_job(job.id)
 
     s = job.extracted_metadata["structure"]
-    assert s["object_disambig_pending"] == 1
-    assert len(s["disambiguation_pending"]) == 1
+    # ★ STAGE 1c: gateway absorbs disambig into "candidate" (created_new).
+    # The disambig queue is now empty; created_new count is 1.
+    assert s["object_disambig_pending"] == 0
+    assert s["object_created_new"] == 1
 
 
 def test_invalid_uuid_string_returns_silently():
@@ -220,8 +238,13 @@ def test_processor_persists_facts_content():
     session = MagicMock()
     session.get.return_value = job
     decomp = _make_decomp(n_facts=3, n_objects=2)
-    match_result = MatchResult(
-        matched_object_uid="obj-X", decision_reason="exact_match",
+    # REQ-004 STAGE 1c migration: ResolvedEntity exact match.
+    # ★ canonical_name empty so the corrected-surface override in
+    # _serialize_struct_object/_serialize_struct_fact does NOT replace the
+    # mock LLM name ("Org-N" / fact subject).
+    match_result = ResolvedEntity(
+        entity_id="obj-X", canonical_name="",
+        entity_type="concept", confidence=1.0, source="exact",
     )
 
     with patch(
@@ -233,7 +256,7 @@ def test_processor_persists_facts_content():
         "api.structure.processor.get_embedding",
         return_value=[0.1] * 1536,
     ), patch(
-        "api.structure.processor.match_or_create_object",
+        "api.structure.processor.resolve_entity_via_gateway",
         return_value=match_result,
     ):
         process_extracted_job(job.id)
@@ -255,7 +278,7 @@ def test_processor_persists_facts_content():
         # lets a later fact about the same entity share a graph node
         # with this one.
         assert fact["subject_uid"] == "obj-X"
-        assert fact["predicate"] == "has_property"
+        assert fact["predicate"].startswith("has_property")
         # B-48a: canonical UUID4 (not "fn-N"). uid == fact_uid.
         assert _UUID4_RE.match(fact["fact_uid"])
         assert fact["uid"] == fact["fact_uid"]
@@ -269,8 +292,13 @@ def test_processor_persists_objects_with_class_alias():
     session = MagicMock()
     session.get.return_value = job
     decomp = _make_decomp(n_facts=1, n_objects=2)
-    match_result = MatchResult(
-        matched_object_uid="obj-X", decision_reason="exact_match",
+    # REQ-004 STAGE 1c migration: ResolvedEntity exact match.
+    # ★ canonical_name empty so the corrected-surface override in
+    # _serialize_struct_object/_serialize_struct_fact does NOT replace the
+    # mock LLM name ("Org-N" / fact subject).
+    match_result = ResolvedEntity(
+        entity_id="obj-X", canonical_name="",
+        entity_type="concept", confidence=1.0, source="exact",
     )
 
     with patch(
@@ -282,7 +310,7 @@ def test_processor_persists_objects_with_class_alias():
         "api.structure.processor.get_embedding",
         return_value=[0.1] * 1536,
     ), patch(
-        "api.structure.processor.match_or_create_object",
+        "api.structure.processor.resolve_entity_via_gateway",
         return_value=match_result,
     ):
         process_extracted_job(job.id)
@@ -302,8 +330,13 @@ def test_processor_persists_links_detail():
     session = MagicMock()
     session.get.return_value = job
     decomp = _make_decomp(n_facts=1, n_objects=1)
-    match_result = MatchResult(
-        matched_object_uid="obj-X", decision_reason="exact_match",
+    # REQ-004 STAGE 1c migration: ResolvedEntity exact match.
+    # ★ canonical_name empty so the corrected-surface override in
+    # _serialize_struct_object/_serialize_struct_fact does NOT replace the
+    # mock LLM name ("Org-N" / fact subject).
+    match_result = ResolvedEntity(
+        entity_id="obj-X", canonical_name="",
+        entity_type="concept", confidence=1.0, source="exact",
     )
 
     with patch(
@@ -315,7 +348,7 @@ def test_processor_persists_links_detail():
         "api.structure.processor.get_embedding",
         return_value=[0.1] * 1536,
     ), patch(
-        "api.structure.processor.match_or_create_object",
+        "api.structure.processor.resolve_entity_via_gateway",
         return_value=match_result,
     ):
         process_extracted_job(job.id)

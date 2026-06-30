@@ -197,7 +197,11 @@ def test_1b_iv_embedding_kNN_disambig_band_returns_candidate(mock_emb):
     ]
     result = resolve("어떤 회사", "ko", "ks-1", client=client)
     assert result.source == "candidate"
-    assert result.entity_id == ""  # ★ disambig 표시
+    # REQ-004 STAGE 1c-ii: gateway 가 ★ 반드시 entity_id 를 채워서 반환.
+    # disambig band 도 새 candidate entity 를 ES 에 insert 한다 (★ v3
+    # 모든 entity 참조 = entity_id, 빈 문자열 path 폐기). entity_id 는
+    # new_uid() 형태 (UUID4) — non-empty 면 충분.
+    assert result.entity_id, "★ 1c-ii: candidate must carry non-empty entity_id"
     assert KNN_DISAMBIG_FLOOR <= result.confidence < KNN_AUTO_THRESHOLD
 
 
@@ -217,7 +221,8 @@ def test_1b_iv_embedding_kNN_below_floor_falls_to_llm(mock_emb):
     ]
     result = resolve("새로운 주식회사 ABC", "ko", "ks-1", client=client)
     assert result.source == "candidate"
-    assert result.entity_id == ""
+    # ★ 1c-ii: gateway 가 ES insert 후 entity_id 채움 (non-empty)
+    assert result.entity_id, "★ 1c-ii: candidate must carry non-empty entity_id"
 
 
 # ---------------------------------------------------------------------------

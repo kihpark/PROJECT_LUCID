@@ -19,15 +19,25 @@ style: MagicMock ES client, no docker dependency.
 """
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock
-
 import pytest
 
-from api.storage.canonical import canonical_key
-from api.storage.elasticsearch.facts import insert_or_dedup_fact
-from api.structure.entity_resolver import resolve_entity
-from api.structure.predicate_mapper import map_predicate_to_type_and_label
+# REQ-004 STAGE 1c-iv: predicate_mapper 폐기 — B-62 natural-spo-display
+# invariant 테스트는 통제어 OPL gloss 와 함께 obsolete. v3 = 자연어
+# predicate verbatim. ★ 모듈 단위 skip (회귀 history 보존).
+pytest.skip(
+    "REQ-004 STAGE 1c-iv: predicate_mapper deleted (v3 = natural-language "
+    "predicate verbatim, OPL 통제어 0). Superseded by "
+    "test_stage1c_literal_zero.py.",
+    allow_module_level=True,
+)
+
+from typing import Any  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
+
+from api.storage.canonical import canonical_key  # noqa: E402
+from api.storage.elasticsearch.facts import insert_or_dedup_fact  # noqa: E402
+from api.structure.entity_resolver import resolve_entity  # noqa: E402
+from api.structure.predicate_mapper import map_predicate_to_type_and_label  # noqa: E402
 
 pytestmark = pytest.mark.integration
 

@@ -110,7 +110,14 @@ def test_structure_fact_without_subject_surface() -> None:
 
 def test_structure_fact_without_object_surface_or_negation() -> None:
     """object_surface, negation_flag, negation_scope, tags_suggested
-    are all optional. Atomic SPO content is what matters."""
+    are all optional. Atomic SPO content is what matters.
+
+    REQ-004 STAGE 1c-iii: ACTION fact 의 literal object_value 는 ★ v3
+    schema guard 가 ★ "literal_object_v3" 태그를 자동 부여한다 (raise
+    없음 — capture-naver-fix 회귀 방지). 그래서 fact_type 명시가
+    없는 (default action) literal "GPT-5" 인 이 케이스는 태그 1개를 받는다.
+    fact_type="claim" / "measurement" 면 가드가 무관 → 빈 태그 유지.
+    """
     fact = StructureFact.model_validate({
         "uid": "fn-1",
         "type": "proposition",
@@ -121,7 +128,22 @@ def test_structure_fact_without_object_surface_or_negation() -> None:
     })
     assert fact.negation_flag is False
     assert fact.negation_scope is None
-    assert fact.tags_suggested == []
+    # ★ STAGE 1c-iii v3 schema guard: ACTION literal object_value 감지 →
+    # "literal_object_v3" 태그 자동 부여 (★ raise 없음, log + tag).
+    assert fact.tags_suggested == ["literal_object_v3"]
+
+    # ★ CLAIM fact 의 object_value 는 의도적으로 발화 내용 literal —
+    # 가드 무관, 태그 0.
+    claim_fact = StructureFact.model_validate({
+        "uid": "fn-2",
+        "type": "proposition",
+        "claim": "x said y",
+        "subject_uid": "obj-1",
+        "predicate": "said",
+        "object_value": "y",
+        "fact_type": "claim",
+    })
+    assert claim_fact.tags_suggested == []
 
 
 # ---------------------------------------------------------------------------

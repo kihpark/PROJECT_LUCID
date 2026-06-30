@@ -20,12 +20,16 @@ REQ-004 STAGE 1b — Entity resolution gateway 가 5 resolver 기능 흡수.
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
+import logging
 import re
 
 from elasticsearch import Elasticsearch
 
+from api.models.base import new_uid
 from api.storage.elasticsearch.client import LUCID_OBJECTS, get_client
 from api.storage.elasticsearch.embeddings import get_embedding
+
+logger = logging.getLogger("lucid.structure.resolution_gateway")
 
 
 # v3 §3: 10종 closed set
@@ -161,13 +165,50 @@ def resolve(
         knowledge_space_id=knowledge_space_id,
     )
     if knn_hit is not None:
+        # ★ 1c-ii: kNN disambig band returns source="candidate" with
+        # entity_id="". Persist the new candidate entity so the caller
+        # never receives an empty entity_id (★ v3 entity_id only).
+        if knn_hit.source == "candidate" and not knn_hit.entity_id:
+            entity_id = _insert_candidate_entity(
+                client=client,
+                normalized=knn_hit.canonical_name or normalized,
+                lang=lang,
+                knowledge_space_id=knowledge_space_id,
+                entity_type=knn_hit.entity_type,
+                confidence=knn_hit.confidence,
+                merge_provenance={
+                    "source": "gateway_knn_disambig",
+                    "stage": "1c-ii",
+                    "disambig_score": float(knn_hit.confidence),
+                },
+            )
+            return ResolvedEntity(
+                entity_id=entity_id,
+                canonical_name=knn_hit.canonical_name or normalized,
+                entity_type=knn_hit.entity_type,
+                confidence=knn_hit.confidence,
+                source="candidate",
+            )
         return knn_hit
 
     # ★ 1b-ii: LLM type 분류 (★ candidate 의 type 결정)
     entity_type, type_confidence = _classify_type_with_llm(normalized, lang)
 
+    # ★ 1c-ii: candidate 새 entity ES insert. ★ v3 §2 verbatim:
+    # "모든 entity 참조 = entity_id. ★ 문자열 저장 경로 제거." 따라서
+    # gateway 는 ★ 반드시 entity_id 를 반환해야 한다 — 빈 문자열 path 폐기.
+    entity_id = _insert_candidate_entity(
+        client=client,
+        normalized=normalized,
+        lang=lang,
+        knowledge_space_id=knowledge_space_id,
+        entity_type=entity_type,
+        confidence=type_confidence,
+        merge_provenance={"source": "gateway_candidate", "stage": "1c-ii"},
+    )
+
     return ResolvedEntity(
-        entity_id="",  # ★ 1c 에서 ES insert 후 entity_id 채움
+        entity_id=entity_id,
         canonical_name=normalized,
         entity_type=entity_type,
         confidence=type_confidence,
@@ -402,6 +443,81 @@ def _classify_type_with_llm(surface: str, lang: str) -> tuple[str, float]:
 
     # default = concept (★ closed set 안 안전 fallback)
     return ("concept", 0.3)
+
+
+# ---------------------------------------------------------------------------
+# ★ 1c-ii: candidate entity ES insert (★ entity_id 채움)
+# ---------------------------------------------------------------------------
+
+def _insert_candidate_entity(
+    *,
+    client: Any,
+    normalized: str,
+    lang: str,
+    knowledge_space_id: str,
+    entity_type: str,
+    confidence: float,
+    merge_provenance: dict[str, Any] | None = None,
+) -> str:
+    """★ 1c-ii: persist a candidate (★ source="candidate") entity to
+    lucid_objects and return its fresh entity_id.
+
+    ★ v3 §2 verbatim:
+        "Entity (노드의 원천): entity_id (canonical, 영구), type (★ 10종
+         closed), canonical_name, aliases[], attributes,
+         merge_provenance (통합/분리 이력 — 되돌릴 수 있게)"
+
+    Writes the canonical v3 entity fields PLUS the legacy back-compat
+    fields (`class` / `entity_type` / `name` / `primary_label`) so the
+    existing recall / Decide UI display paths keep resolving labels.
+
+    Errors degrade quietly to a fresh new_uid() so the caller never sees
+    a blank entity_id (★ contract: entity_id always non-empty). The ES
+    insert failure is logged at WARNING.
+    """
+    entity_id = new_uid()
+    body: dict[str, Any] = {
+        "object_uid": entity_id,
+        # v3 §3 closed-set type (★ 10종)
+        "class": entity_type,
+        "entity_type": entity_type,
+        # Canonical natural surface — recall display reads `name`.
+        "name": normalized,
+        "primary_label": normalized,
+        "primary_lang": lang,
+        "aliases": [],
+        "properties": {},
+        "fact_uids": [],
+        "connected_objects": [],
+        "knowledge_space_id": knowledge_space_id,
+        # ★ 1c-ii: merge_provenance = v3 §2 의 "통합/분리 이력".
+        # Gateway 가 insert 한 candidate 는 source/stage/confidence 를
+        # 남겨 P2 사용자 통합 (merge) 시 되돌릴 수 있게 한다.
+        "relabel_history": [
+            {
+                "from_primary": "",
+                "to_primary": normalized,
+                "to_primary_lang": lang,
+                "reason": "REQ-004 STAGE 1c-ii gateway candidate insert",
+                "confidence": float(confidence),
+                "merge_provenance": dict(merge_provenance or {}),
+            }
+        ],
+    }
+    try:
+        client.index(
+            index=LUCID_OBJECTS,
+            id=entity_id,
+            document=body,
+            refresh="wait_for",
+        )
+    except Exception as exc:  # noqa: BLE001 - gateway must never raise out
+        logger.warning(
+            "REQ-004-1c-ii candidate insert failed for %r (type=%s): %s — "
+            "returning entity_id without ES persistence.",
+            normalized, entity_type, exc,
+        )
+    return entity_id
 
 
 def _coerce_to_v3(entity_type_raw: Any) -> str:
