@@ -483,9 +483,12 @@ def _classify_type_with_llm(surface: str, lang: str) -> tuple[str, float]:
     )
 
     try:
-        # ★ haiku 4.5 — 빠른·저비용 분류. CLAUDE_CLASSIFY_MODEL env 로 override 가능.
+        # ★ PO 2026-06-30 dogfood: Haiku 4.5 = 한국 정치 entity 약함
+        # (이준석 대표/선관위 → "기타"). ★ Sonnet 4.6 상향 = 분류 품질 = 메타네트워크
+        # 입구. 분류는 캡처당 1회라 비용 영향 작음. (★ 나머지 요약 등은 Haiku 유지 — 분류만)
+        # CLAUDE_CLASSIFY_MODEL env 로 override 가능.
         import os as _os
-        chosen_model = _os.getenv("CLAUDE_CLASSIFY_MODEL", "claude-haiku-4-5")
+        chosen_model = _os.getenv("CLAUDE_CLASSIFY_MODEL", "claude-sonnet-4-6")
         parsed = call_claude_structured(
             system_prompt=_LLM_CLASSIFY_SYSTEM_PROMPT,
             user_prompt=user_prompt,
