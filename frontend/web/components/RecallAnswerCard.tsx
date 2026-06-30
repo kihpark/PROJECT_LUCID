@@ -11,25 +11,34 @@
  *
  * v1 = 답변 본문 = 예시 (recall-history). v2 = HEARTH endpoint
  * (postAssistantBrief) 합성 결과. PO 결정 3 (★ Q&A engine = HEARTH 동일).
+ *
+ * ★ REQ-011-v2 (★ PO 2026-07-01) — 실 path 연결.
+ *   - answerText / confFacts 는 그대로 (호환 보존).
+ *   - chips 는 optional (v2 = recall API 가 chip 후보를 따로 주지 않음).
+ *   - isExample default 는 props 가 안 줄 때만 true 로 fallback 가능하도록
+ *     호출부에서 명시 전달.
+ *   - 시각 디자인 변경 0.
  */
 
 interface Props {
   answerText: string;
-  chips: string[];
+  /** v1 = 시안의 핵심 칩 행. v2 = optional (★ recall API 에는 없음). */
+  chips?: string[];
   confFacts: number;
-  /** "예시" 또는 "후속" 마커 표시 여부 (v1 = true). */
+  /** "예시" 또는 "후속" 마커 표시 여부 (v1 = true / v2 실데이터 = false). */
   isExample?: boolean;
 }
 
 export function RecallAnswerCard({
   answerText,
-  chips,
+  chips = [],
   confFacts,
   isExample = true,
 }: Props) {
   return (
     <div
       data-testid="recall-answer-card"
+      data-recall-answer-example={isExample ? 'true' : 'false'}
       style={{
         background: 'linear-gradient(180deg,#0c1417,#0a1013)',
         border: '1px solid #173028',

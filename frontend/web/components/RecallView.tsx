@@ -20,9 +20,33 @@
  *
  * 옛 API 호출 path (recall, recallBriefing, fact mutations) = 상위 페이지
  * 에서 후속 라우팅으로 복원 가능 — REQ-011 단계는 새 디자인 화면 단독.
+ *
+ * ─── ★ REQ-011-v2 (★ PO 2026-07-01) — 실 검색 path 연결. ───────────────
+ *   v1 dogfood 피드백: "recall 화면은 전부 데모용 synthetic이고 검색 자체
+ *   가 안된다." → v1 은 의도된 데이터 의존 분리였으나 사용자 관점에서
+ *   "검색 안 됨" 은 혼란. v2 는 v1 의 디자인·동선·不知 상태를 보존하면서
+ *   실 path 만 연결한다.
+ *
+ *   변경:
+ *     1. 좌측 질문 입력 + 버튼 → api.recall(spaceId, q, …) 실 호출.
+ *     2. isKnown / isUnknown 자동 결정 = recall API 응답.
+ *     3. 답변 카드 본문 = HEARTH postAssistantBrief(query, spaceId).inference.
+ *     4. 근거 fact 카드 = recall API hits[] (★ subject_label/predicate/object_*).
+ *     5. 신뢰지표 = recall API hits.length + 출처 unique count.
+ *     6. 근거 미니 그래프 = hits[] 의 entity-edge 추출 (★ literal skip).
+ *     7. 不知 = recall 결과 0 시 자동.
+ *     8. ★ entity 상세뷰 자리 (onSubjectClick) = REQ-012 EntityTypeDropdown +
+ *        MergeCandidatesModal 진입 자리 (★ RecallEntityEditModal wrapper).
+ *
+ *   유지:
+ *     - 안심 문구 = useHomeBrief().brief.totals (실데이터, 그대로).
+ *     - 최근 recall = EXAMPLE_RECENT_RECALL (★ v3 = endpoint).
+ *     - 不知 상태 1급 화면 디자인 (그대로).
+ *     - Stellar 핸드오프 자리 (비활성).
+ *     - 예시 배너 default ON — 다만 ★ 실데이터 path 동작 시 자동 OFF.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 import {
   EXAMPLE_ENTITIES,
@@ -33,11 +57,18 @@ import {
 } from '@/lib/recall-history';
 import {
   isMeaningfulLabel,
+  postAssistantBrief,
+  recall,
   searchEntitySuggestions,
 } from '@/lib/api';
 import { entityTypeLabelKo } from '@/lib/displayNames';
-import type { EntitySuggestion } from '@/lib/types';
+import type {
+  EntitySuggestion,
+  RecallFact,
+  RecallResponse,
+} from '@/lib/types';
 import { RecallAnswerCard } from './RecallAnswerCard';
+import { RecallEntityEditModal } from './RecallEntityEditModal';
 import { RecallEvidenceCard } from './RecallEvidenceCard';
 import { RecallExampleBanner } from './RecallExampleBanner';
 import { RecallMiniGraph } from './RecallMiniGraph';
@@ -70,6 +101,60 @@ function pickActive(
   return EXAMPLE_RECENT_RECALL.find((q) => q.qid === qid);
 }
 
+/** ★ REQ-011-v2 — 출처 unique count. RecallFact.source_uids 의 union size. */
+function uniqueSourceCount(resp: RecallResponse | null): number {
+  if (!resp) return 0;
+  const s = new Set<string>();
+  for (const f of resp.facts) {
+    for (const u of f.source_uids ?? []) {
+      if (u) s.add(u);
+    }
+  }
+  return s.size;
+}
+
+/** ★ REQ-011-v2 — RecallFact hits[] → mini graph data.
+ *  의뢰서 STEP 1.5 verbatim:
+ *    "subject_uid + object_uid 만 추출 (★ literal skip)."
+ *
+ *  center = 첫 fact 의 subject_label (가장 자주 등장하는 subject 로 잡지 않고
+ *  단순히 첫 번째 — 시안의 "질의 대상이 중앙" 직관과 일치, v3 에서 frequency
+ *  기반으로 교체).
+ *  nodes = (label, edge=predicate) 의 중복 제거 list. literal-only objects
+ *  (object_uid 없음) 는 시안 verbatim 의 "subject_uid + object_uid 만 추출"
+ *  지시에 따라 skip — 미니 그래프는 entity-entity 만. */
+function deriveGraphFromFacts(resp: RecallResponse | null): {
+  center: string;
+  nodes: { label: string; edge: string }[];
+} {
+  if (!resp || resp.facts.length === 0) {
+    return { center: '', nodes: [] };
+  }
+  const first = resp.facts[0]!;
+  const center = first.subject_label && first.subject_label.trim()
+    ? first.subject_label
+    : '대상';
+  const seen = new Set<string>();
+  const nodes: { label: string; edge: string }[] = [];
+  for (const fact of resp.facts) {
+    // entity-entity 만 — literal object skip.
+    if (!fact.subject_uid || !fact.object_uid) continue;
+    const label = fact.object_label && fact.object_label.trim()
+      ? fact.object_label
+      : fact.object_value;
+    if (!label) continue;
+    const edge = fact.predicate_label && fact.predicate_label.trim()
+      ? fact.predicate_label
+      : fact.predicate;
+    const key = `${label}::${edge}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    nodes.push({ label, edge });
+    if (nodes.length >= 6) break; // ★ 미니 그래프 가독성 — 시안 §10 mid count.
+  }
+  return { center, nodes };
+}
+
 export function RecallView({ spaceId }: Props) {
   // ★ PO 결정 1 — brief.totals 실데이터 (안심 문구 + 不知 대비 카드).
   //
@@ -98,10 +183,33 @@ export function RecallView({ spaceId }: Props) {
   const [showSuggest, setShowSuggest] = useState(false);
   const suggestSeqRef = useRef(0);
 
+  // ★ REQ-011-v2 — 실 검색 상태.
+  //   submittedQuery: 마지막으로 제출한 질의 (★ 답변/不知 카드 헤더에 echo).
+  //   recallResult / answer: API 응답 (null = 아직 검색 안 함 → v1 예시 mode).
+  //   isLoading: recall + brief 둘 다 동안 true.
+  //   searchError: 사용자에게 보여줄 fail message (silent 회피).
+  //   editEntity: subject 클릭 시 REQ-012 모달 진입 anchor.
+  const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
+  const [recallResult, setRecallResult] = useState<RecallResponse | null>(null);
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [editEntity, setEditEntity] = useState<
+    | { uid: string; label: string; currentType: string | null }
+    | null
+  >(null);
+  // ★ recall 응답 갱신 시그널 — REQ-012 모달에서 type/merge 변경 후 재호출.
+  const searchSeqRef = useRef(0);
+
   const active = pickActive(activeQid);
 
   const pickRecent = useCallback((qid: string) => {
     setActiveQid(qid);
+    // 최근 recall 클릭은 ★ v1 예시 mode — 실 검색 결과 초기화.
+    setRecallResult(null);
+    setAnswer(null);
+    setSubmittedQuery(null);
+    setSearchError(null);
   }, []);
 
   // ★ Debounce 200ms — 옛 SearchBar 와 동일 호흡. seq guard 로 out-of-order
@@ -132,8 +240,106 @@ export function RecallView({ spaceId }: Props) {
     return () => window.clearTimeout(timer);
   }, [queryDraft, spaceId]);
 
-  const isUnknown = active?.state === 'unknown';
-  const isKnown = active?.state === 'answer';
+  // ★ REQ-011-v2 — 실 검색 실행. 의뢰서 STEP 1.1 verbatim.
+  //   path: recall → (hits > 0 ? postAssistantBrief : 不知).
+  //   HEARTH 호출 실패는 fail-soft (답변 자리에 안내 문구) — recall 결과는
+  //   유효하므로 근거 카드 / 미니 그래프는 그대로 노출.
+  const runSearch = useCallback(
+    async (q: string) => {
+      const trimmed = q.trim();
+      if (!trimmed || !spaceId) return;
+      const seq = ++searchSeqRef.current;
+      setIsLoading(true);
+      setSearchError(null);
+      setSubmittedQuery(trimmed);
+      try {
+        const result = await recall(spaceId, trimmed, { entity: [] });
+        if (searchSeqRef.current !== seq) return;
+        setRecallResult(result);
+        if (result.facts.length > 0) {
+          try {
+            const briefResp = await postAssistantBrief(trimmed, spaceId);
+            if (searchSeqRef.current !== seq) return;
+            setAnswer(briefResp.inference);
+          } catch {
+            // fail-soft: 근거 카드는 살아 있으나 답변 자리만 안내 문구.
+            if (searchSeqRef.current !== seq) return;
+            setAnswer(
+              '검증된 사실은 확보했지만 답변 합성에 실패했습니다. 근거 카드를 참고하세요.',
+            );
+          }
+        } else {
+          setAnswer(null);
+        }
+      } catch (err) {
+        if (searchSeqRef.current !== seq) return;
+        setSearchError(
+          err instanceof Error ? err.message : '검색 실패',
+        );
+        setRecallResult(null);
+        setAnswer(null);
+      } finally {
+        if (searchSeqRef.current === seq) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [spaceId],
+  );
+
+  const onSubmit = useCallback(() => {
+    const q = queryDraft.trim();
+    if (!q) return;
+    setShowSuggest(false);
+    void runSearch(q);
+  }, [queryDraft, runSearch]);
+
+  // ★ v2 — isKnown / isUnknown 자동 결정.
+  //   recallResult 가 있으면 실데이터 mode (의뢰서 STEP 1.2):
+  //     - facts.length > 0 → isKnown.
+  //     - facts.length === 0 → isUnknown.
+  //   없으면 v1 예시 mode → active.state 로 fallback.
+  const hasRealResult = recallResult !== null;
+  const isRealKnown = hasRealResult && recallResult!.facts.length > 0;
+  const isRealUnknown = hasRealResult && recallResult!.facts.length === 0;
+  const isExampleKnown = !hasRealResult && active?.state === 'answer';
+  const isExampleUnknown = !hasRealResult && active?.state === 'unknown';
+
+  // ★ v2 — 미니 그래프 data. useMemo 로 recall 결과 변경 시에만 재계산.
+  const realGraph = useMemo(
+    () => deriveGraphFromFacts(recallResult),
+    [recallResult],
+  );
+
+  const realSourceCount = useMemo(
+    () => uniqueSourceCount(recallResult),
+    [recallResult],
+  );
+
+  // ★ v2 — RecallEvidenceCard onSubjectClick 핸들러 (REQ-012 진입 자리).
+  const openEntityEdit = useCallback(
+    (uid: string, label: string) => {
+      // RecallFact 의 subject_entity_type 을 우선, 없으면 null.
+      const matched = recallResult?.facts.find(
+        (f) => f.subject_uid === uid,
+      );
+      setEditEntity({
+        uid,
+        label,
+        currentType: matched?.subject_entity_type ?? null,
+      });
+    },
+    [recallResult],
+  );
+
+  const closeEntityEdit = useCallback(() => setEditEntity(null), []);
+
+  // REQ-012 modal 에서 변경 발생 시 recall 재호출 → 카드/그래프 갱신.
+  const onEntityChanged = useCallback(() => {
+    if (submittedQuery) {
+      void runSearch(submittedQuery);
+    }
+  }, [submittedQuery, runSearch]);
 
   return (
     <div
@@ -196,6 +402,12 @@ export function RecallView({ spaceId }: Props) {
                 setQueryDraft(e.target.value);
                 setShowSuggest(true);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  onSubmit();
+                }
+              }}
               placeholder="무엇이든 물어보세요"
               style={{
                 width: '100%',
@@ -227,6 +439,8 @@ export function RecallView({ spaceId }: Props) {
               type="button"
               data-testid="recall-submit"
               aria-label="질문 보내기"
+              onClick={onSubmit}
+              disabled={isLoading || !queryDraft.trim()}
               style={{
                 position: 'absolute',
                 right: 7,
@@ -235,13 +449,14 @@ export function RecallView({ spaceId }: Props) {
                 height: 34,
                 borderRadius: 9,
                 border: 'none',
-                cursor: 'pointer',
+                cursor: isLoading || !queryDraft.trim() ? 'default' : 'pointer',
                 background: COLORS.teal,
                 color: COLORS.textInk,
                 fontSize: 15,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                opacity: isLoading || !queryDraft.trim() ? 0.55 : 1,
               }}
             >
               →
@@ -347,7 +562,7 @@ export function RecallView({ spaceId }: Props) {
             }}
           >
             {EXAMPLE_RECENT_RECALL.map((rec) => {
-              const isActiveRec = rec.qid === activeQid;
+              const isActiveRec = !hasRealResult && rec.qid === activeQid;
               const meta = `${rec.factsLabel} · ${rec.when}`;
               return (
                 <button
@@ -715,14 +930,76 @@ export function RecallView({ spaceId }: Props) {
             minHeight: 'calc(100vh - 60px)',
           }}
         >
-          {isKnown && active && (
+          {/* ★ v2 — 로딩 상태 (검색 진행 중 simple banner). */}
+          {isLoading && (
+            <div
+              data-testid="recall-loading"
+              style={{
+                fontSize: 12,
+                color: COLORS.textSecondary,
+                marginBottom: 14,
+              }}
+            >
+              검증된 사실에서 답을 찾는 중…
+            </div>
+          )}
+          {/* ★ v2 — 오류 banner (recall 자체 실패 시). */}
+          {searchError && !isLoading && (
+            <div
+              data-testid="recall-error"
+              style={{
+                background: 'rgba(190,90,80,0.1)',
+                border: '1px solid #4d2a26',
+                color: '#d8a09a',
+                fontSize: 12,
+                padding: '10px 12px',
+                borderRadius: 10,
+                marginBottom: 14,
+              }}
+            >
+              검색 실패 — {searchError}
+            </div>
+          )}
+
+          {/* ★ v2 — 실데이터 known 상태. */}
+          {isRealKnown && submittedQuery && (
+            <RecallRealKnownPanel
+              query={submittedQuery}
+              answerText={answer ?? '답변을 합성하는 중…'}
+              facts={recallResult!.facts}
+              sourceCount={realSourceCount}
+              graphCenter={realGraph.center}
+              graphNodes={realGraph.nodes}
+              onSubjectClick={openEntityEdit}
+            />
+          )}
+          {/* ★ v2 — 실데이터 不知 상태. */}
+          {isRealUnknown && submittedQuery && (
+            <RecallUnknownState
+              queryText={submittedQuery}
+              factsCount={factsCount}
+              entitiesCount={entitiesCount}
+              onCapture={() => {
+                /* ★ v3 = /pending 또는 캡처 모달. */
+              }}
+              onAskAgain={() => {
+                setQueryDraft('');
+                setRecallResult(null);
+                setAnswer(null);
+                setSubmittedQuery(null);
+              }}
+            />
+          )}
+          {/* ★ v1 — 예시 답변 (실데이터 모드 아닐 때만). */}
+          {isExampleKnown && active && (
             <RecallKnownPanel
               query={active as RecallExampleAnswerQuery}
               showStatus={showStatus}
               onCloseBanner={() => setShowStatus(false)}
             />
           )}
-          {isUnknown && active && (
+          {/* ★ v1 — 예시 不知 (실데이터 모드 아닐 때만). */}
+          {isExampleUnknown && active && (
             <RecallUnknownState
               queryText={active.q}
               factsCount={factsCount}
@@ -737,6 +1014,20 @@ export function RecallView({ spaceId }: Props) {
           )}
         </main>
       </div>
+
+      {/* ★ v2 — REQ-012 entity 수정 모달 (subject 클릭 진입). */}
+      {editEntity && (
+        <RecallEntityEditModal
+          spaceId={spaceId}
+          entityUid={editEntity.uid}
+          primaryLabel={editEntity.label}
+          currentType={editEntity.currentType}
+          onClose={closeEntityEdit}
+          onChanged={() => {
+            onEntityChanged();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -998,6 +1289,209 @@ function RecallKnownPanel({
               캡처 →
             </button>
           </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/** ★ REQ-011-v2 — 실 검색 결과 known 패널.
+ *  RecallKnownPanel 과 시각적으로 동일한 레이아웃이지만 props 가 RecallFact[]
+ *  + 합성 answer 로 다르다. 옛 패널은 v1 예시 호환을 위해 그대로 보존. */
+interface RealKnownPanelProps {
+  query: string;
+  answerText: string;
+  facts: RecallFact[];
+  sourceCount: number;
+  graphCenter: string;
+  graphNodes: { label: string; edge: string }[];
+  onSubjectClick: (subjectUid: string, subjectLabel: string) => void;
+}
+
+function RecallRealKnownPanel({
+  query,
+  answerText,
+  facts,
+  sourceCount,
+  graphCenter,
+  graphNodes,
+  onSubjectClick,
+}: RealKnownPanelProps) {
+  return (
+    <div
+      data-testid="recall-real-known-panel"
+      data-recall-fact-count={facts.length}
+      data-recall-source-count={sourceCount}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 12,
+          marginBottom: 6,
+        }}
+      >
+        <span
+          style={{
+            marginTop: 4,
+            width: 9,
+            height: 9,
+            borderRadius: '50%',
+            flex: 'none',
+            background: COLORS.teal,
+            boxShadow: `0 0 9px ${COLORS.teal}`,
+          }}
+        />
+        <h1
+          data-testid="recall-query-echo"
+          style={{
+            margin: 0,
+            fontSize: 27,
+            fontWeight: 600,
+            letterSpacing: '-0.02em',
+            color: COLORS.textPrimary,
+            lineHeight: 1.3,
+          }}
+        >
+          {query}
+        </h1>
+      </div>
+      <div
+        className="font-mono"
+        data-testid="recall-trust-meta"
+        style={{
+          fontSize: 11,
+          letterSpacing: '0.04em',
+          color: COLORS.textDim,
+          margin: '0 0 14px',
+          paddingLeft: 21,
+        }}
+      >
+        검증된 사실 {facts.length}건 · 출처 {sourceCount}곳 근거
+      </div>
+
+      <RecallAnswerCard
+        answerText={answerText}
+        confFacts={facts.length}
+        isExample={false}
+      />
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 18,
+          alignItems: 'start',
+        }}
+      >
+        <section data-testid="recall-evidence-list">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 11,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: COLORS.textBody,
+              }}
+            >
+              근거 사실
+            </span>
+            <span style={{ fontSize: 10.5, color: '#5e7074' }}>
+              대상 클릭 → 종류·합치기 수정
+            </span>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            {facts.map((f) => (
+              <RecallEvidenceCard
+                key={f.fact_uid}
+                realFact={f}
+                onSubjectClick={onSubjectClick}
+              />
+            ))}
+          </div>
+        </section>
+
+        <section data-testid="recall-evidence-graph">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 11,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: COLORS.textBody,
+              }}
+            >
+              근거 그래프
+            </span>
+            <span
+              title="STELLAR 안정(REQ-004) 후 연결"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 11,
+                color: '#5e7074',
+                cursor: 'default',
+              }}
+            >
+              Stellar에서 펼쳐보기 →
+              <span
+                className="font-mono"
+                style={{
+                  fontSize: 8.5,
+                  letterSpacing: '0.06em',
+                  color: COLORS.textDim,
+                  border: '1px solid #1f2e2c',
+                  borderRadius: 4,
+                  padding: '1px 5px',
+                }}
+              >
+                후속
+              </span>
+            </span>
+          </div>
+          {graphNodes.length > 0 ? (
+            <RecallMiniGraph center={graphCenter} nodes={graphNodes} />
+          ) : (
+            <div
+              data-testid="recall-mini-graph-empty"
+              style={{
+                background:
+                  'radial-gradient(420px 280px at 50% 42%, #0c1519, #090d11)',
+                border: '1px solid #14211f',
+                borderRadius: 12,
+                padding: '40px 20px',
+                color: COLORS.textDim,
+                fontSize: 12,
+                textAlign: 'center',
+                minHeight: 200,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              entity-entity 연결이 없어 그래프를 그릴 수 없습니다 ·{' '}
+              근거 사실은 위에서 확인하세요
+            </div>
+          )}
         </section>
       </div>
     </div>

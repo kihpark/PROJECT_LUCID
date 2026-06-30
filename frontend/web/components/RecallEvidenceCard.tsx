@@ -10,22 +10,98 @@
  *    (상세뷰 자체는 REQ-004 후). 여러 entity 를 열어 비교."
  *
  * v1: 클릭 = 자리만 (★ entity 상세뷰 미구현).
+ *
+ * ★ REQ-011-v2 (★ PO 2026-07-01) — 실 path 연결.
+ *   두 가지 props 모드 지원:
+ *     (a) fact: RecallExampleFact — v1 EXAMPLE_RECENT_RECALL 호환 (★ 보존).
+ *     (b) realFact: RecallFact      — recall API 응답 (★ v2 신규).
+ *   onSubjectClick 도 모드별로 시그너처가 다르다:
+ *     (a) (subject_label: string)            — v1 (entity 상세뷰 진입 자리).
+ *     (b) (subject_uid, subject_label)       — v2 (★ REQ-012 entity 수정 모달 진입).
+ *
+ *   동일 시각 디자인 (의뢰서 §4-4-(좌)) 을 유지하면서, render 함수 안에서만
+ *   분기. 옛 호출부 (v1 EXAMPLE 경로) 는 한 글자도 깨지지 않는다.
  */
 
 import type { RecallExampleFact } from '@/lib/recall-history';
+import type { RecallFact } from '@/lib/types';
 
-interface Props {
+interface ExampleProps {
   fact: RecallExampleFact;
+  realFact?: undefined;
   onSubjectClick?: (subject: string) => void;
 }
 
-export function RecallEvidenceCard({
-  fact,
-  onSubjectClick,
-}: Props) {
+interface RealProps {
+  fact?: undefined;
+  realFact: RecallFact;
+  onSubjectClick?: (subjectUid: string, subjectLabel: string) => void;
+}
+
+type Props = ExampleProps | RealProps;
+
+/** ★ REQ-011-v2 — recall API → 카드 표시 라벨로의 안전 매핑.
+ *  subject_label 미해결(null) → '미해결 entity' (★ PO 의뢰서 verbatim).
+ *  object_label > object_value > '미해결' 순.
+ *  source = 첫 번째 source_uid (★ 라벨 회수는 v3 후속). */
+function deriveRealDisplay(rf: RecallFact): {
+  subject: string;
+  predicate: string;
+  object: string;
+  src: string;
+  date: string;
+  by: string;
+} {
+  return {
+    subject: rf.subject_label && rf.subject_label.trim()
+      ? rf.subject_label
+      : '미해결 entity',
+    predicate: rf.predicate_label && rf.predicate_label.trim()
+      ? rf.predicate_label
+      : rf.predicate,
+    object:
+      (rf.object_label && rf.object_label.trim())
+        || (rf.object_value && rf.object_value.trim())
+        || '미해결',
+    src: rf.source_uids[0] ?? '',
+    date: rf.validated_at?.slice(0, 10) ?? '',
+    by: rf.validator_id ?? '',
+  };
+}
+
+export function RecallEvidenceCard(props: Props) {
+  const isReal = 'realFact' in props && props.realFact !== undefined;
+
+  const display = isReal
+    ? deriveRealDisplay(props.realFact!)
+    : {
+        subject: props.fact!.s,
+        predicate: props.fact!.p,
+        object: props.fact!.o,
+        src: props.fact!.src,
+        date: props.fact!.date,
+        by: props.fact!.by,
+      };
+
+  const handleSubjectClick = () => {
+    if (isReal) {
+      const rf = props.realFact!;
+      if (rf.subject_uid) {
+        (props.onSubjectClick as
+          | ((uid: string, label: string) => void)
+          | undefined)?.(rf.subject_uid, display.subject);
+      }
+    } else {
+      (props.onSubjectClick as ((s: string) => void) | undefined)?.(
+        props.fact!.s,
+      );
+    }
+  };
+
   return (
     <div
       data-testid="recall-evidence-card"
+      data-recall-evidence-mode={isReal ? 'real' : 'example'}
       style={{
         background: '#0b1114',
         border: '1px solid #14211f',
@@ -55,7 +131,7 @@ export function RecallEvidenceCard({
         <button
           type="button"
           data-testid="recall-evidence-subject"
-          onClick={() => onSubjectClick?.(fact.s)}
+          onClick={handleSubjectClick}
           style={{
             color: '#9af0e0',
             fontWeight: 600,
@@ -79,7 +155,7 @@ export function RecallEvidenceCard({
             e.currentTarget.style.color = '#9af0e0';
           }}
         >
-          {fact.s}
+          {display.subject}
         </button>
         {/* 서술어 (관계 pill). */}
         <span
@@ -93,14 +169,14 @@ export function RecallEvidenceCard({
             padding: '1px 7px',
           }}
         >
-          {fact.p}
+          {display.predicate}
         </span>
         {/* 목적어. */}
         <span
           data-testid="recall-evidence-object"
           style={{ color: '#cbd6d8' }}
         >
-          {fact.o}
+          {display.object}
         </span>
       </div>
       {/* 메타 한 줄. */}
@@ -130,12 +206,12 @@ export function RecallEvidenceCard({
               background: '#2f6f64',
             }}
           />
-          {fact.src}
+          {display.src}
         </span>
         <span style={{ opacity: 0.4 }}>·</span>
-        <span>검증 {fact.date}</span>
+        <span>검증 {display.date}</span>
         <span style={{ opacity: 0.4 }}>·</span>
-        <span>{fact.by}</span>
+        <span>{display.by}</span>
       </div>
     </div>
   );

@@ -202,6 +202,12 @@ export interface RecallFact {
   // Null when the uid isn't in lucid_objects or when object_value is a literal.
   subject_label?: string | null;
   object_label?: string | null;
+  // ★ REQ-011-v2 (★ PO 2026-07-01) — entity-shape object 의 uid.
+  //   backend recall route 가 entity 객체일 때 채워서 보낸다 (literal 일 때 null).
+  //   미니 그래프가 entity-entity 연결만 모으는 필터 키. stellarRealAdapter
+  //   는 predicate 기반 lookup 을 쓰므로 이 필드를 안 읽지만, 이미 backend
+  //   row 에 존재해 type 만 노출되지 않은 상태였다.
+  object_uid?: string | null;
   // fix/m32b-entity-type-degree-actual-wiring (PO 2026-06-28): server-
   // resolved entity_type for the subject / entity-shape object. The
   // backend resolves lucid_objects.class on the same mget pass that
