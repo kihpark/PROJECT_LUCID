@@ -33,11 +33,15 @@ test('L1: STELLAR LEGEND is visible by default with all vocabulary items', async
 
   // Vocabulary items — WHO 3종 (person / organization / group) must be
   // distinct rows so the user can read the L2 shape distinction off the
-  // legend itself.
+  // legend itself. ★ fix/stellar-v1-v2-v4-legend-class — WHAT is split
+  // into 3 sub-rows (RESOURCE / KNOWLEDGE / TASK) so the user can tell
+  // which amber category a node belongs to.
   await expect(page.getByTestId('stellar-legend-item-person')).toBeVisible();
   await expect(page.getByTestId('stellar-legend-item-organization')).toBeVisible();
   await expect(page.getByTestId('stellar-legend-item-group')).toBeVisible();
-  await expect(page.getByTestId('stellar-legend-item-what')).toBeVisible();
+  await expect(page.getByTestId('stellar-legend-item-what-resource')).toBeVisible();
+  await expect(page.getByTestId('stellar-legend-item-what-knowledge')).toBeVisible();
+  await expect(page.getByTestId('stellar-legend-item-what-task')).toBeVisible();
   await expect(page.getByTestId('stellar-legend-item-event')).toBeVisible();
   await expect(page.getByTestId('stellar-legend-item-place')).toBeVisible();
   await expect(page.getByTestId('stellar-legend-item-claim')).toBeVisible();
