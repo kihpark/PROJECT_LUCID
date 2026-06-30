@@ -31,7 +31,8 @@ import type {
   AssistantBriefResponse,
   VerifiedFactEntry,
 } from '@/lib/types';
-import type { SphereState } from './SphereAnimation';
+// ★ REQ-007-v1 (2026-06-30) — SphereAnimation 제거 → HearthSphere 로 교체.
+import type { HearthSphereState as SphereState } from './HearthSphere';
 
 const ACCENT = '#3fe0c6';
 const TEXT_PRIMARY = '#eaf1f2';

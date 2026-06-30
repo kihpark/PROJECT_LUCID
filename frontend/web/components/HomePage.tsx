@@ -37,10 +37,18 @@ import {
   AssistantQuery,
   type AssistantQueryHandle,
 } from './AssistantQuery';
+/**
+ * ★ REQ-007-v1 (2026-06-30) — SphereAnimation → HearthSphere 입자 코어 교체.
+ * 기존 4 상태 sphere 코드 제거 (중복 0 — PO 직접 지시).
+ *
+ * SphereState 별칭은 호출부 광범위 호환을 위해 유지.
+ */
 import {
-  SphereAnimation,
-  type SphereState,
-} from './SphereAnimation';
+  HearthSphere,
+  type HearthSphereState,
+} from './HearthSphere';
+
+export type SphereState = HearthSphereState;
 
 const ACCENT = '#3fe0c6';
 const BG = '#06080b';
@@ -1039,7 +1047,7 @@ function HomeShellCommon({
           alignItems: 'center',
         }}
       >
-        <SphereAnimation state={sphereState} />
+        <HearthSphere state={sphereState} />
         <BrandLine />
         <GreetingH1 name={userName} />
         {children}
