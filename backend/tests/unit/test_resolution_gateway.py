@@ -12,9 +12,15 @@ from unittest.mock import MagicMock, patch
 from api.structure.resolution_gateway import ResolvedEntity, resolve
 
 
+@patch.dict("os.environ", {"CROSS_LINGUAL_CANONICAL_ENABLED": "0"})
 @patch("api.structure.resolution_gateway.get_embedding")
 def test_resolve_returns_ResolvedEntity_contract(mock_emb):
-    """★ 1a contract: resolve 가 ResolvedEntity 반환 (★ embedding path)."""
+    """★ 1a contract: resolve 가 ResolvedEntity 반환 (★ embedding path).
+
+    ★ PO 2026-06-30: cross-lingual canonical check 가 exact 와 kNN 사이에
+    추가되었으므로, ★ 이 단위 test 는 cross-lingual 을 끄고 ★ 순수 kNN
+    path 만 검증한다 (★ cross-lingual 검증은 test_cross_lingual_canonical.py).
+    """
     mock_emb.return_value = tuple([0.1] * 1536)
     client = MagicMock()
     # ★ exact cascade 4 tier miss → kNN hit (★ 1b cascade)
@@ -38,9 +44,13 @@ def test_resolve_returns_ResolvedEntity_contract(mock_emb):
     assert result.confidence >= 0.95
 
 
+@patch.dict("os.environ", {"CROSS_LINGUAL_CANONICAL_ENABLED": "0"})
 @patch("api.structure.resolution_gateway.get_embedding")
 def test_resolve_below_threshold_returns_candidate(mock_emb):
-    """★ kNN 낮은 score (< 0.70 disambig floor) → candidate."""
+    """★ kNN 낮은 score (< 0.70 disambig floor) → candidate.
+
+    ★ PO 2026-06-30: cross-lingual disabled (★ 이 test 는 ★ kNN path 만).
+    """
     mock_emb.return_value = tuple([0.1] * 1536)
     client = MagicMock()
     client.search.side_effect = [

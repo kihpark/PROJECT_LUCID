@@ -158,9 +158,14 @@ def test_1b_iii_brand_alias_after_particle_strip(mock_emb):
 # ★ 1b-iv: kNN 다단계 band (★ object_matcher 0.70-0.95 흡수)
 # ---------------------------------------------------------------------------
 
+@patch.dict("os.environ", {"CROSS_LINGUAL_CANONICAL_ENABLED": "0"})
 @patch("api.structure.resolution_gateway.get_embedding")
 def test_1b_iv_embedding_kNN_high_score_returns_embedding(mock_emb):
-    """★ 1b-iv: kNN score >= 0.95 → source=embedding."""
+    """★ 1b-iv: kNN score >= 0.95 → source=embedding.
+
+    ★ PO 2026-06-30: cross-lingual canonical check 가 exact 와 kNN 사이에
+    추가됨. 이 test 는 ★ kNN path 만 검증하므로 cross-lingual 을 끈다.
+    """
     mock_emb.return_value = tuple([0.1] * 1536)
     client = MagicMock()
     # exact path = miss (4 tier), kNN = hit 0.97

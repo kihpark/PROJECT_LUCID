@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
 import logging
+import os
 import re
 
 from elasticsearch import Elasticsearch
@@ -30,6 +31,19 @@ from api.storage.elasticsearch.client import LUCID_OBJECTS, get_client
 from api.storage.elasticsearch.embeddings import get_embedding
 
 logger = logging.getLogger("lucid.structure.resolution_gateway")
+
+
+# ★ PO 2026-06-30: cross-lingual canonical 보강. 옛 "삼성전자" / "Samsung
+# Electronics" 가 ★ 따로 entity 로 떨어진 문제 → exact-match miss 후 ★ Claude
+# 에게 "동일 entity?" 묻고 ★ alias 자동 추가. STEP 0 진단:
+#   - cosine('삼성전자','Samsung Electronics') = 0.6439 (★ < DISAMBIG_FLOOR 0.70)
+#   - cosine('SK하이닉스','SK Hynix')          = 0.4378
+#   - 게다가 ★ 옛 entity 169개 중 0개만 embedding 보유 → kNN ★ 무의미
+# 결론: ★ Option C (★ embedding + Claude). kNN 으로 후보 잡고 Claude 가 결정.
+# ★ env CROSS_LINGUAL_CANONICAL_ENABLED=0 로 끌 수 있음 (★ test default off).
+def _cross_lingual_enabled() -> bool:
+    raw = os.getenv("CROSS_LINGUAL_CANONICAL_ENABLED", "1").strip().lower()
+    return raw not in ("", "0", "false", "no", "off")
 
 
 # v3 §3: 10종 closed set
@@ -158,6 +172,20 @@ def resolve(
     if exact_hit is not None:
         return exact_hit
 
+    # ★ PO 2026-06-30 cross-lingual canonical: ★ exact miss 후, ★ embedding
+    # kNN 진입 전에 BM25 후보 → Claude "동일 entity?" 게이트.
+    # ★ 옛 entity 들이 embedding 없음 + 한/영 cosine 0.4-0.6 → kNN 가 ★ 못 잡음.
+    # 따라서 ★ 텍스트 후보 + Claude 가 ★ 유일한 cross-lingual canonical 경로.
+    cross_hit = _cross_lingual_canonical_check(
+        client=client,
+        surface=surface,
+        normalized=normalized,
+        lang=lang,
+        knowledge_space_id=knowledge_space_id,
+    )
+    if cross_hit is not None:
+        return cross_hit
+
     # ★ 1a 보존 + 1b-iv: embedding kNN 다단계 band
     knn_hit = _embedding_knn_match(
         client=client,
@@ -278,6 +306,314 @@ def _exact_match_cascade(
             source="exact",
         )
     return None
+
+
+# ---------------------------------------------------------------------------
+# ★ PO 2026-06-30: cross-lingual canonical check (★ 삼성전자 ↔ Samsung Electronics)
+# ---------------------------------------------------------------------------
+
+# ★ BM25 후보 수 — 너무 크면 Claude 입력 토큰 폭주, 너무 작으면 cross-lingual
+# 후보 누락. 8 = 한 KS 안 동일 class 의 자주 거론된 entity 다 잡기 충분.
+CROSS_LINGUAL_CANDIDATE_K: int = 8
+
+# ★ Claude 호출 비용 절감: 후보 0 개면 호출 skip.
+# ★ Claude 가 너무 자주 "같다" 라고 거짓 양성을 내면 ★ off 로 켜는 env knob.
+_CROSS_LINGUAL_SYSTEM_PROMPT = (
+    "You are a cross-lingual entity canonicalizer. Given a new surface form "
+    "and a list of existing entities (with names, name_en, aliases, class), "
+    "decide if the new surface refers to the SAME REAL-WORLD ENTITY as one "
+    "of the candidates.\n\n"
+    "★ Cross-lingual focus: 삼성전자 = Samsung Electronics, SK하이닉스 = "
+    "SK Hynix, 현대자동차 = Hyundai Motor. Also handle abbreviation "
+    "(SK Inc. ≠ SK하이닉스), translation variants (한국은행 = Bank of "
+    "Korea), and transliteration (스페이스X = SpaceX).\n\n"
+    "★ Rules:\n"
+    "- ONLY match if you are HIGHLY confident the two surfaces denote the "
+    "  same legal/real entity (not just a related entity).\n"
+    "- '삼성' (parent) ≠ '삼성전자' (subsidiary).\n"
+    "- 'Samsung Group' ≠ 'Samsung Electronics'.\n"
+    "- 'SK' alone is ambiguous — DO NOT match to 'SK하이닉스' or 'SK텔레콤' "
+    "  unless context disambiguates.\n"
+    "- Different classes (organization vs person) → NEVER match.\n\n"
+    "Output ONLY a single JSON object: "
+    '{"match_index": <int or null>, "confidence": <0.0-1.0>, '
+    '"reason": "<short string>"}\n'
+    "- match_index = 0-based index into the candidates list, or null if no "
+    "  match.\n"
+    "- confidence < 0.85 → treat as null (the caller will ignore).\n"
+    "★ no prose, no markdown fence."
+)
+
+# ★ 같은 entity 로 판정되려면 Claude confidence ≥ 0.85 필요. 너무 낮추면
+# false-positive (옛 SK Inc. 와 SK하이닉스 잘못 묶임), 너무 높이면 false-negative.
+CROSS_LINGUAL_MIN_CONFIDENCE: float = 0.85
+
+
+def _fetch_cross_lingual_candidates(
+    *,
+    client: Any,
+    surface: str,
+    normalized: str,
+    knowledge_space_id: str,
+) -> list[dict[str, Any]]:
+    """★ BM25 후보 수집 (★ name / name_en / aliases / primary_label).
+
+    ★ 두 surface 다 시도 (★ "삼성전자" 입력 → name_en 분석기는 koren X →
+    한국어 surface 가 name_en 분석기로 안 잡혀도 ★ name 분석기로 잡힘).
+    ★ multi_match 의 best_fields 로 OR 결합.
+    """
+    # ★ 입력 surface 와 정규화된 surface 둘 다 BM25 — normalize 가 brand alias
+    # 영문 변환을 이미 했으면 영문 surface 가 name_en 에 hit 가능.
+    queries = [normalized]
+    if surface and surface.strip() and surface.strip() != normalized:
+        queries.append(surface.strip())
+
+    hits: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for q in queries:
+        try:
+            resp = client.search(
+                index=LUCID_OBJECTS,
+                size=CROSS_LINGUAL_CANDIDATE_K,
+                query={
+                    "bool": {
+                        "filter": [
+                            {"term": {"knowledge_space_id": knowledge_space_id}},
+                        ],
+                        "must": [
+                            {
+                                "multi_match": {
+                                    "query": q,
+                                    "fields": [
+                                        "name^2",
+                                        "name_en^2",
+                                        "aliases",
+                                        "primary_label",
+                                    ],
+                                    "type": "best_fields",
+                                }
+                            }
+                        ],
+                    }
+                },
+            )
+        except Exception:  # noqa: BLE001 - degrade quietly
+            continue
+        for h in (resp.get("hits") or {}).get("hits") or []:
+            hid = h.get("_id")
+            if not hid or hid in seen_ids:
+                continue
+            seen_ids.add(hid)
+            hits.append(h)
+            if len(hits) >= CROSS_LINGUAL_CANDIDATE_K:
+                break
+        if len(hits) >= CROSS_LINGUAL_CANDIDATE_K:
+            break
+    return hits
+
+
+def _cross_lingual_canonical_check(
+    *,
+    client: Any,
+    surface: str,
+    normalized: str,
+    lang: str,
+    knowledge_space_id: str,
+) -> Optional[ResolvedEntity]:
+    """★ PO 2026-06-30: BM25 후보 → Claude "동일 entity?" → alias 추가.
+
+    Returns ResolvedEntity(source="exact", confidence=conf) if Claude
+    confirms cross-lingual canonical match, else None.
+
+    ★ Degrade quietly: Claude 호출 실패 / claude_client import 실패 /
+    환경변수로 disabled / candidate 0개 → None (★ 후속 kNN / candidate path).
+
+    ★ Match 성공 시: 새 surface 를 ★ 기존 entity 의 aliases 에 추가
+    (★ best-effort, 실패는 silent — match 자체는 유효).
+    """
+    if not _cross_lingual_enabled():
+        return None
+    # ★ Short-circuit when Claude is unreachable so we don't burn ES
+    # searches in test envs / no-key envs. The check needs Claude — without
+    # it, BM25 alone isn't a canonical decision (★ false-positive 위험).
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return None
+
+    candidates = _fetch_cross_lingual_candidates(
+        client=client,
+        surface=surface,
+        normalized=normalized,
+        knowledge_space_id=knowledge_space_id,
+    )
+    if not candidates:
+        return None
+
+    # ★ Claude 입력으로 펴치기 (★ 한국어 + 영어 surface 다 포함)
+    candidate_view: list[dict[str, Any]] = []
+    for h in candidates:
+        s = h.get("_source") or {}
+        candidate_view.append({
+            "name": s.get("name") or "",
+            "name_en": s.get("name_en") or "",
+            "aliases": list(s.get("aliases") or [])[:6],
+            "class": s.get("class") or s.get("entity_type") or "",
+            "primary_lang": s.get("primary_lang") or "",
+        })
+
+    try:
+        from api.structure.claude_client import call_claude_structured
+    except Exception as exc:  # noqa: BLE001
+        logger.info(
+            "cross-lingual canonical: claude_client import failed for %r: %s",
+            normalized, exc,
+        )
+        return None
+
+    import json as _json
+    user_prompt = (
+        f"new_surface: {normalized!r}\n"
+        f"original_input: {surface!r}\n"
+        f"source language: {lang}\n\n"
+        "candidates (0-indexed):\n"
+        + _json.dumps(candidate_view, ensure_ascii=False, indent=2)
+        + "\n\nWhich candidate (if any) denotes the SAME entity? JSON only."
+    )
+
+    try:
+        import os as _os
+        chosen_model = _os.getenv(
+            "CLAUDE_CANONICAL_MODEL",
+            _os.getenv("CLAUDE_CLASSIFY_MODEL", "claude-sonnet-4-6"),
+        )
+        parsed = call_claude_structured(
+            system_prompt=_CROSS_LINGUAL_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            max_tokens=120,
+            model=chosen_model,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.info(
+            "cross-lingual canonical Claude call failed for %r: %s",
+            normalized, exc,
+        )
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+    match_index = parsed.get("match_index")
+    raw_conf = parsed.get("confidence")
+    reason = parsed.get("reason") if isinstance(parsed.get("reason"), str) else ""
+
+    if match_index is None:
+        return None
+    if not isinstance(match_index, int):
+        try:
+            match_index = int(match_index)
+        except (TypeError, ValueError):
+            return None
+    if match_index < 0 or match_index >= len(candidates):
+        return None
+    try:
+        confidence = float(raw_conf) if raw_conf is not None else 0.0
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence < CROSS_LINGUAL_MIN_CONFIDENCE:
+        logger.info(
+            "cross-lingual canonical: low confidence %.3f for %r → reject "
+            "(reason=%s)", confidence, normalized, reason[:80],
+        )
+        return None
+
+    matched = candidates[match_index]
+    src = matched.get("_source") or {}
+    entity_id = matched.get("_id") or src.get("object_uid") or ""
+    if not entity_id:
+        return None
+    entity_type_raw = (
+        src.get("entity_type")
+        or src.get("class")
+        or "concept"
+    )
+
+    # ★ Best-effort alias 추가 — 실패해도 match 자체는 유효.
+    _append_alias_best_effort(
+        client=client,
+        entity_id=entity_id,
+        new_surface=surface.strip() if surface and surface.strip() else normalized,
+        existing_aliases=list(src.get("aliases") or []),
+    )
+
+    logger.info(
+        "cross-lingual canonical match: %r → entity_id=%s confidence=%.3f "
+        "(reason=%s)", normalized, entity_id[:8], confidence, reason[:80],
+    )
+    return ResolvedEntity(
+        entity_id=entity_id,
+        canonical_name=src.get("primary_label") or src.get("name") or normalized,
+        entity_type=_coerce_to_v3(entity_type_raw),
+        confidence=confidence,
+        # ★ source="exact" — caller / downstream metrics 가 ★ 동일하게 취급.
+        # cross-lingual canonical 은 ★ exact 의 한 종류 (★ Claude 가 별칭 동치 확인).
+        source="exact",
+    )
+
+
+# ★ Alias 비대 가드 — 너무 많아지면 ES doc bloat. 32 = 충분히 크고
+# 한 entity 의 cross-lingual / abbreviation / typo variant 다 잡기 충분.
+ALIAS_MAX_PER_ENTITY: int = 32
+
+
+def _append_alias_best_effort(
+    *,
+    client: Any,
+    entity_id: str,
+    new_surface: str,
+    existing_aliases: list[str],
+) -> None:
+    """★ Best-effort: append new_surface to entity.aliases if absent.
+
+    ★ Silent degrade — ES update 실패해도 caller 는 ★ 영향 받지 않음.
+    ★ Dedup: existing aliases 안에 이미 있으면 skip.
+    ★ Cap: ALIAS_MAX_PER_ENTITY 초과 시 skip (★ doc bloat 방지).
+    """
+    if not entity_id or not new_surface:
+        return
+    surface = new_surface.strip()
+    if not surface:
+        return
+    # ★ dedup (case-insensitive 한 비교 — 한국어는 그대로, 영어는 lower)
+    existing_lower = {str(a).strip().lower() for a in existing_aliases if a}
+    if surface.lower() in existing_lower:
+        return
+    if len(existing_aliases) >= ALIAS_MAX_PER_ENTITY:
+        logger.info(
+            "alias cap reached for entity_id=%s (%d aliases) — skip %r",
+            entity_id[:8], len(existing_aliases), surface,
+        )
+        return
+    try:
+        client.update(
+            index=LUCID_OBJECTS,
+            id=entity_id,
+            script={
+                "source": (
+                    "if (ctx._source.aliases == null) { "
+                    "ctx._source.aliases = []; "
+                    "} "
+                    "if (!ctx._source.aliases.contains(params.alias)) { "
+                    "ctx._source.aliases.add(params.alias); "
+                    "}"
+                ),
+                "lang": "painless",
+                "params": {"alias": surface},
+            },
+            refresh="wait_for",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "alias append best-effort failed for entity_id=%s alias=%r: %s",
+            entity_id[:8], surface, exc,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +924,21 @@ def _insert_candidate_entity(
     # = top-level new fields rejected — so the needs_review / confidence
     # signal goes into `properties` (a dynamic_object field) instead.
     needs_review = bool(confidence < 0.5)
+    # ★ PO 2026-06-30: 옛 entity 169 / 0 = embedding 누락. ★ candidate
+    # insert 시 embedding 생성해서 ★ future kNN 가능하게. get_embedding 은
+    # OPENAI_API_KEY 없으면 None — None 이면 field 생략 (★ mapping strict O,
+    # 다만 embedding 은 optional dense_vector).
+    embedding_vec = None
+    try:
+        _ev = get_embedding(normalized)
+        if _ev is not None:
+            embedding_vec = list(_ev)
+    except Exception as exc:  # noqa: BLE001
+        logger.info(
+            "candidate insert: embedding generation failed for %r: %s "
+            "(persist without embedding)", normalized, exc,
+        )
+
     body: dict[str, Any] = {
         "object_uid": entity_id,
         # v3 §3 closed-set type (★ 10종)
@@ -629,6 +980,8 @@ def _insert_candidate_entity(
             }
         ],
     }
+    if embedding_vec is not None:
+        body["embedding"] = embedding_vec
     try:
         client.index(
             index=LUCID_OBJECTS,
