@@ -127,6 +127,222 @@ function ChevronDown() {
   );
 }
 
+/** REQ-009 (★ PO 2026-06-30) — 언어 설정 entry point.
+ *
+ * PO 의뢰서 verbatim:
+ *   • 한/영 진입점이 ★ 화면에 없음 → REQ-002 displayNames 맵 위에 노출
+ *   • ★ i18n 베타 = 영어 진입 X (★ 지금은 entry point 만)
+ *
+ * 구현:
+ *   • AppShell header 의 profile menu 좌측에 globe 아이콘 + "한국어" 라벨
+ *   • 클릭 시 작은 dropdown — "한국어 (현재)" / "English (베타 준비 중)"
+ *   • "English" 클릭 → 진입 X, "i18n 베타 준비 중" 메시지 표시
+ *
+ * ★ 상태 저장 0 (현재): displayNames.ts 가 한국어 only — 영어 매핑 추가는
+ *   후속 PR. 이번 PR 은 ★ 진입점 노출 + 사용자 가시화 만.
+ */
+function LanguageMenu() {
+  const [open, setOpen] = useState(false);
+  const [betaNotice, setBetaNotice] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocDown(e: MouseEvent) {
+      const node = ref.current;
+      if (node && e.target instanceof Node && !node.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [open]);
+
+  // beta 안내 자동 dismiss (3s).
+  useEffect(() => {
+    if (!betaNotice) return;
+    const id = window.setTimeout(() => setBetaNotice(false), 3000);
+    return () => window.clearTimeout(id);
+  }, [betaNotice]);
+
+  return (
+    <div
+      ref={ref}
+      style={{ position: 'relative' }}
+      data-testid="app-shell-lang-container"
+    >
+      <button
+        type="button"
+        data-testid="app-shell-lang-trigger"
+        aria-expanded={open}
+        aria-label="언어 설정"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '5px 8px',
+          borderRadius: 9,
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          color: TEXT_BODY,
+          fontSize: 13,
+        }}
+      >
+        {/* Globe icon — inline SVG (외부 의존성 0) */}
+        <svg
+          width={16}
+          height={16}
+          viewBox="0 0 16 16"
+          aria-hidden="true"
+          style={{ display: 'block' }}
+        >
+          <circle
+            cx={8}
+            cy={8}
+            r={6.5}
+            fill="none"
+            stroke={TEXT_SECONDARY}
+            strokeWidth={1.2}
+          />
+          <ellipse
+            cx={8}
+            cy={8}
+            rx={2.5}
+            ry={6.5}
+            fill="none"
+            stroke={TEXT_SECONDARY}
+            strokeWidth={1.2}
+          />
+          <line
+            x1={1.5}
+            y1={8}
+            x2={14.5}
+            y2={8}
+            stroke={TEXT_SECONDARY}
+            strokeWidth={1.2}
+          />
+        </svg>
+        <span data-testid="app-shell-lang-current">한국어</span>
+        <ChevronDown />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          data-testid="app-shell-lang-menu"
+          style={{
+            position: 'absolute',
+            top: 38,
+            right: 0,
+            width: 220,
+            background: MENU_BG,
+            border: `1px solid ${MENU_BORDER}`,
+            borderRadius: 13,
+            padding: 8,
+            boxShadow: '0 20px 50px rgba(0,0,0,0.55)',
+            zIndex: 60,
+          }}
+        >
+          <div
+            style={{
+              padding: '6px 10px 10px',
+              fontSize: 11,
+              letterSpacing: '0.14em',
+              color: TEXT_DIM,
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            }}
+          >
+            LANGUAGE
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="app-shell-lang-option-ko"
+            onClick={() => setOpen(false)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              width: '100%',
+              padding: '9px 10px',
+              borderRadius: 8,
+              fontSize: 14,
+              color: ACCENT,
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <span>한국어</span>
+            <span
+              aria-hidden="true"
+              style={{ fontSize: 12, color: ACCENT }}
+            >
+              현재
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="app-shell-lang-option-en"
+            onClick={() => {
+              // ★ PO 의뢰서 verbatim — "i18n 베타 = 영어 진입 X".
+              // 진입점만 노출 → 클릭 시 안내 메시지 (자동 3s dismiss).
+              setBetaNotice(true);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              width: '100%',
+              padding: '9px 10px',
+              borderRadius: 8,
+              fontSize: 14,
+              color: TEXT_BODY,
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <span>English</span>
+            <span
+              style={{
+                fontSize: 11,
+                color: TEXT_DIM,
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                letterSpacing: '0.06em',
+              }}
+            >
+              BETA
+            </span>
+          </button>
+          {betaNotice ? (
+            <div
+              data-testid="app-shell-lang-beta-notice"
+              role="status"
+              style={{
+                marginTop: 6,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: `color-mix(in oklab, ${ACCENT} 8%, transparent)`,
+                border: `1px solid color-mix(in oklab, ${ACCENT} 25%, transparent)`,
+                color: TEXT_BODY,
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              영어 모드는 베타 준비 중입니다. 곧 만나뵐게요.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ProfileMenu({
   name,
   email,
@@ -456,7 +672,18 @@ export function AppShell({ children, userName, userEmail }: AppShellProps) {
             <NavLink key={item.href} item={item} active={isActive(item.href)} />
           ))}
         </nav>
-        <ProfileMenu name={name} email={email} />
+        {/* REQ-009 — 언어 entry + profile menu 묶음 (★ 우측 상단 cluster). */}
+        <div
+          data-testid="app-shell-right-cluster"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <LanguageMenu />
+          <ProfileMenu name={name} email={email} />
+        </div>
       </header>
       <main
         data-testid="app-shell-main"

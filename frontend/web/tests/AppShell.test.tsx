@@ -316,6 +316,67 @@ describe('AppShell', () => {
     );
   });
 
+  // -------------------------------------------------------------------------
+  // REQ-009 (★ PO 2026-06-30) — 언어 설정 entry point
+  // -------------------------------------------------------------------------
+
+  it('REQ-009 — header 에 언어 entry (★ "한국어" + globe) 노출', () => {
+    render(
+      <AppShell>
+        <div>child</div>
+      </AppShell>,
+    );
+    const trigger = screen.getByTestId('app-shell-lang-trigger');
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-label', '언어 설정');
+    expect(screen.getByTestId('app-shell-lang-current')).toHaveTextContent(
+      '한국어',
+    );
+  });
+
+  it('REQ-009 — 드롭다운 열림: 한국어 (현재) / English (BETA)', () => {
+    render(
+      <AppShell>
+        <div>child</div>
+      </AppShell>,
+    );
+    expect(
+      screen.queryByTestId('app-shell-lang-menu'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('app-shell-lang-trigger'));
+    const menu = screen.getByTestId('app-shell-lang-menu');
+    expect(menu).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-lang-option-ko')).toHaveTextContent(
+      '한국어',
+    );
+    expect(screen.getByTestId('app-shell-lang-option-ko')).toHaveTextContent(
+      '현재',
+    );
+    expect(screen.getByTestId('app-shell-lang-option-en')).toHaveTextContent(
+      'English',
+    );
+    expect(screen.getByTestId('app-shell-lang-option-en')).toHaveTextContent(
+      'BETA',
+    );
+  });
+
+  it('REQ-009 — English 클릭 → 베타 안내 노출 (★ 진입 X)', () => {
+    render(
+      <AppShell>
+        <div>child</div>
+      </AppShell>,
+    );
+    fireEvent.click(screen.getByTestId('app-shell-lang-trigger'));
+    fireEvent.click(screen.getByTestId('app-shell-lang-option-en'));
+    const notice = screen.getByTestId('app-shell-lang-beta-notice');
+    expect(notice).toBeInTheDocument();
+    expect(notice).toHaveTextContent('베타 준비 중');
+    // 현재 표시는 여전히 한국어 (★ 진입 X 검증).
+    expect(screen.getByTestId('app-shell-lang-current')).toHaveTextContent(
+      '한국어',
+    );
+  });
+
   it('B-61 — renders me.email when useAuthMe returns a me object', async () => {
     useAuthMeMock.mockReturnValue({
       me: {
