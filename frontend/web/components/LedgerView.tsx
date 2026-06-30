@@ -220,7 +220,11 @@ function LedgerCard({ fact }: LedgerCardProps) {
     >
       <header className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
-          <FactTypeBadge factType={fact.fact_type} factUid={fact.fact_uid} />
+          <FactTypeBadge
+            factType={fact.fact_type}
+            factUid={fact.fact_uid}
+            speechAct={fact.speech_act}
+          />
         </div>
         <time
           className="font-mono text-xxs text-text-muted"
