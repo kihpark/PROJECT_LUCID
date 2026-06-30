@@ -75,7 +75,12 @@ def test_properties_dict_still_coerced_to_plain_dict():
 def test_b37_end_to_end_matches_fact_subject_uid():
     """The point of the fix: after both serialisers run with the
     same uid_map, fact.subject_uid and obj.uid carry identical
-    canonical strings — that's the join key FactCard needs."""
+    canonical strings — that's the join key FactCard needs.
+
+    ★ STAGE 1c-vii: ACTION + literal "85.7 billion USD" 는 validator 가
+    raise. fact_type=claim 으로 우회 (수치 literal 의도 = CLAIM/MEASUREMENT
+    영역; 여기서는 surface join 만 검증).
+    """
     from api.structure.models import StructureFact
     from api.structure.processor import _serialize_struct_fact
 
@@ -91,6 +96,7 @@ def test_b37_end_to_end_matches_fact_subject_uid():
             "negation_flag": False,
             "negation_scope": None,
             "tags_suggested": [],
+            "fact_type": "claim",
         },
     )
     uid_map = {"obj-1": "canonical-spacex"}

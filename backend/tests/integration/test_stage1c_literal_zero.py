@@ -22,7 +22,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from api.structure.models import StructureFact, StructureObject
+from pydantic import ValidationError
+
+from api.structure.models import StructureFact, StructureObject, V3LiteralObjectError
 from api.structure.processor import _serialize_struct_fact
 
 pytestmark = pytest.mark.integration
@@ -85,27 +87,35 @@ def _obj(uid: str = "obj-1", name: str = "샘플 엔티티") -> StructureObject:
 # 1. ★ ACTION fact → ES 저장 직전 직렬화 → literal object_value 0
 # ---------------------------------------------------------------------------
 
-def test_action_fact_literal_object_is_stripped() -> None:
-    """★ 1c-iii acceptance: literal=0.
+def test_action_fact_literal_object_raises_at_validator() -> None:
+    """★ 1c-vii STRICT REJECT (★ PO 2026-06-30): literal=raise.
 
-    LLM 이 흘린 literal ("강재호") 가 uid_map 으로 매핑 안 되면 ★ ES 저장
-    직전 ★ "" 로 strip 되고 needs_review=True 가 자동 부여된다. v3 §2:
-    "모든 entity 참조 = entity_id. ★ 문자열 저장 경로 제거."
+    LLM 이 흘린 literal ("강재호") 가 ACTION fact 의 object_value 로 들어오면
+    ★ pydantic model_validator 단계에서 V3LiteralObjectError 가 raise 된다.
+    pydantic 은 validator ValueError 를 ValidationError 로 wrap; 내부의
+    V3LiteralObjectError 는 ``err['ctx']['error']`` 로 접근 가능하고
+    claude_client `_build_result` 는 이를 unwrap 해 propagate 한다.
+    1c-iii 의 silent strip + needs_review 자동 부여 패턴은 ★ 폐기.
     """
-    fact = _fact(
-        fact_type="action",
-        subject_uid="obj-1",
-        object_value="강재호",  # ★ literal — uid_map 에 없음
-        predicate="언급했다",
-        claim="이재명이 강재호를 언급했다.",
-    )
-    uid_map = {"obj-1": "11111111-1111-1111-1111-111111111111"}
-    out = _serialize_struct_fact(fact, uid_map=uid_map)
-    assert out["fact_type"] == "action"
-    assert out["object_value"] == "", (
-        f"★ 1c-iii literal 잔재: object_value={out['object_value']!r}"
-    )
-    assert out["needs_review"] is True
+    with pytest.raises(ValidationError) as exc_info:
+        _fact(
+            fact_type="action",
+            subject_uid="obj-1",
+            object_value="강재호",  # ★ literal — validator 가 raise
+            predicate="언급했다",
+            claim="이재명이 강재호를 언급했다.",
+        )
+    # ★ ValidationError 내부에 V3LiteralObjectError 가 wrap 되어 있어야 한다
+    found = False
+    for err in exc_info.value.errors():
+        ctx = err.get("ctx") or {}
+        if isinstance(ctx.get("error"), V3LiteralObjectError):
+            found = True
+            break
+        if "V3 위반" in (err.get("msg") or ""):
+            found = True
+            break
+    assert found, f"V3 violation not found: {exc_info.value.errors()}"
 
 
 def test_action_fact_resolved_entity_id_passes_through() -> None:
@@ -127,18 +137,22 @@ def test_action_fact_resolved_entity_id_passes_through() -> None:
     assert out["object_value"] == real_uid
 
 
-def test_action_fact_placeholder_leak_is_stripped() -> None:
-    """★ 1c-iii: obj-N placeholder 가 uid_map 에 없어 매핑 실패한 경우도
-    literal 과 동일하게 ★ "" 로 strip 된다 (★ entity_id only invariant)."""
+def test_action_fact_placeholder_leak_raises_at_serialize() -> None:
+    """★ 1c-vii STRICT REJECT (★ PO 2026-06-30): placeholder leak=raise.
+
+    obj-N placeholder 가 validator 는 통과 (entity_id shape) 했지만
+    uid_map 에 없어 canonical UUID 변환 실패 → ES 저장 직전
+    `_serialize_struct_fact` 가 V3LiteralObjectError 를 raise 한다.
+    1c-iii 의 silent strip 폐기.
+    """
     fact = _fact(
         fact_type="action",
         subject_uid="obj-1",
-        object_value="obj-999",  # ★ uid_map 에 없음 → leak
+        object_value="obj-999",  # ★ validator 통과 (shape OK), uid_map 누락
     )
     uid_map = {"obj-1": "11111111-1111-1111-1111-111111111111"}
-    out = _serialize_struct_fact(fact, uid_map=uid_map)
-    assert out["object_value"] == ""
-    assert out["needs_review"] is True
+    with pytest.raises(V3LiteralObjectError, match="placeholder-leak"):
+        _serialize_struct_fact(fact, uid_map=uid_map)
 
 
 def test_claim_fact_literal_object_is_NOT_stripped() -> None:

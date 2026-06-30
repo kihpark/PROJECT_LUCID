@@ -32,11 +32,15 @@ _UUID4_RE = re.compile(
 
 def _make_struct_fact(uid: str, subject_uid: str, predicate: str,
                       object_value: str, claim: str = "x"):
+    # ★ STAGE 1c-vii: ACTION + literal object_value 는 validator 가 raise.
+    # 이 helper 는 fact_uid 매핑 로직 검증용이라 fact_type 은 무관 →
+    # CLAIM 으로 우회해 literal 보존.
     from api.structure.models import StructureFact
     return StructureFact(
         uid=uid, claim=claim, type="proposition",
         subject_uid=subject_uid, predicate=predicate,
         object_value=object_value,
+        fact_type="claim",
     )
 
 

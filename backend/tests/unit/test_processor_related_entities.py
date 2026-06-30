@@ -80,8 +80,16 @@ def test_extract_related_entity_uids_uid_map_fallthrough():
 def test_extract_related_entity_uids_non_claim_passthrough():
     """non-CLAIM fact 도 helper 자체는 fact_type 분기 없이 동일하게
     동작한다 (★ 단순성 — 분기 = 미래 버그). LLM 이 보통 emit 하지 않
-    아 빈 array 가 자연 결과지만, 만약 LLM 이 emit 하면 그대로 보존."""
-    f = _fact(fact_type="action", related_entity_uids=["obj-2"])
+    아 빈 array 가 자연 결과지만, 만약 LLM 이 emit 하면 그대로 보존.
+
+    ★ STAGE 1c-vii: ACTION + literal object_value 는 validator 가 raise —
+    object_value 를 obj-N placeholder 로 변경 (validator 통과).
+    """
+    f = _fact(
+        fact_type="action",
+        object_value="obj-2",
+        related_entity_uids=["obj-2"],
+    )
     out = _extract_related_entity_uids(f, {"obj-2": "obj-canonical-aweb"})
     assert out == ["obj-canonical-aweb"]
 
@@ -168,7 +176,19 @@ def test_serialize_writes_related_entity_uids_field():
 def test_serialize_non_claim_fact_emits_empty_array():
     """non-CLAIM fact 의 직렬화는 related_entity_uids=[] 로 평탄 처리.
     분기 = 미래 버그 (PO 결정 6 의 단순성 원칙). ES keyword null 처리
-    덕에 facet/count 에 영향 없음."""
-    f = _fact(fact_type="action", related_entity_uids=None)
-    d = _serialize_struct_fact(f, uid_map={"obj-1": "U1", "obj-2": "U2"})
+    덕에 facet/count 에 영향 없음.
+
+    ★ STAGE 1c-vii: ACTION → object_value obj-N 사용 + uid_map 의 값을
+    canonical UUID4 로 변경해 serialize strict reject 통과.
+    """
+    f = _fact(
+        fact_type="action",
+        object_value="obj-2",
+        related_entity_uids=None,
+    )
+    uid_map = {
+        "obj-1": "11111111-1111-1111-1111-111111111111",
+        "obj-2": "22222222-2222-2222-2222-222222222222",
+    }
+    d = _serialize_struct_fact(f, uid_map=uid_map)
     assert d["related_entity_uids"] == []

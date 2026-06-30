@@ -132,12 +132,14 @@ def test_dry_run_returns_counts_and_does_not_mutate(
 # ---------------------------------------------------------------------------
 
 def test_apply_is_gated_on_po_command():
-    """apply() must raise NotImplementedError until the PO command lands.
+    """apply() must raise NotImplementedError without force_po_approval=True.
 
-    The follow-up "wipe 실행" PR removes the single ``raise`` line. If
-    that PR lands without the PO approving the dry-run report, this
-    test fails — which is exactly the gate the PO 의뢰서 specifies:
-    'wipe 함수 구조 작성 (★ NotImplementedError 가드 유지)'.
+    REQ-004 STAGE 1c-vii (★ PO 2026-06-30): the previous "wipe 실행"
+    unblock PR (8d68825, 2026-06-28) removed this guard prematurely.
+    PO directive verbatim: "wipe NotImplementedError 가드 ★ 왜 풀렸는지
+    확인 + PO 승인 게이트 재설치." The new shape requires the caller to
+    pass ``force_po_approval=True`` explicitly — automated scripts /
+    tests that don't pass the flag continue to hit the raise.
     """
     with pytest.raises(NotImplementedError) as excinfo:
         wipe_data.apply()

@@ -95,7 +95,13 @@ def test_structure_result_ignores_top_level_extra_fields() -> None:
 def test_structure_fact_without_subject_surface() -> None:
     """The LLM may omit subject_surface entirely under the simpler
     prompt. The fact still parses; subject_surface defaults None and
-    the processor's `_match_object` falls back to obj.name."""
+    the processor's `_match_object` falls back to obj.name.
+
+    ★ STAGE 1c-vii (★ PO 2026-06-30): ACTION + literal object_value
+    는 validator 가 raise — 이 surface-field 회귀 테스트는 ``claim``
+    fact_type 으로 우회. ACTION literal 의 raise 동작은 별도
+    ``test_stage1c_vii_strict_reject.py`` 가 잡는다.
+    """
     fact = StructureFact.model_validate({
         "uid": "fn-1",
         "type": "proposition",
@@ -103,6 +109,7 @@ def test_structure_fact_without_subject_surface() -> None:
         "subject_uid": "obj-1",
         "predicate": "announced",
         "object_value": "수출통제 조치",
+        "fact_type": "claim",
     })
     assert fact.subject_surface is None
     assert fact.object_surface is None
@@ -112,11 +119,11 @@ def test_structure_fact_without_object_surface_or_negation() -> None:
     """object_surface, negation_flag, negation_scope, tags_suggested
     are all optional. Atomic SPO content is what matters.
 
-    REQ-004 STAGE 1c-iii: ACTION fact 의 literal object_value 는 ★ v3
-    schema guard 가 ★ "literal_object_v3" 태그를 자동 부여한다 (raise
-    없음 — capture-naver-fix 회귀 방지). 그래서 fact_type 명시가
-    없는 (default action) literal "GPT-5" 인 이 케이스는 태그 1개를 받는다.
-    fact_type="claim" / "measurement" 면 가드가 무관 → 빈 태그 유지.
+    REQ-004 STAGE 1c-vii (★ PO 2026-06-30): ACTION fact 의 literal
+    object_value 는 ★ V3LiteralObjectError 로 raise 한다 (1c-iii 의
+    silent tag 패턴 폐기). 따라서 이 테스트는 fact_type 을 ``claim``
+    으로 명시해 ★ literal 경로의 raise 를 피하고, optional 필드 기본값만
+    검증한다. ACTION literal 의 raise 동작은 별도 1c-vii 테스트가 잡는다.
     """
     fact = StructureFact.model_validate({
         "uid": "fn-1",
@@ -125,12 +132,14 @@ def test_structure_fact_without_object_surface_or_negation() -> None:
         "subject_uid": "obj-1",
         "predicate": "announced",
         "object_value": "GPT-5",
+        # ★ STAGE 1c-vii: ACTION + literal object_value 는 validator 가
+        # raise — optional 필드 검증을 위해 claim 으로 우회.
+        "fact_type": "claim",
     })
     assert fact.negation_flag is False
     assert fact.negation_scope is None
-    # ★ STAGE 1c-iii v3 schema guard: ACTION literal object_value 감지 →
-    # "literal_object_v3" 태그 자동 부여 (★ raise 없음, log + tag).
-    assert fact.tags_suggested == ["literal_object_v3"]
+    # ★ STAGE 1c-vii: CLAIM fact 는 가드 무관 → 자동 태그 없음.
+    assert fact.tags_suggested == []
 
     # ★ CLAIM fact 의 object_value 는 의도적으로 발화 내용 literal —
     # 가드 무관, 태그 0.
@@ -169,7 +178,13 @@ def test_structure_fact_object_link_ignores_extras() -> None:
 
 def test_full_minimal_envelope_parses() -> None:
     """A real-world minimal LLM response: one object, one fact, no
-    surface fields, no link tables. The whole envelope must parse."""
+    surface fields, no link tables. The whole envelope must parse.
+
+    ★ STAGE 1c-vii (★ PO 2026-06-30): ACTION + literal object_value
+    는 validator 가 raise. envelope shape 회귀 테스트는 fact_type
+    ``claim`` 으로 우회. v3 ACTION literal 의 raise 동작은 별도
+    ``test_stage1c_vii_strict_reject.py`` 가 잡는다.
+    """
     minimal = {
         "objects": [
             {"uid": "obj-1", "class": "organization", "name": "중국"},
@@ -182,6 +197,7 @@ def test_full_minimal_envelope_parses() -> None:
                 "subject_uid": "obj-1",
                 "predicate": "announced",
                 "object_value": "수출통제 조치",
+                "fact_type": "claim",
             },
         ],
         "extraction_status": "success",

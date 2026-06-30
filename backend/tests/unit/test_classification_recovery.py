@@ -37,14 +37,19 @@ def test_all_few_shot_facts_carry_fact_type() -> None:
 
 
 def test_structure_fact_back_compat_defaults_to_action() -> None:
-    """Legacy payloads without fact_type still validate (defaults to action)."""
+    """Legacy payloads without fact_type still validate (defaults to action).
+
+    ★ STAGE 1c-vii: ACTION + literal object_value 는 validator 가 raise.
+    default=action 검증을 위해 object_value 는 entity_id shape (obj-2)
+    으로 변경 — validator 통과 + 기본값 검증 보존.
+    """
     fact = StructureFact.model_validate({
         "uid": "fn-1",
         "claim": "X did Y.",
         "type": "proposition",
         "subject_uid": "obj-1",
         "predicate": "did",
-        "object_value": "Y",
+        "object_value": "obj-2",
     })
     assert fact.fact_type == "action"
 

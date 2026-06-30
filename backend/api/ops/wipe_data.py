@@ -20,13 +20,16 @@ Usage::
     # Dry-run (★ safe, 0 mutation)
     docker compose exec backend python -m api.ops.wipe_data
 
-    # Apply (★ NotImplementedError 가드 — 실행 안 됨 until 별도 PR)
-    docker compose exec backend python -m api.ops.wipe_data --apply
+    # Apply (★ NotImplementedError 가드 — STAGE 1c-vii 재설치 by PO 2026-06-30)
+    docker compose exec backend python -m api.ops.wipe_data --apply \\
+        --force-po-approval
 
-The CLI intentionally exposes ``--apply`` so the PO-approval gate is
-visible: the flag is parsed, ``apply()`` is called, and the call
-raises ``NotImplementedError``. The follow-up "wipe 실행" PR will
-remove the one-line raise and add the caller invocation.
+The CLI exposes ``--apply`` and ``--force-po-approval`` as two separate
+flags so the PO-approval gate is explicit: ``--apply`` alone raises
+``NotImplementedError`` (STAGE 1c-vii re-installed guard), and
+``--force-po-approval`` is the secondary confirmation that must be
+passed verbatim from the CLI. Automated Python scripts / tests must
+never pass this flag — they only see the raise.
 """
 from __future__ import annotations
 
@@ -141,14 +144,18 @@ def dry_run() -> dict[str, Any]:
 # Apply — ★ PO 가드. 실제 wipe 코드는 작성 완료, NotImplementedError 로 차단.
 # ---------------------------------------------------------------------------
 
-def apply() -> dict[str, Any]:
-    """Execute the global wipe. ★ PO 명시 명령 후 별도 PR.
+def apply(*, force_po_approval: bool = False) -> dict[str, Any]:
+    """Execute the global wipe. ★ PO 직접 명령 + force_po_approval=True 필요.
 
-    The body below is the wipe implementation that will run after the
-    follow-up PR removes the one-line ``raise`` and adds the caller
-    invocation. It is checked in (as a commented-out block) so the PR
-    review surfaces the exact mutation surface — there is no "design
-    later, ship later" gap.
+    REQ-004 STAGE 1c-vii (★ PO 2026-06-30): NotImplementedError 가드 재설치.
+    이전에 한 번 wipe-apply-unblock (8d68825, 2026-06-28) 으로 가드가 풀렸으나
+    ★ STAGE 1c-vii 의 strict reject 검증 + 새 캡처 검증이 끝나기 전까지
+    실제 wipe 는 차단되어야 한다. PO 결정 verbatim:
+        "★ wipe apply 는 ★ PO 직접 명령 + force_po_approval=True 필요.
+         현재 dry-run 만 허용."
+
+    `force_po_approval` flag 는 ★ CLI 의 명시적 옵션으로만 전달 가능 —
+    Python script 의 자동 호출은 ★ 명시 전달 없이 raise 한다.
 
     Order of operations (★ PO 의뢰서 verbatim — mapping 보존):
       1. ES delete_by_query match_all on lucid_facts / lucid_objects /
@@ -163,10 +170,19 @@ def apply() -> dict[str, Any]:
     alembic_version / archetype_surveys / graph_notes) are NEVER
     touched.
     """
-    # ★ PO "wipe 실행" 명령 후 가드 해제 (2026-06-28).
-    # dry-run 검토 완료: kihpark85@gmail.com 외 8 user 보존 확인.
+    if not force_po_approval:
+        raise NotImplementedError(
+            "★ wipe apply 는 ★ PO 직접 명령 + force_po_approval=True 필요. "
+            "현재 dry-run 만 허용 (STAGE 1c-vii 의 strict reject 검증 + "
+            "새 캡처 검증 후 별도 PO approval). "
+            "Data wipe is gated on explicit PO command — pass "
+            "force_po_approval=True from the CLI flag only, never from "
+            "an automated Python script. "
+            "Follow-up PR will remove this raise after PO approves the "
+            "dry-run report (separate PR)."
+        )
 
-    # === 실제 wipe 코드 ===
+    # === 실제 wipe 코드 (★ force_po_approval=True 일 때만 도달) ===
     SessionLocal = make_sessionmaker()
     c = get_client()
     deleted: dict[str, Any] = {"pg": {}, "es": {}}
@@ -199,14 +215,28 @@ def main(argv: list[str] | None = None) -> int:
         "--apply",
         action="store_true",
         help=(
-            "Run the actual wipe. ★ Currently raises NotImplementedError "
-            "as a PO gate. The follow-up PR removes the raise after PO "
-            "approves the dry-run report."
+            "Run the actual wipe. ★ Requires --force-po-approval as a "
+            "separate explicit flag — STAGE 1c-vii guard. Without it, "
+            "apply() raises NotImplementedError."
+        ),
+    )
+    parser.add_argument(
+        "--force-po-approval",
+        action="store_true",
+        help=(
+            "★ PO 직접 명령 확인 플래그 (STAGE 1c-vii). 반드시 CLI 에서 "
+            "명시적으로 전달해야 wipe 가 실행된다. 자동 스크립트 / 테스트는 "
+            "이 플래그를 절대 전달하지 X."
         ),
     )
     args = parser.parse_args(argv)
     if args.apply:
-        print(json.dumps(apply(), ensure_ascii=False, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                apply(force_po_approval=args.force_po_approval),
+                ensure_ascii=False, indent=2, sort_keys=True,
+            )
+        )
     else:
         print(
             json.dumps(

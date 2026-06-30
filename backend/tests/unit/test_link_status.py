@@ -96,13 +96,21 @@ def test_serialize_wires_link_status_for_claim_and_action():
     """End-to-end serializer wire — _serialize_struct_fact emits
     `link_status` derived from `fact_type`. CLAIM → claimed, ACTION
     → verified. ★ provenance 게이트의 데이터 표현이 직렬화 단계에
-    박혀 STELLAR 가 doc 만 보고 점/실선을 결정할 수 있다."""
+    박혀 STELLAR 가 doc 만 보고 점/실선을 결정할 수 있다.
+
+    ★ STAGE 1c-vii: ACTION 의 object_value 는 canonical UUID4 강제 —
+    uid_map 의 값을 UUID4 shape 으로 변경 (strict reject 통과).
+    """
+    uid_map = {
+        "obj-1": "11111111-1111-1111-1111-111111111111",
+        "obj-2": "22222222-2222-2222-2222-222222222222",
+    }
     f_claim = _fact(fact_type="claim")
-    d_claim = _serialize_struct_fact(f_claim, uid_map={"obj-1": "U1", "obj-2": "U2"})
+    d_claim = _serialize_struct_fact(f_claim, uid_map=uid_map)
     assert d_claim["link_status"] == "claimed"
     assert d_claim["fact_type"] == "claim"
 
     f_action = _fact(fact_type="action")
-    d_action = _serialize_struct_fact(f_action, uid_map={"obj-1": "U1", "obj-2": "U2"})
+    d_action = _serialize_struct_fact(f_action, uid_map=uid_map)
     assert d_action["link_status"] == "verified"
     assert d_action["fact_type"] == "action"

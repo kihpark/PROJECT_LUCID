@@ -63,6 +63,9 @@ EINFOMAX_LLM_PAYLOAD = {
             "negation_scope": None,
             "tags_suggested": ["M&A"],
             "valid_from": "2025-01-16T07:42:00",
+            # ★ STAGE 1c-vii: 발화 내용 / 거래 방법은 CLAIM 의도 의
+            # literal 이므로 fact_type=claim 명시 (default action 은 raise).
+            "fact_type": "claim",
         },
     ],
     "fact_object_links": [
@@ -82,6 +85,8 @@ EINFOMAX_LLM_PAYLOAD = {
 
 
 def test_structure_fact_drops_valid_from_silently():
+    # ★ STAGE 1c-vii: ACTION + literal "o" → raise. fact_type=claim 으로
+    # 우회해 ``extra="ignore"`` 가 valid_from 을 drop 하는 behaviour 만 검증.
     f = StructureFact.model_validate(
         {
             "uid": "fn-1",
@@ -94,6 +99,7 @@ def test_structure_fact_drops_valid_from_silently():
             "negation_scope": None,
             "tags_suggested": [],
             "valid_from": "2025-01-16",
+            "fact_type": "claim",
         },
     )
     assert f.uid == "fn-1"
@@ -103,7 +109,11 @@ def test_structure_fact_drops_valid_from_silently():
 
 def test_structure_fact_drops_unknown_future_field():
     """Future-proofing: a brand-new key the LLM invents must also
-    drop, not crash."""
+    drop, not crash.
+
+    ★ STAGE 1c-vii: ACTION + literal "o" → raise; fact_type=claim 으로
+    우회해 extra-key drop behaviour 만 검증.
+    """
     f = StructureFact.model_validate(
         {
             "uid": "fn-1",
@@ -117,6 +127,7 @@ def test_structure_fact_drops_unknown_future_field():
             "tags_suggested": [],
             "confidence": 0.9,
             "source_quote": "hallucinated key",
+            "fact_type": "claim",
         },
     )
     assert f.uid == "fn-1"
