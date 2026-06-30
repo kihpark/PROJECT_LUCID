@@ -22,7 +22,7 @@
  * 에서 후속 라우팅으로 복원 가능 — REQ-011 단계는 새 디자인 화면 단독.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 import {
   EXAMPLE_ENTITIES,
@@ -31,6 +31,12 @@ import {
   type RecallExampleQuery,
   type RecallExampleAnswerQuery,
 } from '@/lib/recall-history';
+import {
+  isMeaningfulLabel,
+  searchEntitySuggestions,
+} from '@/lib/api';
+import { entityTypeLabelKo } from '@/lib/displayNames';
+import type { EntitySuggestion } from '@/lib/types';
 import { RecallAnswerCard } from './RecallAnswerCard';
 import { RecallEvidenceCard } from './RecallEvidenceCard';
 import { RecallExampleBanner } from './RecallExampleBanner';
@@ -65,13 +71,17 @@ function pickActive(
 }
 
 export function RecallView({ spaceId }: Props) {
-  void spaceId; // ★ v1 = spaceId 미사용 (★ v2 = recall/briefing endpoint 연결).
-
   // ★ PO 결정 1 — brief.totals 실데이터 (안심 문구 + 不知 대비 카드).
+  //
+  // ★ M-Dogfood-C 가드 (PO 2026-07-01): 옛 코드는 `brief?.totals.facts` 였
+  //   는데 mock 환경 일부에서 brief 가 `{}` (totals 미포함) 으로 도달하면
+  //   `.facts` 가 undefined 에서 throw → 페이지 전체 runtime error. 추가
+  //   `?.` 한 단계로 totals 미포함 케이스를 안전하게 처리. ★ 비즈니스 동작
+  //   변화 0 (totals 있는 정상 응답은 그대로).
   const { brief } = useHomeBrief();
-  const factsCount = brief?.totals.facts ?? 0;
-  const entitiesCount = brief?.totals.entities ?? 0;
-  const sourcesCount = brief?.totals.sources ?? 0;
+  const factsCount = brief?.totals?.facts ?? 0;
+  const entitiesCount = brief?.totals?.entities ?? 0;
+  const sourcesCount = brief?.totals?.sources ?? 0;
 
   // 활성 질의 = 시안 default q1 (SpaceX 답변).
   const [activeQid, setActiveQid] = useState<string>('q1');
@@ -79,11 +89,48 @@ export function RecallView({ spaceId }: Props) {
   const [showStatus, setShowStatus] = useState(true); // ★ 예시 배너 default ON.
   const [queryDraft, setQueryDraft] = useState<string>('');
 
+  // ★ M-Dogfood-C (PO 2026-07-01) — 옛 SearchBar 의 자동완성을 신규 디자인
+  //   에도 복원. 핵심은 lib/api::isMeaningfulLabel 회귀 가드 — 백엔드가 "."
+  //   같은 무의미 라벨을 흘려보내도 frontend 가 filter 해 dropdown 에 0건.
+  //   searchEntitySuggestions 자체가 isMeaningfulLabel 을 적용하므로 호출
+  //   부는 결과만 받으면 자동으로 안전.
+  const [suggestions, setSuggestions] = useState<EntitySuggestion[]>([]);
+  const [showSuggest, setShowSuggest] = useState(false);
+  const suggestSeqRef = useRef(0);
+
   const active = pickActive(activeQid);
 
   const pickRecent = useCallback((qid: string) => {
     setActiveQid(qid);
   }, []);
+
+  // ★ Debounce 200ms — 옛 SearchBar 와 동일 호흡. seq guard 로 out-of-order
+  //   응답 충돌 방지 (사용자가 빠르게 입력 시 마지막 query 의 결과만 반영).
+  useEffect(() => {
+    const trimmed = queryDraft.trim();
+    if (!spaceId || !trimmed || !isMeaningfulLabel(trimmed)) {
+      setSuggestions([]);
+      return;
+    }
+    const seq = ++suggestSeqRef.current;
+    const timer = window.setTimeout(() => {
+      searchEntitySuggestions(trimmed, spaceId, 5)
+        .then((items) => {
+          if (suggestSeqRef.current !== seq) return;
+          // Belt + suspenders: api.ts 가 이미 isMeaningfulLabel 로 필터링하지만
+          // 한 번 더 컴포넌트에서 가드한다 (★ 회귀 가드 — api 회귀 시에도
+          // dropdown 에 "." 표시 0).
+          setSuggestions(
+            items.filter((it) => isMeaningfulLabel(it.primary_label)),
+          );
+        })
+        .catch(() => {
+          if (suggestSeqRef.current !== seq) return;
+          setSuggestions([]);
+        });
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [queryDraft, spaceId]);
 
   const isUnknown = active?.state === 'unknown';
   const isKnown = active?.state === 'answer';
@@ -145,7 +192,10 @@ export function RecallView({ spaceId }: Props) {
             <input
               data-testid="recall-input"
               value={queryDraft}
-              onChange={(e) => setQueryDraft(e.target.value)}
+              onChange={(e) => {
+                setQueryDraft(e.target.value);
+                setShowSuggest(true);
+              }}
               placeholder="무엇이든 물어보세요"
               style={{
                 width: '100%',
@@ -164,10 +214,13 @@ export function RecallView({ spaceId }: Props) {
                   'rgba(45,212,191,0.55)';
                 e.currentTarget.style.boxShadow =
                   '0 0 0 3px rgba(45,212,191,0.1)';
+                setShowSuggest(true);
               }}
               onBlur={(e) => {
                 e.currentTarget.style.borderColor = COLORS.borderInput;
                 e.currentTarget.style.boxShadow = 'none';
+                // 약간 딜레이 — dropdown 내부 클릭이 onBlur 보다 먼저 실행되도록.
+                window.setTimeout(() => setShowSuggest(false), 120);
               }}
             />
             <button
@@ -193,6 +246,54 @@ export function RecallView({ spaceId }: Props) {
             >
               →
             </button>
+            {/* ★ M-Dogfood-C (PO 2026-07-01) — 자동완성 dropdown. 옛 SearchBar
+             *  와 동일 형상. isMeaningfulLabel 가드가 api 와 컴포넌트 양쪽에
+             *  걸려 있어 "." 가 dropdown 에 등장하면 회귀 (e2e:
+             *  req011-dot-suggestion-regression.spec.ts). */}
+            {showSuggest && suggestions.length > 0 ? (
+              <ul
+                data-testid="recall-suggest-dropdown"
+                style={{
+                  position: 'absolute',
+                  top: 52,
+                  left: 0,
+                  right: 0,
+                  margin: 0,
+                  padding: '4px 0',
+                  listStyle: 'none',
+                  background: COLORS.bgInput,
+                  border: `1px solid ${COLORS.borderInput}`,
+                  borderRadius: 10,
+                  boxShadow: '0 6px 18px rgba(0,0,0,0.45)',
+                  maxHeight: 260,
+                  overflowY: 'auto',
+                  zIndex: 20,
+                }}
+              >
+                {suggestions.map((s) => (
+                  <li
+                    key={s.entity_id}
+                    data-testid="recall-suggest-item"
+                    data-primary-label={s.primary_label}
+                    onMouseDown={(e) => {
+                      // ★ onMouseDown (not onClick) so the selection commits
+                      //   BEFORE input.onBlur fires.
+                      e.preventDefault();
+                      setQueryDraft(s.primary_label);
+                      setShowSuggest(false);
+                    }}
+                    style={{
+                      padding: '7px 12px',
+                      fontSize: 13,
+                      color: COLORS.textBody,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {s.primary_label}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
 
           {/* ★ 안심 문구 = brief.totals 실데이터 (PO 결정 1). */}
@@ -362,6 +463,11 @@ export function RecallView({ spaceId }: Props) {
             {EXAMPLE_ENTITIES.map((e) => (
               <span
                 key={e.name}
+                data-testid="recall-facet-entity-chip"
+                data-entity-name={e.name}
+                data-entity-type={e.entity_type}
+                data-entity-type-ko={entityTypeLabelKo(e.entity_type)}
+                data-entity-count={e.count}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -376,6 +482,21 @@ export function RecallView({ spaceId }: Props) {
                 }}
               >
                 {e.name}
+                {/* ★ M-Dogfood-C (PO 2026-07-01) — entity_type 한국어 배지.
+                 *  facet 패널 회귀 시 박원갑이 "사람" 으로 분류되지 않으면
+                 *  req011-recall-facet-regression spec 가 즉시 잡는다. */}
+                <span
+                  data-testid="recall-facet-entity-type"
+                  style={{
+                    fontSize: 10,
+                    color: '#7d8e92',
+                    border: '1px solid #18262a',
+                    borderRadius: 4,
+                    padding: '0 4px',
+                  }}
+                >
+                  {entityTypeLabelKo(e.entity_type)}
+                </span>
                 <span
                   className="font-mono"
                   style={{ fontSize: 10, color: '#5a8f86' }}

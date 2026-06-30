@@ -120,13 +120,26 @@ export const EXAMPLE_RECENT_RECALL: RecallExampleQuery[] = [
 ];
 
 // 의뢰서 §3-5 verbatim — 그래프 렌즈 패섯 예시 (★ v1 = 예시, v2 = facets endpoint).
-export const EXAMPLE_ENTITIES: { name: string; count: number }[] = [
-  { name: 'SpaceX', count: 14 },
-  { name: '바이오빅데이터', count: 9 },
-  { name: '입법연구', count: 7 },
-  { name: '홍명보', count: 5 },
-  { name: '나스닥', count: 4 },
-  { name: '골드만삭스', count: 3 },
+//
+// ★ M-Dogfood-C (PO 2026-07-01) — recall-facet 회귀 가드 위한 entity_type
+// 분류 보강. v1 의 예시 데이터가 facet 패널의 "사람/조직/장소" 분류 회귀
+// 검증의 fixture 역할. 박원갑 = 사람 fact 가 의도적으로 끼어 있어 회귀
+// 시 "사람 분류 사라짐"이 즉시 잡힌다. entity_type 은 closed set v3 어휘
+// (lib/displayNames.ts ENTITY_TYPE_LABELS_KO 와 1:1).
+export type RecallExampleEntity = {
+  name: string;
+  count: number;
+  entity_type: string;
+};
+
+export const EXAMPLE_ENTITIES: RecallExampleEntity[] = [
+  { name: 'SpaceX', count: 14, entity_type: 'organization' },
+  { name: '바이오빅데이터', count: 9, entity_type: 'concept' },
+  { name: '입법연구', count: 7, entity_type: 'concept' },
+  { name: '홍명보', count: 5, entity_type: 'person' },
+  { name: '박원갑', count: 4, entity_type: 'person' },
+  { name: '나스닥', count: 4, entity_type: 'organization' },
+  { name: '골드만삭스', count: 3, entity_type: 'organization' },
 ];
 
 export const EXAMPLE_PREDICATES: { name: string; count: number }[] = [

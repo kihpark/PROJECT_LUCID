@@ -43,6 +43,13 @@ export interface LegendSpec {
   bucket: LegendBucket;
   /** Sub-bucket label for V1+ (WHAT 의 RESOURCE / KNOWLEDGE / TASK). */
   subBucket?: string;
+  /** ★ M-Dogfood-C (PO 2026-07-01) — WHAT 묶음 시각 보강.
+   *  WHAT 의 cube/sphere/diamond 형태는 WHO 묶음 (organization/person/group)
+   *  과 형태가 겹친다 (색만 다름). 사용자가 "이 cube 가 조직인가 자원인가" 를
+   *  즉각 구분할 수 있도록 LEGEND 의 WHAT 행에 한국어 sub-bucket 한 글자
+   *  배지를 별도로 노출한다. WHO / WHERE / EVENT / CLAIM / unknown 은 undefined
+   *  (배지 미노출). */
+  subBucketLabelKo?: string;
   /** Korean label shown in the legend row. */
   label: string;
   /** Entity-type tokens this spec matches — used for both renderer dispatch
@@ -96,6 +103,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     key: 'what-resource',
     bucket: 'WHAT',
     subBucket: 'RESOURCE',
+    subBucketLabelKo: '자원',
     label: '자원·제품',
     entity_types: ['resource', 'product'],
     shape: 'cube',
@@ -105,6 +113,7 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     key: 'what-knowledge',
     bucket: 'WHAT',
     subBucket: 'KNOWLEDGE',
+    subBucketLabelKo: '개념',
     label: '개념·지식',
     entity_types: ['concept', 'knowledge'],
     shape: 'sphere',
@@ -114,12 +123,13 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     key: 'what-task',
     bucket: 'WHAT',
     subBucket: 'TASK',
+    subBucketLabelKo: '행위',
     label: '행위·역할',
     // procedure / service / problem / metric — backend taxonomy 의 "task"
     // family. ★ entity_types 에 없는 새 토큰이 들어와도 unknown 으로 fallback
     // 하므로 안전. metric 도 여기에 끼워 두면 metric 노드가 LEGEND 한 자리에
     // 표시된다.
-    entity_types: ['procedure', 'service', 'problem', 'metric'],
+    entity_types: ['procedure', 'service', 'problem', 'metric', 'task'],
     shape: 'diamond',
     color: ENTITY_COLORS.product,
   },

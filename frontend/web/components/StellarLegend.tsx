@@ -278,6 +278,31 @@ export function StellarLegend(props: StellarLegendProps = {}): React.ReactElemen
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {spec.label}
                 </span>
+                {/* ★ M-Dogfood-C (PO 2026-07-01) — WHAT 묶음의 cube/sphere/
+                 *  diamond 형태가 WHO 묶음과 겹치는 문제 보강. WHAT 의 sub-
+                 *  bucket (자원/개념/행위) 을 한국어 한 글자 배지로 LEGEND
+                 *  옆에 노출 → 사용자가 "같은 cube 라도 amber + 자원 배지면
+                 *  자원, cyan 이면 조직" 으로 두 채널 (색·배지) 로 확실히
+                 *  구분할 수 있다. WHO/WHERE/EVENT/CLAIM/unknown 은 미노출. */}
+                {spec.subBucketLabelKo ? (
+                  <span
+                    data-testid={`stellar-legend-subbucket-${spec.key}`}
+                    data-sub-bucket-ko={spec.subBucketLabelKo}
+                    style={{
+                      flexShrink: 0,
+                      fontSize: 9,
+                      letterSpacing: '0.04em',
+                      color: spec.color,
+                      border: `1px solid ${spec.color}`,
+                      borderRadius: 3,
+                      padding: '1px 4px',
+                      marginRight: 2,
+                      opacity: 0.82,
+                    }}
+                  >
+                    {spec.subBucketLabelKo}
+                  </span>
+                ) : null}
                 {/* ★ V1++ — per-category count. Always rendered (even when 0)
                  *  so the dashboard "지금 분포 = 0" 도 명시적으로 보인다.
                  *  data-testid 는 카운트 만 추출 가능하게 분리. */}
