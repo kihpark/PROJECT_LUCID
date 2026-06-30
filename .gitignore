@@ -30,3 +30,4 @@ backend/.faiss_index/
 
 # REQ-007 핸드오프 reference (코드 아님, ZIP 풀어둠)
 design_handoff_hearth_sphere/
+design_handoff_recall_redesign/
