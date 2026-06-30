@@ -3,6 +3,11 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { ActionButton } from './ActionButton';
 import { GraphNoteEditor } from './GraphNoteEditor';
+import {
+  ClaimModalityBadge,
+  classifyClaimModality,
+  MODALITY_LABEL,
+} from './ClaimModalityBadge';
 import { searchEntitySuggestions, listPredicates } from '@/lib/api';
 import type { FactAction, FactSummary, ObjectSummary, EntitySuggestion, PredicateEntry } from '@/lib/types';
 import type { Lang } from './LangToggle';
@@ -37,16 +42,24 @@ export interface FactTypeFields {
 }
 
 export function FactTypeBadge({
-  factType, factUid,
-}: { factType: FactTypeFields['fact_type']; factUid: string }) {
+  factType, factUid, speechAct,
+}: { factType: FactTypeFields['fact_type']; factUid: string; speechAct?: string | null }) {
   if (factType === 'claim') {
+    // ★ REQ-004 결함 2 (PO 2026-06-30) — claim modality 표시 전 화면 일관.
+    // 옛: CLAIM 배지만 → 단정/판단/의견 구분 없음 (사용자가 양태를 알 길 0).
+    // fix: CLAIM 배지 옆에 modality 배지를 동반 출력. 분류 안 되면 modality
+    // 배지 자체가 null 을 반환하므로 옛 동작과 회귀 0.
+    const modality = classifyClaimModality(speechAct);
     return (
-      <span
-        data-testid={`fact-claim-badge-${factUid}`}
-        className="inline-flex items-center text-xxs font-mono text-accent-cool bg-accent-cool/10 border border-accent-cool/30 rounded px-1.5 py-0.5"
-        title="화자 인용 (one-hop provenance — 내용 진실은 보증되지 않음)"
-      >
-        CLAIM
+      <span className="inline-flex items-center gap-1">
+        <span
+          data-testid={`fact-claim-badge-${factUid}`}
+          className="inline-flex items-center text-xxs font-mono text-accent-cool bg-accent-cool/10 border border-accent-cool/30 rounded px-1.5 py-0.5"
+          title="화자 인용 (one-hop provenance — 내용 진실은 보증되지 않음)"
+        >
+          CLAIM
+        </span>
+        <ClaimModalityBadge modality={modality} factUid={factUid} />
       </span>
     );
   }
@@ -86,21 +99,36 @@ export function FactTypeStrip({
   // PO claim-display-format (recovery spec PR B): bold speaker WITHOUT
   // brackets, brackets around speech_act, quotes around content_claim.
   // Visual: **국가데이터처**[발표했다]: "4월 기준 증가율은…"
+  //
+  // ★ REQ-004 결함 2 (PO 2026-06-30) — modality 표시 전 화면 일관.
+  // speech_act 가 modality 키워드 (assertion / judgment / opinion 동의어)
+  // 면 raw 영문 token 대신 한국어 양태 라벨 (단정 / 판단 / 의견) 을 strip
+  // 의 brackets 안에 노출한다. 분류 안 되는 verb (예: "발표했다") 는
+  // 옛 동작 verbatim (raw text). data-modality attr 은 e2e 가 strip 의
+  // 양태도 카드 외에서 직접 검증할 수 있게 한다.
   if (fact.fact_type === 'claim') {
     if (!fact.speaker_label && !fact.speech_act && !fact.content_claim) {
       return null;
     }
+    const modality = classifyClaimModality(fact.speech_act);
+    const speechActLabel = modality ? MODALITY_LABEL[modality] : fact.speech_act;
     return (
       <p
         data-testid={`fact-claim-strip-${factUid}`}
+        data-modality={modality ?? ''}
         className="text-sm text-text-secondary mb-3 pl-7 italic"
         lang={lang === 'kr' ? 'ko' : 'en'}
       >
         {fact.speaker_label && (
           <strong className="font-bold not-italic">{fact.speaker_label}</strong>
         )}
-        {fact.speech_act && (
-          <span className="ml-1 not-italic">[{fact.speech_act}]:</span>
+        {speechActLabel && (
+          <span
+            data-testid={`fact-claim-strip-speech-act-${factUid}`}
+            className="ml-1 not-italic"
+          >
+            [{speechActLabel}]:
+          </span>
         )}
         {fact.content_claim && (
           <span className="ml-1">&ldquo;{fact.content_claim}&rdquo;</span>
@@ -634,7 +662,11 @@ export function FactCard({
                 fact_type signal identically. The component itself
                 early-returns null for action / legacy / undefined
                 fact_type — matches the previous Decide guard verbatim. */}
-            <FactTypeBadge factType={fact.fact_type} factUid={factUid} />
+            <FactTypeBadge
+              factType={fact.fact_type}
+              factUid={factUid}
+              speechAct={fact.speech_act}
+            />
             {/* decide-ux-v3: negation badge UI removed per PO ("필요 없다"). */}
             {/* The underlying fact.negation_flag + negation_scope data is */}
             {/* preserved on the FactNode in storage — kept as substrate for */}

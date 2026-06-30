@@ -192,7 +192,11 @@ function RecallFactCard({
               header chrome is unchanged for the dominant case. The
               MatchKindBadge ("유사도 매치"/"엔티티 연결") is preserved as
               recall-specific metadata. */}
-          <FactTypeBadge factType={fact.fact_type} factUid={fact.fact_uid} />
+          <FactTypeBadge
+            factType={fact.fact_type}
+            factUid={fact.fact_uid}
+            speechAct={fact.speech_act}
+          />
         </div>
         <span
           className="font-mono text-xxs text-text-muted"
@@ -536,7 +540,11 @@ function FactDetailModal({
                 to the eyebrow so the modal carries the same [CLAIM] /
                 [MEASUREMENT] signal that the list card does. Legacy
                 facts (action / undefined) early-return null. */}
-            <FactTypeBadge factType={fact.fact_type} factUid={fact.fact_uid} />
+            <FactTypeBadge
+              factType={fact.fact_type}
+              factUid={fact.fact_uid}
+              speechAct={fact.speech_act}
+            />
           </div>
           {/* feat/recall-card-original-claim — same pipe-artefact repair
               as the recall card title; the detail hero is the same surface
