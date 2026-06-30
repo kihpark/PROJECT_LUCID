@@ -36,6 +36,13 @@ import { StellarEdgeFactsList } from './StellarEdgeFactsList';
 //   L4 = edge hover tooltip (predicate only)
 import { StellarLegend } from './StellarLegend';
 import { StellarEdgeHoverTooltip } from './StellarEdgeHoverTooltip';
+// ★ V4 (fix/stellar-v1-v2-v4-legend-class, PO 2026-06-29) — SearchBar
+//   자동완성 결과에 의미 없는 라벨 (".", "...", 공백, 구두점만) 0. 옛 fix
+//   (api.ts::isMeaningfulLabel) 가 RecallView 의 /entities/suggest 응답만
+//   걸렀고, STELLAR SearchBar 의 in-memory match path 는 따로 살아 있어
+//   PO 가 "라온프렌즈" 검색 시 "." 추천을 다시 봤다 (image #88). 같은
+//   filter 를 SearchBar 에도 적용해 회귀를 닫는다.
+import { isMeaningfulLabel } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
 // fix/stellar-cleanup #9 — predicate / fact-type theme color.
@@ -636,6 +643,16 @@ function SearchBar({
     const out: StellarNode[] = [];
     for (const node of data.nodes) {
       if (out.length >= 10) break;
+      // ★ V4 (fix/stellar-v1-v2-v4-legend-class, PO 2026-06-29) — drop
+      // suggestion entries whose primary label is meaningless (".",
+      // "...", whitespace, pure punctuation). Mirrors api.ts::isMeaningfulLabel
+      // so RecallView 와 STELLAR SearchBar 가 같은 의미-없는 라벨 가드를
+      //공유한다. 원칙 단위 — 특정 케이스 ("." / "라온프렌즈") 하드코딩 X.
+      // The check also covers subject + object so a node whose label is
+      // valid but whose only matchable surface text is meaningless does
+      // not surface either.
+      const primary = node.label ?? node.subject ?? node.object ?? '';
+      if (!isMeaningfulLabel(primary)) continue;
       const hay = `${node.label} ${node.subject} ${node.object}`.toLowerCase();
       if (!hay.includes(q)) continue;
       if (seen.has(node.id)) continue;
@@ -1362,8 +1379,11 @@ export function StellarView(props: StellarViewProps = {}) {
       />
 
       {/* ★ L1 (PO 2026-06-29) — STELLAR LEGEND. default visible, user can
-       *  collapse. 색·형태 어휘 안내. */}
-      <StellarLegend />
+       *  collapse. 색·형태 어휘 안내.
+       *  ★ V1++ (fix/stellar-v1-v2-v4-legend-class, PO 2026-06-29) — pass
+       *  the currently-visible nodes so each LEGEND row carries its
+       *  "(count)" — 사용자가 그래프의 분포 즉시 파악. */}
+      <StellarLegend nodes={filteredData.nodes} />
 
       {hovered ? (
         <StellarHoverCard fact={hovered.node} position={{ x: hovered.x, y: hovered.y }} />

@@ -1,97 +1,37 @@
 /**
  * ★ L1 (STELLAR legend/shape/hover, PO 2026-06-29) — STELLAR LEGEND.
+ * ★ fix/stellar-v1-v2-v4-legend-class (PO 2026-06-29) — V1 / V1+ / V1++ / V2
+ *   동기화 fix.
  *
- * 위반 클래스: 노드 색·형태를 의미 안내 없이 도입 → 사용자가 추측만 가능.
+ * 위반 클래스 (★ PO verbatim):
+ *   V1.  WHO/사람 vs unknown 시각 동일 → 양쪽 모두 sphere/teal 이라 분포
+ *        디버그 시 unknown 노드를 사람 노드와 혼동.
+ *   V1+. WHAT 안의 RESOURCE / KNOWLEDGE / TASK 가 LEGEND 한 줄 → 사용자가
+ *        amber sphere 가 자원/제품/지식/행위 중 무엇인지 알 수 없다.
+ *   V1++. LEGEND 가 카테고리만, 카운트 없음 → 현재 그래프의 분포를 사용자가
+ *         즉시 파악할 수 없다.
+ *   V2.  LEGEND 안내와 ForceGraph3D 의 노드 표시가 따로 살아 있음 →
+ *        "WHERE = 빨간 구 + 핀셋" 인데 실제는 "회색 원형뿔" — UX 신뢰 깨짐.
  *
  * Fix 원칙:
- *   • LEGEND default = visible (★ 첫 진입 시 보임).
- *   • 사용자가 끌 수 있어야 (★ 화면 점유 가드).
- *   • 색 swatch + 형태 swatch 둘 다 안내 — L2 의 형태 분리 (sphere / cube /
- *     diamond / roundedSquare / pin) 가 같이 노출돼야 의미 안내가 완성된다.
- *   • 특정 케이스 하드코딩 0 — ENTITY_COLORS / ENTITY_SHAPES 로부터 어휘를
- *     끌어오므로 새 entity_type 가 추가돼도 자동으로 반영된다.
+ *   • LEGEND_SPECS 단일 source (stellarLegendShapes.ts). 이 컴포넌트 와
+ *     StellarGraph 의 nodeThreeObject 가 같은 spec 함수 (specForEntityType)
+ *     을 호출하므로 V2 의 안내 vs 실제 불일치가 구조적으로 발생할 수 없다.
+ *   • props.nodes 로 현재 visible 노드를 받아 V1++ 카운트 계산.
+ *   • unknown = 별도 row (작은 점 + 회색). person 과 시각 충돌 0.
  */
 'use client';
 
-import { useState } from 'react';
-import { ENTITY_COLORS, CLAIM_NODE_COLOR, STELLAR_ACCENT } from '@/lib/stellarColors';
-import { SHAPE_LABEL, shapeForEntityType, CLAIM_SHAPE } from '@/lib/stellarShapes';
+import { useMemo, useState } from 'react';
+import { LEGEND_SPECS, type LegendSpec } from '@/lib/stellarLegendShapes';
+import { SHAPE_LABEL } from '@/lib/stellarShapes';
+import type { StellarNode } from '@/lib/syntheticGraph';
 
 const PANEL_BG = 'rgba(12,19,22,0.92)';
 const PANEL_BORDER = '#1c272b';
 const ACCENT = '#3fe0c6';
 const TEXT_BODY = '#cdd9da';
 const TEXT_DIM = '#647479';
-
-interface LegendItem {
-  /** Render key. */
-  key: string;
-  /** Color swatch (entity / claim / unknown color). */
-  color: string;
-  /** Form swatch label (★ L2 — '●' / '■' / '◆' / '▢' / '📍' / '•'). */
-  shapeChar: string;
-  /** Human-readable label (KR). */
-  label: string;
-}
-
-/** ★ L1 — derive the legend from the shared color / shape vocabularies so
- *  the legend can never drift away from what the renderer actually paints.
- *  Order: WHO 3종 (person / organization / group) → WHAT → EVENT → WHERE
- *  → CLAIM → unknown. */
-function buildLegendItems(): LegendItem[] {
-  return [
-    {
-      key: 'person',
-      color: ENTITY_COLORS.person,
-      shapeChar: SHAPE_LABEL[shapeForEntityType('person')],
-      label: 'WHO · 사람',
-    },
-    {
-      key: 'organization',
-      color: ENTITY_COLORS.organization,
-      shapeChar: SHAPE_LABEL[shapeForEntityType('organization')],
-      label: 'WHO · 조직',
-    },
-    {
-      key: 'group',
-      color: ENTITY_COLORS.group,
-      shapeChar: SHAPE_LABEL[shapeForEntityType('group')],
-      label: 'WHO · 그룹',
-    },
-    {
-      key: 'what',
-      color: ENTITY_COLORS.product,
-      shapeChar: SHAPE_LABEL[shapeForEntityType('product')],
-      label: 'WHAT · 개념/제품',
-    },
-    {
-      key: 'event',
-      color: ENTITY_COLORS.event,
-      shapeChar: SHAPE_LABEL[shapeForEntityType('event')],
-      label: 'EVENT · 이벤트',
-    },
-    {
-      key: 'place',
-      color: ENTITY_COLORS.place,
-      shapeChar: SHAPE_LABEL[shapeForEntityType('place')],
-      label: 'WHERE · 장소',
-    },
-    {
-      key: 'claim',
-      color: CLAIM_NODE_COLOR,
-      shapeChar: SHAPE_LABEL[CLAIM_SHAPE],
-      label: '발언 · claim',
-    },
-    {
-      key: 'unknown',
-      color: STELLAR_ACCENT,
-      shapeChar: SHAPE_LABEL.sphere,
-      label: '기타 · unknown',
-    },
-  ];
-}
-
-export const LEGEND_ITEMS: ReadonlyArray<LegendItem> = buildLegendItems();
 
 export interface StellarLegendProps {
   /** ★ L1 — top offset (px) so the host can position relative to existing
@@ -101,6 +41,14 @@ export interface StellarLegendProps {
   /** ★ L1 — default visible. The toggle persists in localStorage so the
    *  PO's preference survives reload. */
   defaultVisible?: boolean;
+  /** ★ V1++ (PO 2026-06-29) — current visible nodes for the per-row count.
+   *  Optional: when omitted the legend still renders categories without
+   *  counts, so unit tests / Storybook can mount the component standalone.
+   *  Counts use node.entity_type ?? null and fall through to the 'unknown'
+   *  row when no spec matches — that match mirrors the renderer's dispatch
+   *  via specForEntityType so the count is exactly what the user sees on
+   *  the canvas. */
+  nodes?: ReadonlyArray<StellarNode>;
 }
 
 const LS_KEY = 'lucid.stellar.legend.visible';
@@ -126,10 +74,75 @@ function persistVisible(visible: boolean): void {
   }
 }
 
+/** ★ V1++ helper — bucket each node into the legend spec it belongs to.
+ *  Mirrors specForEntityType but resolves to the spec INDEX so the caller
+ *  can build a count array in one pass. CLAIM and unknown are special
+ *  buckets:
+ *    - claim:  node.kind === 'claim' OR node.fact_type === 'claim'
+ *    - unknown: no entity_type, OR entity_type that no other spec claims.
+ *  Exported for unit tests. */
+export function indexForNode(
+  specs: ReadonlyArray<LegendSpec>,
+  node: StellarNode,
+): number {
+  const claimIdx = specs.findIndex((s) => s.bucket === 'CLAIM');
+  const unknownIdx = specs.findIndex((s) => s.bucket === 'unknown');
+  if (node.kind === 'claim' || node.fact_type === 'claim') {
+    return claimIdx >= 0 ? claimIdx : unknownIdx;
+  }
+  const t = (node.entity_type ?? '').toLowerCase();
+  if (!t) return unknownIdx;
+  for (let i = 0; i < specs.length; i += 1) {
+    const s = specs[i];
+    if (!s) continue;
+    if (s.bucket === 'unknown' || s.bucket === 'CLAIM') continue;
+    if (s.entity_types.includes(t)) return i;
+  }
+  return unknownIdx;
+}
+
+/** ★ V1++ — per-spec count across the given nodes. */
+export function computeLegendCounts(
+  specs: ReadonlyArray<LegendSpec>,
+  nodes: ReadonlyArray<StellarNode>,
+): number[] {
+  const counts = new Array<number>(specs.length).fill(0);
+  for (const node of nodes) {
+    const i = indexForNode(specs, node);
+    if (i >= 0 && i < counts.length) {
+      counts[i] = (counts[i] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+/** ★ V1 — small inline SVG dot for the unknown swatch. The text-character
+ *  swatch (SHAPE_LABEL['dot'] = '•') reads identical to person at 14px on
+ *  many fonts; an explicit 6px filled circle inside an 18px frame creates a
+ *  clearly different visual silhouette (★ V1 핵심: unknown 과 사람 이
+ *  시각적으로 즉시 구분돼야 한다). */
+function UnknownSwatch({ color }: { color: string }): React.ReactElement {
+  return (
+    <svg
+      viewBox="0 0 18 18"
+      width={18}
+      height={18}
+      aria-hidden="true"
+      data-shape="dot"
+    >
+      <circle cx={9} cy={9} r={3} fill={color} />
+    </svg>
+  );
+}
+
 export function StellarLegend(props: StellarLegendProps = {}): React.ReactElement {
   const defaultVisible = props.defaultVisible ?? true;
+  const nodes = props.nodes ?? [];
   // ★ default = visible (PO 명시). User can collapse and the choice persists.
   const [visible, setVisible] = useState<boolean>(() => readVisible(defaultVisible));
+
+  // ★ V1++ — per-row count, memo so the math only re-runs on node list change.
+  const counts = useMemo(() => computeLegendCounts(LEGEND_SPECS, nodes), [nodes]);
 
   function onToggle(): void {
     setVisible((v) => {
@@ -148,7 +161,7 @@ export function StellarLegend(props: StellarLegendProps = {}): React.ReactElemen
         top: props.topOffset ?? 110,
         right: 18,
         zIndex: 10,
-        width: visible ? 220 : 130,
+        width: visible ? 248 : 130,
         padding: visible ? '12px 14px' : '6px 10px',
         borderRadius: 12,
         background: PANEL_BG,
@@ -219,38 +232,70 @@ export function StellarLegend(props: StellarLegendProps = {}): React.ReactElemen
             gap: 6,
           }}
         >
-          {LEGEND_ITEMS.map((item) => (
-            <li
-              key={item.key}
-              data-testid={`stellar-legend-item-${item.key}`}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                fontSize: 11,
-                color: TEXT_BODY,
-              }}
-            >
-              <span
-                data-testid={`stellar-legend-swatch-${item.key}`}
-                aria-hidden="true"
+          {LEGEND_SPECS.map((spec, i) => {
+            const count = counts[i] ?? 0;
+            return (
+              <li
+                key={spec.key}
+                data-testid={`stellar-legend-item-${spec.key}`}
+                data-bucket={spec.bucket}
+                data-sub-bucket={spec.subBucket ?? ''}
+                data-shape={spec.shape}
+                data-color={spec.color}
+                data-count={count}
                 style={{
-                  display: 'inline-flex',
+                  display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 18,
-                  height: 18,
-                  color: item.color,
-                  fontSize: 14,
-                  lineHeight: 1,
-                  fontWeight: 700,
+                  gap: 8,
+                  fontSize: 11,
+                  color: TEXT_BODY,
                 }}
               >
-                {item.shapeChar}
-              </span>
-              <span>{item.label}</span>
-            </li>
-          ))}
+                <span
+                  data-testid={`stellar-legend-swatch-${spec.key}`}
+                  data-shape={spec.shape}
+                  data-color={spec.color}
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 18,
+                    height: 18,
+                    color: spec.color,
+                    fontSize: 14,
+                    lineHeight: 1,
+                    fontWeight: 700,
+                    flexShrink: 0,
+                  }}
+                >
+                  {spec.shape === 'dot' ? (
+                    <UnknownSwatch color={spec.color} />
+                  ) : (
+                    SHAPE_LABEL[spec.shape]
+                  )}
+                </span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {spec.label}
+                </span>
+                {/* ★ V1++ — per-category count. Always rendered (even when 0)
+                 *  so the dashboard "지금 분포 = 0" 도 명시적으로 보인다.
+                 *  data-testid 는 카운트 만 추출 가능하게 분리. */}
+                <span
+                  data-testid={`stellar-legend-count-${spec.key}`}
+                  style={{
+                    color: TEXT_DIM,
+                    fontSize: 11,
+                    fontVariantNumeric: 'tabular-nums',
+                    marginLeft: 4,
+                    flexShrink: 0,
+                  }}
+                >
+                  ({count})
+                </span>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </aside>

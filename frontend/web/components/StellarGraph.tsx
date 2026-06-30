@@ -38,16 +38,15 @@ import {
 // real-mode branches in nodeColor / nodeSize / linkColor / linkWidth
 // below switch on these so entity_type / kind / fact_count actually
 // drive what the user sees.
-import {
-  CLAIM_NODE_COLOR,
-  STELLAR_ACCENT,
-  colorForEntityType,
-} from '@/lib/stellarColors';
 import { edgeStyle, nodeRadius } from '@/lib/stellarEdgeStyle';
 // ★ L2 (PO 2026-06-29) — entity_type 별 형태 분리 (sphere / cube / diamond /
 //   roundedSquare / pin). nodeThreeObject 로 ForceGraph3D 의 default sphere
 //   geometry 를 entity_type 에 맞는 mesh 로 교체.
-import { shapeForEntityType, type StellarShape } from '@/lib/stellarShapes';
+// ★ fix/stellar-v1-v2-v4-legend-class (PO 2026-06-29) — V2 same-source:
+//   StellarLegend 와 ForceGraph3D 의 노드 둘 다 stellarLegendShapes 의
+//   specForEntityType() 를 사용해 색/형태가 LEGEND 안내와 1:1 동기화.
+import type { StellarShape } from '@/lib/stellarShapes';
+import { claimSpec, specForEntityType } from '@/lib/stellarLegendShapes';
 
 // react-force-graph-3d is a client-only module. Importing it directly from
 // page code makes Next try to evaluate three.js on the server at build time
@@ -1201,12 +1200,16 @@ export function StellarGraph(props: StellarGraphProps) {
       // Synthetic mode keeps the cluster palette unchanged.
       let base: string;
       if (mode === 'real') {
-        if (node.fact_type === 'claim') {
-          base = CLAIM_NODE_COLOR;
-        } else if (node.entity_type) {
-          base = colorForEntityType(node.entity_type);
+        // ★ fix/stellar-v1-v2-v4-legend-class V2 — color comes from the
+        // shared LEGEND spec so the legend swatch and the canvas mesh
+        // stay in lock-step. CLAIM nodes get claimSpec().color (same as
+        // CLAIM_NODE_COLOR); unknown / unresolved entity_type → the
+        // UNKNOWN_SPEC color (neutral grey), NOT the teal STELLAR_ACCENT
+        // that the user reads as "사람" in the LEGEND.
+        if (node.kind === 'claim' || node.fact_type === 'claim') {
+          base = claimSpec().color;
         } else {
-          base = STELLAR_ACCENT;
+          base = specForEntityType(node.entity_type ?? null).color;
         }
       } else {
         base =
@@ -1332,9 +1335,16 @@ export function StellarGraph(props: StellarGraphProps) {
     (rawNode: unknown): THREE.Object3D | undefined => {
       if (mode !== 'real') return undefined; // synthetic = default sphere
       const node = rawNode as StellarNode;
-      // CLAIM 노드는 형태 분리 대상 X — 점은 그대로 sphere 유지.
-      if (node.kind === 'claim' || node.fact_type === 'claim') return undefined;
-      const shape: StellarShape = shapeForEntityType(node.entity_type ?? null);
+      // ★ fix/stellar-v1-v2-v4-legend-class V2 — shape AND base color
+      // both come from the shared LEGEND spec (specForEntityType /
+      // claimSpec), so anything the user reads in the LEGEND is exactly
+      // what the canvas draws. CLAIM nodes get claimSpec(); everything
+      // else dispatches off entity_type (unknown → UNKNOWN_SPEC = dot).
+      const spec =
+        node.kind === 'claim' || node.fact_type === 'claim'
+          ? claimSpec()
+          : specForEntityType(node.entity_type ?? null);
+      const shape: StellarShape = spec.shape;
       const color = nodeColor(node);
       const size = Math.max(2, nodeSize(node));
       const radius = Math.sqrt(size); // ForceGraph3D treats nodeVal as a volume hint
@@ -1363,9 +1373,15 @@ export function StellarGraph(props: StellarGraphProps) {
           geometry = new THREE.ConeGeometry(radius * 0.9, radius * 2.2, 12);
           break;
         }
+        case 'dot': {
+          // ★ V1 fix — unknown 은 사람/조직/그룹 그 어떤 entity 와도 시각이
+          // 달라야 한다. 작은 sphere (radius 절반) + low-poly geometry 로
+          // 점이 "fact 다" 라기보단 "분류 실패 / 미정" 인상을 준다.
+          geometry = new THREE.SphereGeometry(radius * 0.45, 8, 8);
+          break;
+        }
         case 'sphere':
         case 'circle':
-        case 'dot':
         default:
           geometry = new THREE.SphereGeometry(radius, 16, 16);
           break;
@@ -1376,6 +1392,15 @@ export function StellarGraph(props: StellarGraphProps) {
       // 사용자가 형태를 학습하기 쉽다.
       if (shape === 'diamond') mesh.rotation.y = Math.PI / 4;
       if (shape === 'pin') mesh.rotation.z = Math.PI; // cone tip down
+      // ★ V1 — annotate the mesh so e2e tests can read the spec back from
+      // the scene graph and prove LEGEND ↔ mesh stay in sync.
+      mesh.userData = {
+        ...mesh.userData,
+        stellarShape: shape,
+        stellarSpecKey: spec.key,
+        stellarBucket: spec.bucket,
+        stellarColor: spec.color,
+      };
       return mesh;
     },
     [mode, nodeColor, nodeSize],
