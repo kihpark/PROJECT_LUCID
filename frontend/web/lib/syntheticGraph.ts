@@ -209,6 +209,10 @@ export interface StellarNode {
   /** ★ fix/entitycard-fact-count-and-dot-suggestion — fact_type 별 정확 카운트.
    *  link 수와 무관 (literal object 인 ACTION 도 subject 의 action++). */
   fact_counts?: { action: number; claim: number; measurement: number } | null;
+  /** REQ-012-v1 — AI confidence on entity_type classification (0..1).
+   *  EntityTypeDropdown 가 낮은 값일 때 "확인 필요" banner 표시. Adapter
+   *  /backend 가 채워주지 않으면 undefined — banner 미표시 (★ 보수적). */
+  entity_type_confidence?: number | null;
 }
 
 // feat/stellar-entity-edge-remodel-v2 — link kinds the renderer cares about.
