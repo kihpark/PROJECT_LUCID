@@ -377,6 +377,22 @@ describe('AppShell', () => {
     );
   });
 
+  // -------------------------------------------------------------------------
+  // REQ-010 (★ PO 2026-06-30) — 버전 표기 (★ 화면 하단)
+  // -------------------------------------------------------------------------
+
+  it('REQ-010 — AppShell footer 에 "Lucid v0.x.x" 노출 (★ 모든 페이지)', () => {
+    render(
+      <AppShell>
+        <div>child</div>
+      </AppShell>,
+    );
+    const footer = screen.getByTestId('app-shell-version-footer');
+    expect(footer).toBeInTheDocument();
+    // ★ SemVer 0.MINOR.PATCH (★ lib/version.ts 자동 — hardcode 0).
+    expect(footer.textContent).toMatch(/^Lucid v0\.\d+\.\d+$/);
+  });
+
   it('B-61 — renders me.email when useAuthMe returns a me object', async () => {
     useAuthMeMock.mockReturnValue({
       me: {

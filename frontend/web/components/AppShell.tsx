@@ -23,6 +23,7 @@ import { logoutUser } from '@/lib/api';
 import { useAuthMe } from '@/lib/useAuthMe';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 import { sectionLabelKo } from '@/lib/displayNames';
+import { LUCID_VERSION } from '@/lib/version';
 
 const ACCENT = '#3fe0c6';
 const BG = '#06080b';
@@ -694,9 +695,27 @@ export function AppShell({ children, userName, userEmail }: AppShellProps) {
       >
         {children}
       </main>
-      {/* Hidden anchor — keeps the unused TEXT_DIMMER token referenced so the
-          design contract is visible. The README calls for it on dim captions. */}
-      <span style={{ display: 'none' }} aria-hidden="true" data-color={TEXT_DIMMER} />
+      {/* REQ-010 (★ PO 2026-06-30) — version 표기. 화면 하단 (★ 모든 페이지).
+       *   • lib/version.ts 의 LUCID_VERSION = 0.MINOR dogfood 라운드 단위
+       *   • 자동 표시 (수동 hardcode 0)
+       *   • home 페이지의 home-version-footer 와 별도 (★ home 은 본문 내
+       *     decorative 위치, AppShell 푸터는 모든 라우트 글로벌 chrome).
+       */}
+      <footer
+        data-testid="app-shell-version-footer"
+        style={{
+          padding: '14px 30px',
+          textAlign: 'center',
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontSize: 11,
+          letterSpacing: '0.06em',
+          color: TEXT_DIMMER,
+          borderTop: `1px solid ${HEADER_BORDER}`,
+          background: BG,
+        }}
+      >
+        Lucid v{LUCID_VERSION}
+      </footer>
     </div>
   );
 }
