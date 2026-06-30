@@ -13,7 +13,7 @@ from api.structure.models import (
     StructureObject,
     StructureResult,
 )
-from api.structure.object_matcher import MatchResult  # noqa: F401 — legacy; kept for back-compat with helper fixtures below
+# REQ-004 STAGE 1d (PO 2026-06-30): object_matcher DELETED — MatchResult import 폐기.
 from api.structure.resolution_gateway import ResolvedEntity
 from api.structure.processor import process_extracted_job
 
