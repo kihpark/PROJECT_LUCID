@@ -61,6 +61,22 @@ export function FactTypeBadge({
       </span>
     );
   }
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 5) — ACTION 배지 추가.
+  // 옛: action / 옛 legacy null → null 반환 (배지 없음). claim 노드는
+  // CLAIM, measurement 노드는 MEASUREMENT 배지로 표시되는데 action 만
+  // 빠져 fact_type 식별 일관성이 깨졌다. fix: action 도 ACTION 배지.
+  // legacy (null) 도 action 으로 fallback 하는 것과 일관되게 ACTION 으로.
+  if (factType === 'action' || factType == null) {
+    return (
+      <span
+        data-testid={`fact-action-badge-${factUid}`}
+        className="inline-flex items-center text-xxs font-mono text-text-secondary bg-bg-elevated/40 border border-border-subtle rounded px-1.5 py-0.5"
+        title="행위 (subject가 object에 한 일)"
+      >
+        ACTION
+      </span>
+    );
+  }
   return null;
 }
 
@@ -230,7 +246,11 @@ function resolveEntity(
     return obj.name || obj.name_en || value;
   }
   if (OBJECT_REF_PATTERN.test(value)) {
-    return lang === 'en' ? `${value} (unresolved)` : `${value} (미해석)`;
+    // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+    // 옛: `${value} (미해석)` — UUID 가 Decide 카드 / Recall edit input 에
+    // 노출됐다. v3 entity-id-only 저장 구조에선 ★ 모든 entity 가 UUID
+    // 모양. fix: 못 끌어오면 "미해결 entity" 배지 only (★ UUID X).
+    return lang === 'en' ? 'unresolved entity' : '미해결 entity';
   }
   return value;
 }

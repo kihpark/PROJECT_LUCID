@@ -100,10 +100,11 @@ export function pickEntityName(node: StellarNode): string {
   if (typeof labelLike === 'string' && labelLike.trim().length > 0) {
     return labelLike.trim();
   }
-  if (typeof node.id === 'string' && node.id.length > 0) {
-    return node.id.slice(0, 8);
-  }
-  return '?';
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+  // 옛: `node.id.slice(0, 8)` → UUID prefix 8 chars 를 hover card 에
+  // 노출. v3 entity-id-only 저장 구조 + STELLAR 노드 = entity uid 이라
+  // ★ 모든 fallback 이 UUID 표시였다. fix: "미해결 entity" 로 교체.
+  return '미해결 entity';
 }
 
 const FACT_TYPE_KO: Record<'action' | 'claim' | 'measurement' | 'entity', string> = {

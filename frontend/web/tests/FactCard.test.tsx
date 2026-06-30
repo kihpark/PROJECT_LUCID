@@ -367,7 +367,10 @@ describe('FactCard — entity label resolution (B-27 + B-31 regression)', () => 
     );
   });
 
-  it('shows "(미해석)" marker when subject_uid is obj-N but not in objects', () => {
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+  // 옛: "obj-99 (미해석)" — uid 와 marker 둘 다 노출.
+  // 새: "미해결 entity" only — uid 노출 X.
+  it('shows "미해결 entity" placeholder when subject_uid is obj-N but not in objects', () => {
     const onChange = vi.fn();
     const fact: FactSummary = { ...baseFact, subject_uid: 'obj-99' };
     render(
@@ -379,8 +382,9 @@ describe('FactCard — entity label resolution (B-27 + B-31 regression)', () => 
         onChange={onChange}
       />,
     );
-    expect(screen.getByTestId('fact-subject')).toHaveTextContent('obj-99');
-    expect(screen.getByTestId('fact-subject')).toHaveTextContent('(미해석)');
+    // ★ 내부 uid (obj-99) 가 표시되면 안 됨.
+    expect(screen.getByTestId('fact-subject')).not.toHaveTextContent('obj-99');
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('미해결 entity');
   });
 
   it('einfomax SpaceX/Goldman Sachs regression: distinct refs resolve to distinct labels', () => {
@@ -458,7 +462,10 @@ describe('FactCard — UUID entity resolution (B-37)', () => {
     expect(screen.getByTestId('fact-subject')).not.toHaveTextContent('6895dbc7');
   });
 
-  it('flags an unresolved UUID with the same "(미해석)" marker as obj-N', () => {
+  // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+  // 옛: "deadbeef-... (미해석)" — UUID 가 marker 와 함께 노출.
+  // 새: "미해결 entity" only.
+  it('flags an unresolved UUID with the "미해결 entity" placeholder (★ UUID X)', () => {
     const onChange = vi.fn();
     const fact: FactSummary = {
       ...baseFact,
@@ -473,7 +480,8 @@ describe('FactCard — UUID entity resolution (B-37)', () => {
         onChange={onChange}
       />,
     );
-    expect(screen.getByTestId('fact-subject')).toHaveTextContent('(미해석)');
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('미해결 entity');
+    expect(screen.getByTestId('fact-subject')).not.toHaveTextContent('deadbeef');
   });
 
   it('Edit subject input shows the resolved label as initial value when entity is known', () => {
@@ -523,8 +531,8 @@ describe('FactCard — UUID entity resolution (B-37)', () => {
     );
     const input = screen.getByTestId('fact-edit-subject-fn-1') as HTMLInputElement;
     expect(input.tagName).toBe('INPUT');
-    // Shows the "(미해석)" resolved form
-    expect(input.value).toMatch(/미해석|99999999/);
+    // ★ REQ-004 STAGE 3+4 — "미해결 entity" placeholder (★ UUID X).
+    expect(input.value).toBe('미해결 entity');
   });
 });
 
@@ -1178,10 +1186,10 @@ describe('FactCard - decide-frontend-prefer-name: prefer backend-corrected name'
     expect(screen.getByTestId('fact-subject')).toHaveTextContent('OpenAI');
   });
 
-  it('still shows the (미해석)/(unresolved) marker when obj-N has no match in objects', () => {
-    // Regression guard for the lang parameter's remaining role: the marker
-    // micro-strings ("(unresolved)" vs "(미해석)") still toggle on lang;
-    // only the entity-surface choice no longer does.
+  it('shows the "unresolved entity" / "미해결 entity" placeholder when obj-N has no match in objects', () => {
+    // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
+    // 옛: "obj-77 (unresolved)" — uid + marker.
+    // 새: "unresolved entity" / "미해결 entity" only (lang 별).
     const onChange = vi.fn();
     const fact: FactSummary = { ...baseFact, subject_uid: 'obj-77' };
     render(
@@ -1193,8 +1201,8 @@ describe('FactCard - decide-frontend-prefer-name: prefer backend-corrected name'
         onChange={onChange}
       />,
     );
-    expect(screen.getByTestId('fact-subject')).toHaveTextContent('obj-77');
-    expect(screen.getByTestId('fact-subject')).toHaveTextContent('(unresolved)');
+    expect(screen.getByTestId('fact-subject')).not.toHaveTextContent('obj-77');
+    expect(screen.getByTestId('fact-subject')).toHaveTextContent('unresolved entity');
   });
 });
 
