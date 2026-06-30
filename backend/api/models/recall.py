@@ -185,11 +185,30 @@ class EntityFacetItem(LucidBaseModel):
 
 
 class EntityFacets(LucidBaseModel):
-    """Class-bucketed entity facets. Four canonical buckets in beta."""
+    """Class-bucketed entity facets.
 
-    organization: list[EntityFacetItem] = Field(default_factory=list)
+    fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ root cause — PO 2026-06-30):
+    옛 4 bucket (organization / person / place / other) 은 v3 closed set
+    10 class 중 7 class 가 "other" 로 떨어져 "기타" 비대를 만들었다.
+    v3 10 class 를 1:1 로 버킷화: WHO (person / organization / group),
+    WHAT (knowledge / resource / task / concept / event / metric),
+    WHERE (location). `other` 는 unknown / null fallback 만 받는다.
+    """
+
+    # WHO
     person: list[EntityFacetItem] = Field(default_factory=list)
-    place: list[EntityFacetItem] = Field(default_factory=list)
+    organization: list[EntityFacetItem] = Field(default_factory=list)
+    group: list[EntityFacetItem] = Field(default_factory=list)
+    # WHAT
+    knowledge: list[EntityFacetItem] = Field(default_factory=list)
+    resource: list[EntityFacetItem] = Field(default_factory=list)
+    task: list[EntityFacetItem] = Field(default_factory=list)
+    concept: list[EntityFacetItem] = Field(default_factory=list)
+    event: list[EntityFacetItem] = Field(default_factory=list)
+    metric: list[EntityFacetItem] = Field(default_factory=list)
+    # WHERE
+    location: list[EntityFacetItem] = Field(default_factory=list)
+    # ★ unknown / heuristic fallback only (★ 비대 가드)
     other: list[EntityFacetItem] = Field(default_factory=list)
 
 

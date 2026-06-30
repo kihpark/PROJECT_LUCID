@@ -80,14 +80,18 @@ def test_facets_bucket_by_class_and_sort_by_count_desc():
 
 
 def test_facets_persons_and_other_bucket():
+    """fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ — PO 2026-06-30):
+    v3 closed set 10 class 1:1 bucket. 옛 시절 metric / place 가 모두
+    "other" 로 떨어졌던 것이 → metric / location (place=legacy alias)
+    각각 제 버킷에 들어간다. "other" 는 unknown / null fallback 만."""
     from api.routes.recall import _facets_for
 
     client = MagicMock()
     client.search.return_value = _agg_response(
         subject_buckets=[
             {"key": "33333333-4444-4555-a666-777777777777", "doc_count": 1},
-            {"key": "44444444-5555-4666-b777-888888888888", "doc_count": 2},   # class=metric -> 'other'
-            {"key": "55555555-6666-4777-8888-999999999999", "doc_count": 3},  # class=place
+            {"key": "44444444-5555-4666-b777-888888888888", "doc_count": 2},   # class=metric -> 'metric'
+            {"key": "55555555-6666-4777-8888-999999999999", "doc_count": 3},  # class=place (legacy) -> 'location'
         ],
         object_buckets=[],
         predicate_buckets=[],
@@ -100,8 +104,12 @@ def test_facets_persons_and_other_bucket():
     with patch("api.routes.recall.get_client", return_value=client):
         out = _facets_for(["fn-1"], "ks-1")
     assert [e.uid for e in out.entities.person] == ["33333333-4444-4555-a666-777777777777"]
-    assert [e.uid for e in out.entities.place] == ["55555555-6666-4777-8888-999999999999"]
-    assert [e.uid for e in out.entities.other] == ["44444444-5555-4666-b777-888888888888"]
+    # ★ class=metric → 'metric' bucket (옛 "other" 비대 해소).
+    assert [e.uid for e in out.entities.metric] == ["44444444-5555-4666-b777-888888888888"]
+    # ★ class=place → 'location' bucket (legacy alias).
+    assert [e.uid for e in out.entities.location] == ["55555555-6666-4777-8888-999999999999"]
+    # ★ "other" 는 unknown 만 (place / metric 떨어지지 않음).
+    assert out.entities.other == []
 
 
 def test_facets_unknown_uid_label_falls_back_to_uid_text():

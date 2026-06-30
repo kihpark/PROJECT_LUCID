@@ -765,17 +765,28 @@ def _build_entity_brief(
     )
 
 
-# feat/entity-layer-restore (PO 2026-06-23): facet bucketing. The facet
-# pane in Recall surfaces 4 named buckets (organization / person /
-# place / other). Everything not in the named buckets — concept,
-# service, product, event, procedure, task, metric, resource, problem,
-# knowledge — falls into "other". This is by design: the named buckets
-# are the journalist's first-class entity categories; concept-side
-# entities are still surfaced, just under the catch-all heading.
+# fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ root cause — PO 2026-06-30):
+# 옛 3-bucket (organization / person / place) 시절엔 concept / resource /
+# event / metric / knowledge / group / task / location 등이 전부 "other"
+# 로 떨어져 "기타 비대" 가 됐다. v3 closed set 10 class 를 1:1 로 버킷
+# 화해 "기타" 비대를 해소한다. legacy `place` 는 `location` 으로 호환
+# alias (★ pre-v3 데이터). 알 수 없는 class 는 여전히 "other" fallback.
 _OBJECT_CLASS_BUCKET = {
-    "organization": "organization",
+    # WHO
     "person": "person",
-    "place": "place",
+    "organization": "organization",
+    "group": "group",
+    # WHAT
+    "knowledge": "knowledge",
+    "resource": "resource",
+    "task": "task",
+    "concept": "concept",
+    "event": "event",
+    "metric": "metric",
+    # WHERE
+    "location": "location",
+    # legacy alias (★ pre-v3 데이터 호환)
+    "place": "location",
 }
 
 
@@ -938,8 +949,21 @@ def _facets_for(
     except Exception as exc:  # noqa: BLE001
         logger.warning("recall: facet label mget failed: %s", exc)
 
+    # fix/recall-facet-bucket-expand (PO 2026-06-30) — v3 closed-set 10
+    # bucket + "other" fallback. Aligned with _OBJECT_CLASS_BUCKET above
+    # and EntityFacets schema in api/models/recall.py.
     buckets: dict[str, list[EntityFacetItem]] = {
-        "organization": [], "person": [], "place": [], "other": [],
+        "person": [],
+        "organization": [],
+        "group": [],
+        "knowledge": [],
+        "resource": [],
+        "task": [],
+        "concept": [],
+        "event": [],
+        "metric": [],
+        "location": [],
+        "other": [],
     }
     for uid, c in counts.items():
         name, cls = label_class.get(uid, (uid, None))
@@ -961,9 +985,16 @@ def _facets_for(
 
     return RecallFacets(
         entities=EntityFacets(
-            organization=buckets["organization"],
             person=buckets["person"],
-            place=buckets["place"],
+            organization=buckets["organization"],
+            group=buckets["group"],
+            knowledge=buckets["knowledge"],
+            resource=buckets["resource"],
+            task=buckets["task"],
+            concept=buckets["concept"],
+            event=buckets["event"],
+            metric=buckets["metric"],
+            location=buckets["location"],
             other=buckets["other"],
         ),
         predicates=predicates,

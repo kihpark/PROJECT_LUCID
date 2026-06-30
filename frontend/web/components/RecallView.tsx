@@ -61,6 +61,7 @@ import { notifyStateChanged } from '@/lib/sync';
 import type {
   EntityBrief,
   EntityFacetItem,
+  EntityFacets,
   EntitySuggestion,
   FactDetailResponse,
   FactTypeFacets,
@@ -329,10 +330,50 @@ const FACT_TYPE_ORDER: FactTypeKey[] = ['action', 'claim', 'measurement'];
 // summary header. See RecallFactTypeSummary below.
 
 
-const BUCKET_LABELS: Record<'organization' | 'person' | 'place' | 'other', string> = {
-  organization: '조직',
+// fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ — PO 2026-06-30):
+// v3 closed set 10 class + "other" fallback. 옛 4 bucket 시절 "기타 비대"
+// 해소. 순서 = WHO (사람 / 조직 / 그룹) → WHAT (지식 / 자원 / 행위 / 개념
+// / 사건 / 지표) → WHERE (장소) → 기타. 한국어 라벨은 displayNames.ts
+// 의 ENTITY_TYPE_LABELS_KO 와 동일 단어를 쓴다 (★ "여기 한글 저기 영문
+// / 같은 토큰 다른 단어" 불일치 0 가드).
+type FacetBucketKey =
+  | 'person'
+  | 'organization'
+  | 'group'
+  | 'knowledge'
+  | 'resource'
+  | 'task'
+  | 'concept'
+  | 'event'
+  | 'metric'
+  | 'location'
+  | 'other';
+
+const FACET_BUCKET_ORDER: readonly FacetBucketKey[] = [
+  'person',
+  'organization',
+  'group',
+  'knowledge',
+  'resource',
+  'task',
+  'concept',
+  'event',
+  'metric',
+  'location',
+  'other',
+] as const;
+
+const BUCKET_LABELS: Record<FacetBucketKey, string> = {
   person: '사람',
-  place: '장소',
+  organization: '조직',
+  group: '그룹',
+  knowledge: '지식',
+  resource: '자원',
+  task: '행위',
+  concept: '개념',
+  event: '사건',
+  metric: '지표',
+  location: '장소',
   other: '기타',
 };
 
@@ -923,19 +964,38 @@ interface FacetPanelProps {
   onToggleEntity: (uid: string) => void;
 }
 
+// fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ — PO 2026-06-30):
+// 옛 backend 가 `place` 만 emit 한 응답을 새 FE 가 받을 수도 있다 (deploy
+// 비대칭 윈도우). `place` → `location` 으로 합치고, 둘 다 들어오면 합집합.
+function _resolveBucketItems(
+  entities: EntityFacets | undefined,
+  bucket: FacetBucketKey,
+): EntityFacetItem[] {
+  if (!entities) return [];
+  const primary = entities[bucket] ?? [];
+  if (bucket === 'location') {
+    const legacy = entities.place ?? [];
+    if (legacy.length === 0) return primary;
+    // dedupe by uid, primary wins.
+    const seen = new Set(primary.map((e) => e.uid));
+    return [...primary, ...legacy.filter((e) => !seen.has(e.uid))];
+  }
+  return primary;
+}
+
 function FacetPanel({ facets, activeEntityUids, onToggleEntity }: FacetPanelProps) {
   const entities = facets?.entities;
   const predicates = facets?.predicates ?? [];
   const activeSet = new Set(activeEntityUids);
 
-  const buckets = entities
-    ? (['organization', 'person', 'place', 'other'] as const)
+  // ★ v3 10-bucket — empty bucket 은 render skip (★ "비대 가드"). 단 backend
+  // 가 entities 자체를 안 보냈을 땐 panel 비어두고 어떤 bucket 도 안 그림.
+  const bucketsWithItems: Array<{ key: FacetBucketKey; items: EntityFacetItem[] }> = entities
+    ? FACET_BUCKET_ORDER.map((b) => ({ key: b, items: _resolveBucketItems(entities, b) }))
+        .filter(({ items }) => items.length > 0)
     : [];
 
-  const allEntityCounts: number[] = entities
-    ? ([entities.organization, entities.person, entities.place, entities.other]
-        .flatMap((arr) => arr.map((e) => e.count)))
-    : [];
+  const allEntityCounts: number[] = bucketsWithItems.flatMap(({ items }) => items.map((e) => e.count));
   const maxEntityCount = allEntityCounts.length > 0 ? Math.max(...allEntityCounts) : 0;
   const maxPredicateCount = predicates.length > 0 ? Math.max(...predicates.map((p) => p.count)) : 0;
 
@@ -948,8 +1008,10 @@ function FacetPanel({ facets, activeEntityUids, onToggleEntity }: FacetPanelProp
       <h2 className="text-xxs uppercase tracking-wider text-text-muted mb-3 font-mono">
         Entities
       </h2>
-      {buckets.map((bucket) => {
-        const items = entities ? entities[bucket] : [];
+      {bucketsWithItems.length === 0 ? (
+        <p className="text-xxs text-text-muted px-2 py-1" data-testid="facet-empty">(없음)</p>
+      ) : null}
+      {bucketsWithItems.map(({ key: bucket, items }) => {
         return (
           <div
             key={bucket}
@@ -959,24 +1021,20 @@ function FacetPanel({ facets, activeEntityUids, onToggleEntity }: FacetPanelProp
             <h3 className="text-xs font-medium text-text-secondary mb-1">
               {BUCKET_LABELS[bucket]} ({items.length})
             </h3>
-            {items.length === 0 ? (
-              <p className="text-xxs text-text-muted px-2 py-1">(없음)</p>
-            ) : (
-              <ul className="space-y-1">
-                {items.map((item) => (
-                  <li key={item.uid}>
-                    <FacetBar
-                      item={item}
-                      active={activeSet.has(item.uid)}
-                      maxCount={maxEntityCount}
-                      onClick={() => onToggleEntity(item.uid)}
-                      testId={`facet-entity-${item.uid}`}
-                      uid={item.uid}
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
+            <ul className="space-y-1">
+              {items.map((item) => (
+                <li key={item.uid}>
+                  <FacetBar
+                    item={item}
+                    active={activeSet.has(item.uid)}
+                    maxCount={maxEntityCount}
+                    onClick={() => onToggleEntity(item.uid)}
+                    testId={`facet-entity-${item.uid}`}
+                    uid={item.uid}
+                  />
+                </li>
+              ))}
+            </ul>
           </div>
         );
       })}
@@ -2083,11 +2141,20 @@ export function RecallView({ spaceId }: Props) {
     const entities = result?.facets?.entities;
     const lookup = new Map<string, { name: string; bucket: string }>();
     if (entities) {
-      (['organization', 'person', 'place', 'other'] as const).forEach((b) => {
-        for (const e of entities[b]) {
+      // ★ v3 10-bucket — chip bucket 라벨 lookup. legacy `place` 응답
+      // 도 "장소" 로 매핑 (FacetPanel 의 _resolveBucketItems 와 일관).
+      FACET_BUCKET_ORDER.forEach((b) => {
+        const items = entities[b] ?? [];
+        for (const e of items) {
           lookup.set(e.uid, { name: e.name, bucket: BUCKET_LABELS[b] });
         }
       });
+      const legacyPlace = entities.place ?? [];
+      for (const e of legacyPlace) {
+        if (!lookup.has(e.uid)) {
+          lookup.set(e.uid, { name: e.name, bucket: BUCKET_LABELS.location });
+        }
+      }
     }
     return activeEntities.map((uid) => {
       const m = lookup.get(uid);

@@ -38,21 +38,24 @@ export const LEGEND_BUCKET_LABELS_KO: Record<string, string> = {
 /** STELLAR entity_type 토큰 (backend taxonomy) → 한국어. ★ 사용자 노출 시
  *  type identifier (`person`, `organization`) 가 아닌 이 매핑을 사용. */
 export const ENTITY_TYPE_LABELS_KO: Record<string, string> = {
+  // ★ v3 closed set 10 class — PO 2026-06-30 의뢰서 verbatim.
   person: '사람',
   organization: '조직',
   group: '그룹',
-  resource: '자원',
-  product: '제품',
-  concept: '개념',
   knowledge: '지식',
+  resource: '자원',
+  task: '행위',
+  concept: '개념',
+  event: '사건',
+  metric: '지표',
+  location: '장소',
+  // ── legacy / 보조 매핑 (★ pre-v3 데이터 호환) ─────────────────
+  product: '제품',
   procedure: '행위',
   service: '서비스',
   problem: '문제',
-  metric: '지표',
-  event: '사건',
   artifact: '산출물',
   place: '장소',
-  location: '위치',
   region: '지역',
   venue: '장소',
 };
