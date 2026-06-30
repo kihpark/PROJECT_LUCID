@@ -600,21 +600,29 @@ def _insert_candidate_entity(
             # (★ strict_dynamic_mapping safe — properties is dynamic_object).
             "type_confidence": float(confidence),
             "needs_review": needs_review,
+            # ★ STAGE 1c-ii hotfix (PO 2026-06-30): relabel_history mapping
+            # 은 strict + {at, from_primary, to_primary, reason} 만 허용.
+            # 따라서 lang / confidence / merge_provenance 는 strict reject →
+            # entity ES insert 전체 실패 (★ orphan UUID 양산). v3 schema
+            # 변경 없이 hotfix 하기 위해 부가 정보를 dynamic_object 인
+            # `properties` 로 옮긴다 (mapping migration 불필요).
+            "candidate_insert_lang": lang,
+            "candidate_insert_confidence": float(confidence),
+            "candidate_insert_merge_provenance": dict(merge_provenance or {}),
         },
         "fact_uids": [],
         "connected_objects": [],
         "knowledge_space_id": knowledge_space_id,
-        # ★ 1c-ii: merge_provenance = v3 §2 의 "통합/분리 이력".
-        # Gateway 가 insert 한 candidate 는 source/stage/confidence 를
-        # 남겨 P2 사용자 통합 (merge) 시 되돌릴 수 있게 한다.
+        # ★ 1c-ii hotfix: relabel_history 는 strict mapping —
+        # {at, from_primary, to_primary, reason} 만 허용. 다른 필드
+        # (to_primary_lang / confidence / merge_provenance) 는 strict
+        # reject → entity insert 전체 실패. 부가 정보는 properties 로
+        # 이동했고, 여기서는 옛 schema 의 허용 필드만 기록한다.
         "relabel_history": [
             {
                 "from_primary": "",
                 "to_primary": normalized,
-                "to_primary_lang": lang,
                 "reason": "REQ-004 STAGE 1c-ii gateway candidate insert",
-                "confidence": float(confidence),
-                "merge_provenance": dict(merge_provenance or {}),
             }
         ],
     }
