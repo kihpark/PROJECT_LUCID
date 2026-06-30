@@ -420,29 +420,131 @@ _TYPE_HINT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+_LLM_CLASSIFY_SYSTEM_PROMPT = (
+    "You are an entity-type classifier. Given a single surface form, "
+    "classify it into EXACTLY ONE of the v3 10-type closed set:\n"
+    "  person, organization, group, knowledge, resource, task, "
+    "concept, event, metric, location\n\n"
+    "★ v3 Carley 분류 기준:\n"
+    "- person: 사람 이름 (홍길동, Elon Musk)\n"
+    "- organization: 공식·법적 실체 (Samsung, 한국은행, 보건복지부)\n"
+    "- group: 비공식·창발 묶음 (지지층, 시민단체)\n"
+    "- knowledge: 전문영역·노하우·정보자산 (반도체 기술, AI, 청사진)\n"
+    "- resource: 예산·자원·물자·제품 (예산, 희토류, Vision Pro, 메모리 팹)\n"
+    "- task: 정책·절차·법안·역할·프로젝트 (탄핵 의결, 메가프로젝트, 종합계획)\n"
+    "- concept: 추상개념·주제 (자본주의, 민주주의)\n"
+    "- event: 명명된 사건 거점 (6·3부정선거, IMF사태, 팬데믹)\n"
+    "- metric: 지표 (GDP, MAU, 환율, 시세)\n"
+    "- location: 장소 (서울, 광주·전남, 미국)\n\n"
+    "Output ONLY a single JSON object: "
+    '{"type": "<one_of_10>", "confidence": <0.0-1.0>}\n'
+    "★ no prose, no explanation, no markdown fence."
+)
+
+
 def _classify_type_with_llm(surface: str, lang: str) -> tuple[str, float]:
     """
-    ★ 1b-ii: LLM 가 v3 10종 closed set 안에서만 분류.
+    ★ 1b-ii final: Claude structured output 으로 entity_type 분류.
 
     Returns (entity_type, confidence).
-    ★ STUB — 실제 LLM 호출 (★ Claude structured output) 통합 = 1b-ii final.
 
-    Heuristic stub:
-      - 명백한 패턴 매칭 → type + 0.6 confidence
-      - default → "concept" + 0.3 confidence (★ closed-set 안 안전 fallback)
+    PO 2026-06-30: heuristic stub (★ 한국어 명사구 분류 불가) → ★ 진짜
+    Claude 호출. ANTHROPIC_API_KEY 없거나 호출 실패 시 heuristic fallback.
+
+    Resilience:
+      - API key 미설정 / SDK 미설치 / 호출 실패 → heuristic fallback
+        (confidence 0.3 로 표시 — 낮은 신뢰)
+      - LLM JSON 깨짐 → heuristic fallback
+      - v3 10종 외 type → concept (confidence 감소 0.3 floor)
     """
     if not surface:
         return ("concept", 0.0)
 
+    bare = surface.strip()
+    if not bare:
+        return ("concept", 0.0)
+
+    # ★ Claude 진짜 호출 (★ call_claude_structured = claude_client 의 helper)
+    # ★ import locally so the gateway module stays importable without the
+    # anthropic SDK installed (e.g. lightweight test envs).
+    try:
+        from api.structure.claude_client import call_claude_structured
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "LLM classify: claude_client import failed for %r: %s — "
+            "fallback heuristic", bare, exc,
+        )
+        return (_classify_type_heuristic(bare, lang), 0.3)
+
+    user_prompt = (
+        f"surface: {bare!r}\n"
+        f"source language: {lang}\n\n"
+        "Classify into one of the 10 v3 types. JSON only."
+    )
+
+    try:
+        # ★ haiku 4.5 — 빠른·저비용 분류. CLAUDE_CLASSIFY_MODEL env 로 override 가능.
+        import os as _os
+        chosen_model = _os.getenv("CLAUDE_CLASSIFY_MODEL", "claude-haiku-4-5")
+        parsed = call_claude_structured(
+            system_prompt=_LLM_CLASSIFY_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            max_tokens=80,
+            model=chosen_model,
+        )
+    except Exception as exc:  # noqa: BLE001 - any failure -> heuristic fallback
+        logger.warning(
+            "LLM classify Claude call failed for %r: %s — fallback heuristic",
+            bare, exc,
+        )
+        return (_classify_type_heuristic(bare, lang), 0.3)
+
+    raw_type = parsed.get("type") if isinstance(parsed, dict) else None
+    raw_conf = parsed.get("confidence") if isinstance(parsed, dict) else None
+
+    if not isinstance(raw_type, str):
+        logger.warning(
+            "LLM classify: missing/non-string 'type' for %r (got %r) — "
+            "fallback heuristic", bare, parsed,
+        )
+        return (_classify_type_heuristic(bare, lang), 0.3)
+
+    entity_type = raw_type.strip().lower()
+    try:
+        confidence = float(raw_conf) if raw_conf is not None else 0.5
+    except (TypeError, ValueError):
+        confidence = 0.5
+    # clamp [0.0, 1.0]
+    if confidence < 0.0:
+        confidence = 0.0
+    elif confidence > 1.0:
+        confidence = 1.0
+
+    # ★ v3 10종 외 → concept fallback, confidence 감소 (floor 0.3)
+    if entity_type not in _ENTITY_TYPE_V3_SET:
+        logger.info(
+            "LLM classify: out-of-set type %r for %r — coerce to 'concept'",
+            entity_type, bare,
+        )
+        return ("concept", min(confidence, 0.3))
+
+    return (entity_type, confidence)
+
+
+def _classify_type_heuristic(surface: str, lang: str) -> str:
+    """★ Heuristic fallback (★ Claude 호출 실패 시 보존).
+
+    ★ 옛 stub 의 명백한 패턴 매칭만 — Korean 명사구 일반은 'concept' 로 떨어진다.
+    Claude 호출이 성공하면 호출되지 않는다.
+    """
+    if not surface:
+        return "concept"
     s = surface.lower()
-    # 명백한 패턴 hint
     for entity_type, patterns in _TYPE_HINT_PATTERNS:
         for pat in patterns:
             if pat in s:
-                return (entity_type, 0.6)
-
-    # default = concept (★ closed set 안 안전 fallback)
-    return ("concept", 0.3)
+                return entity_type
+    return "concept"
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +578,13 @@ def _insert_candidate_entity(
     insert failure is logged at WARNING.
     """
     entity_id = new_uid()
+    # REQ-004 STAGE 1b-ii final (★ PO 2026-06-30): confidence < 0.5 →
+    # needs_review marker. Claude classifier may emit a low-confidence
+    # type when the surface is ambiguous (e.g. "AI 코리아" — knowledge?
+    # task? resource?). ES `lucid_objects` index has strict_dynamic_mapping
+    # = top-level new fields rejected — so the needs_review / confidence
+    # signal goes into `properties` (a dynamic_object field) instead.
+    needs_review = bool(confidence < 0.5)
     body: dict[str, Any] = {
         "object_uid": entity_id,
         # v3 §3 closed-set type (★ 10종)
@@ -486,7 +595,12 @@ def _insert_candidate_entity(
         "primary_label": normalized,
         "primary_lang": lang,
         "aliases": [],
-        "properties": {},
+        "properties": {
+            # ★ STAGE 1b-ii final: confidence + needs_review under properties
+            # (★ strict_dynamic_mapping safe — properties is dynamic_object).
+            "type_confidence": float(confidence),
+            "needs_review": needs_review,
+        },
         "fact_uids": [],
         "connected_objects": [],
         "knowledge_space_id": knowledge_space_id,

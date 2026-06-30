@@ -365,17 +365,36 @@ def _build_uid_mapping(
         Sprint 4A user picks).
     """
     mapping: dict[str, str] = {}
+    placeholder_leak: list[str] = []
     for obj in decomp.objects:
         m = match_per_object.get(obj.uid)
         if m is None:
-            mapping[obj.uid] = obj.uid  # leave placeholder
+            # REQ-004 STAGE 1b-ii final: gateway should never return None
+            # (the 1c-ii candidate insert guarantees entity_id). When it
+            # does (e.g. _safe_object_class rejected the class), log so
+            # the leak is visible in production. The placeholder stays
+            # in the map so downstream lookups fall back to obj.uid.
+            placeholder_leak.append(obj.uid)
+            mapping[obj.uid] = obj.uid
             continue
         if m.matched_object_uid:
             mapping[obj.uid] = m.matched_object_uid
         elif m.new_object_uid:
             mapping[obj.uid] = m.new_object_uid
         else:
+            # Defensive: gateway-driven path always populates one of the
+            # two — but if a defensive fallback path emits both blank,
+            # surface the leak so the serialize-time strict-reject
+            # (STAGE 1c-vii) names the right caller.
+            placeholder_leak.append(obj.uid)
             mapping[obj.uid] = obj.uid
+    if placeholder_leak:
+        logger.warning(
+            "REQ-004-1b-ii-final: placeholder leak on uid_map for %d "
+            "object(s): %r — gateway returned no entity_id (will trigger "
+            "STAGE 1c-vii strict-reject if any ACTION fact references them).",
+            len(placeholder_leak), placeholder_leak[:6],
+        )
     return mapping
 
 
