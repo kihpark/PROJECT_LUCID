@@ -256,10 +256,18 @@ def test_1b_ii_candidate_type_in_v3_closed_set(mock_emb):
     assert result.entity_type in v3_closed
 
 
+@patch("api.structure.claude_client.call_claude_structured")
 @patch("api.structure.resolution_gateway.get_embedding")
-def test_1b_ii_default_to_concept_safe_fallback(mock_emb):
-    """★ 1b-ii: unknown surface → concept (★ closed-set safe fallback)."""
+def test_1b_ii_default_to_concept_safe_fallback(mock_emb, mock_claude):
+    """★ 1b-ii final (★ PO 2026-06-30): unknown surface + Claude 호출 실패 →
+    heuristic fallback → 패턴 미스 → concept (★ closed-set safe fallback).
+
+    Pre-1b-ii-final: heuristic stub 만 호출. unknown surface 가 패턴
+    매칭 안 되면 concept 으로 떨어짐. 1b-ii final 에서 Claude 호출이
+    추가되었으므로, fallback path 검증은 Claude 호출을 실패시킨다.
+    """
     mock_emb.return_value = None
+    mock_claude.side_effect = RuntimeError("forced fallback to heuristic")
     client = MagicMock()
     client.search.return_value = {"hits": {"hits": []}}
     result = resolve("xyzabc123nopattern", "en", "ks-1", client=client)

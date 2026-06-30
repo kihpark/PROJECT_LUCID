@@ -302,6 +302,198 @@ def _drop_facts_without_subject(parsed: dict[str, Any]) -> tuple[dict[str, Any],
     return out, len(dropped_fact_uids)
 
 
+_OBJ_PLACEHOLDER_RE_CLIENT = re.compile(r"^obj-\d+$", re.IGNORECASE)
+_UUID_LIKE_RE_CLIENT = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _is_entity_id_shape_client(value: Any) -> bool:
+    """True iff `value` is None / empty / obj-N placeholder / canonical UUID4.
+
+    Mirror of `api.structure.models._is_entity_id_shape` — used in the
+    pre-validate literal-recovery pass so we can rewrite literals into
+    fresh obj-N placeholders BEFORE the StructureFact model_validator
+    runs and raises V3LiteralObjectError.
+    """
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    bare = value.strip()
+    if not bare:
+        return True
+    if _OBJ_PLACEHOLDER_RE_CLIENT.match(bare):
+        return True
+    if _UUID_LIKE_RE_CLIENT.match(bare):
+        return True
+    return False
+
+
+def _recover_literal_object_values(parsed: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """REQ-004 STAGE 1b-ii final (★ PO 2026-06-30) — literal recovery.
+
+    The LLM occasionally violates the prompt rule "ACTION fact's
+    object_value MUST be obj-N (an entity reference)" and emits a raw
+    Korean / English noun phrase as literal ("메가프로젝트", "Samsung",
+    "메모리 팹"). The v3 strict-reject model_validator (STAGE 1c-vii)
+    then raises V3LiteralObjectError and the whole envelope fails.
+
+    The PO's 2026-06-30 directive (REQ-004 STAGE 1b-ii final):
+        "AI 코리아", "청사진" 등을 ★ entity_id 로 해석하게 (지금은
+        literal 떨어뜨려 reject). gateway 가 ★ 진짜 entity 만들면
+        ★ literal reject 없이 entity-edge 형성.
+
+    This pass walks parsed['facts'] BEFORE Pydantic validation and:
+      1. For each ACTION fact with a non-entity-shape object_value
+         (literal noun phrase), allocate a synthetic obj-N uid.
+      2. Append a matching StructureObject stub to parsed['objects']
+         (class=concept; resolution_gateway will Claude-classify the
+         real v3 10-type later).
+      3. Replace the fact's object_value with that synthetic obj-N.
+      4. Append a fact_object_link of link_type='primary_object' so the
+         link layer keeps the edge consistent.
+
+    Returns (mutated_dict_or_original, recovered_count). The pass is
+    idempotent — facts whose object_value is already entity-shaped are
+    passed through untouched. The link layer is not pruned (only
+    appended-to) so existing references stay valid.
+    """
+    facts = parsed.get("facts")
+    if not isinstance(facts, list):
+        return parsed, 0
+
+    objects = parsed.get("objects")
+    if not isinstance(objects, list):
+        objects = []
+        parsed["objects"] = objects
+
+    # Cache existing literal -> synthetic-uid so multiple facts
+    # mentioning the same entity-literal share one obj-N.
+    literal_to_uid: dict[str, str] = {}
+
+    # Seed cache with EXISTING objects that share a name — when the
+    # LLM already created a StructureObject for "메가프로젝트" but
+    # also emitted a fact whose object_value is the same literal, we
+    # want both to land on the same obj-N (not allocate a duplicate).
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        nm = obj.get("name")
+        uid = obj.get("uid")
+        if isinstance(nm, str) and isinstance(uid, str) and nm.strip() and uid.strip():
+            literal_to_uid.setdefault(nm.strip(), uid.strip())
+
+    # Find the next free obj-N index.
+    next_idx = 1
+    seen_uids: set[str] = set()
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        uid = obj.get("uid")
+        if isinstance(uid, str):
+            seen_uids.add(uid)
+            m = _OBJ_PLACEHOLDER_RE_CLIENT.match(uid)
+            if m:
+                try:
+                    n = int(uid.split("-", 1)[1])
+                    if n >= next_idx:
+                        next_idx = n + 1
+                except (ValueError, IndexError):
+                    pass
+
+    def _alloc_uid() -> str:
+        nonlocal next_idx
+        while True:
+            candidate = f"obj-{next_idx}"
+            next_idx += 1
+            if candidate not in seen_uids:
+                seen_uids.add(candidate)
+                return candidate
+
+    fol = parsed.get("fact_object_links")
+    if not isinstance(fol, list):
+        fol = []
+        parsed["fact_object_links"] = fol
+
+    recovered = 0
+    out_facts: list[Any] = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            out_facts.append(fact)
+            continue
+        # CLAIM 의 object_value 는 의도적으로 literal (발화 내용),
+        # MEASUREMENT 의 object_value 는 수치 표현 literal — 둘 다 건너뜀.
+        if fact.get("fact_type") != "action":
+            out_facts.append(fact)
+            continue
+        ov = fact.get("object_value")
+        if _is_entity_id_shape_client(ov):
+            out_facts.append(fact)
+            continue
+        if not isinstance(ov, str):
+            out_facts.append(fact)
+            continue
+        literal = ov.strip()
+        if not literal:
+            out_facts.append(fact)
+            continue
+        # Allocate (or reuse) a synthetic obj-N for this literal.
+        synth_uid = literal_to_uid.get(literal)
+        if synth_uid is None:
+            synth_uid = _alloc_uid()
+            literal_to_uid[literal] = synth_uid
+            # Append a StructureObject stub. class=concept is a safe
+            # default; resolution_gateway._classify_type_with_llm
+            # (Claude structured output) will pick the real v3 type
+            # downstream and ResolvedEntity.entity_type lands on the
+            # fact's object resolution.
+            #
+            # object_surface (used by processor._build_surface_map)
+            # gets the literal too via the fact's own object_surface
+            # falling back to the StructureObject.name.
+            objects.append({
+                "uid": synth_uid,
+                "class": "concept",
+                "name": literal,
+                "aliases": [],
+                "properties": {
+                    "synthetic": True,
+                    "recovered_from_literal": True,
+                    "stage": "1b-ii-final",
+                },
+            })
+        # Rewrite the fact.
+        fact = dict(fact)
+        fact["object_value"] = synth_uid
+        # Preserve the LLM's original literal in object_surface for
+        # downstream surface_map / corrected_label fallback.
+        if not fact.get("object_surface"):
+            fact["object_surface"] = literal
+        out_facts.append(fact)
+        # Append a primary_object link so the link layer stays consistent.
+        fact_uid = fact.get("uid")
+        if isinstance(fact_uid, str) and fact_uid:
+            # ★ link_type = 'involves' (FactObjectLink enum: asserts_property,
+            # describes_state, addresses, uses, involves). 'involves' is the
+            # most generic "fact references this entity as a participant" —
+            # matches the prompt's convention for object/subject entity refs.
+            fol.append({
+                "fact_uid": fact_uid,
+                "object_uid": synth_uid,
+                "link_type": "involves",
+                "properties": {"recovered_from_literal": True},
+            })
+        recovered += 1
+
+    if recovered == 0:
+        return parsed, 0
+
+    parsed["facts"] = out_facts
+    return parsed, recovered
+
+
 def decompose_via_claude(
     merged_text: str,
     metadata: dict[str, Any] | None = None,
@@ -425,6 +617,22 @@ def _build_result(
         logger.info(
             "Structure: dropped %d facts with null/empty subject_uid "
             "(LLM ellipsis artifact)", dropped_subjectless,
+        )
+    # REQ-004 STAGE 1b-ii final (★ PO 2026-06-30): literal recovery.
+    # When the LLM emits ACTION fact whose object_value is a raw noun
+    # phrase ("메가프로젝트", "Samsung", "AI 코리아"), rewrite it into a
+    # fresh obj-N placeholder + a synthetic StructureObject stub BEFORE
+    # the StructureFact._v3_action_object_must_be_entity_id validator
+    # runs. Downstream `resolution_gateway.resolve()` Claude-classifies
+    # the v3 type and persists the candidate entity (★ 1c-ii path).
+    # Without this pass the whole envelope explodes on first literal.
+    parsed, recovered_literals = _recover_literal_object_values(parsed)
+    if recovered_literals:
+        logger.info(
+            "REQ-004-1b-ii-final: recovered %d literal object_value(s) "
+            "into synthetic obj-N placeholders (gateway will Claude-"
+            "classify the v3 type downstream).",
+            recovered_literals,
         )
     try:
         result = StructureResult.model_validate(parsed)
