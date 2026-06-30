@@ -92,6 +92,45 @@ _KOREAN_PARTICLES_RE = re.compile(
 )
 
 
+# ★ PO 2026-07-01 M-Dogfood-B: 한국어 행정구역 약칭 → 정식 명칭.
+# 같은 location 인데 옛 entity 가 "광주" / 새 entity 가 "광주광역시" 로
+# 따로 떨어진 dogfood 사례 fix. cosine('광주', '광주광역시') 도 0.6 대 →
+# kNN 못 잡음. ★ Korean 한정 (★ lang=="ko") + ★ exact lookup 만 (★ 보수).
+#
+# Coverage: 17 시·도 (★ 행안부 행정구역 기준, 2026-07-01).
+#   - 1 특별시: 서울특별시
+#   - 6 광역시: 부산/대구/인천/광주/대전/울산
+#   - 1 특별자치시: 세종
+#   - 1 도: 경기도
+#   - 4 특별자치도: 강원/전북/제주 + (★ 충청·전라·경상 은 ★ 일반 도)
+#   - 4 도: 충청북도/충청남도/전라남도/경상북도/경상남도
+#
+# ★ Conservative: 광역시 등 ★ 도시 단위만 (★ "강남" 같은 ★ 구 단위 X —
+# 동/구는 동음이의 너무 많아 자동 normalize 시 false-positive 위험 — REQ-012
+# 사용자 병합으로 처리).
+_KOREAN_ADMIN_AREA_ALIAS: dict[str, str] = {
+    # ★ 특별시 / 광역시 / 특별자치시 (8)
+    "서울": "서울특별시",
+    "부산": "부산광역시",
+    "대구": "대구광역시",
+    "인천": "인천광역시",
+    "광주": "광주광역시",   # ★ 광주 = 광주광역시 (★ PO 사례)
+    "대전": "대전광역시",
+    "울산": "울산광역시",
+    "세종": "세종특별자치시",
+    # ★ 도 / 특별자치도 (9)
+    "경기": "경기도",
+    "강원": "강원특별자치도",
+    "충북": "충청북도",
+    "충남": "충청남도",
+    "전북": "전북특별자치도",
+    "전남": "전라남도",
+    "경북": "경상북도",
+    "경남": "경상남도",
+    "제주": "제주특별자치도",
+}
+
+
 def _normalize_surface(surface: str, lang: str) -> str:
     """★ 1b-iii: pre-resolve surface 정규화.
 
@@ -99,6 +138,8 @@ def _normalize_surface(surface: str, lang: str) -> str:
       1. strip whitespace
       2. brand alias lookup (★ Korean transliteration → English canonical)
       3. Korean particles strip (★ "한국은행이" → "한국은행")
+      4. ★ M-Dogfood-B: 한국어 행정구역 약칭 → 정식 명칭
+         (★ "광주" → "광주광역시", ko 한정, exact lookup 만)
     """
     if not surface:
         return ""
@@ -115,6 +156,12 @@ def _normalize_surface(surface: str, lang: str) -> str:
         if stripped in _KOREAN_BRAND_ALIAS:
             return _KOREAN_BRAND_ALIAS[stripped]
         s = stripped or s
+        # ★ M-Dogfood-B: 행정구역 약칭 → 정식 명칭 (★ "광주" → "광주광역시").
+        # ★ exact match 만 — substring 매칭 시 "광주은행" → "광주광역시은행"
+        # 같은 false-positive 발생. ★ 보수적: 단독 surface 가 사전 key 와
+        # ★ 정확히 일치할 때만 confirm.
+        if s in _KOREAN_ADMIN_AREA_ALIAS:
+            return _KOREAN_ADMIN_AREA_ALIAS[s]
     return s
 
 
@@ -327,6 +374,13 @@ _CROSS_LINGUAL_SYSTEM_PROMPT = (
     "SK Hynix, 현대자동차 = Hyundai Motor. Also handle abbreviation "
     "(SK Inc. ≠ SK하이닉스), translation variants (한국은행 = Bank of "
     "Korea), and transliteration (스페이스X = SpaceX).\n\n"
+    "★ Korean administrative-area focus (M-Dogfood-B): 광주 = 광주광역시, "
+    "서울 = 서울특별시, 부산 = 부산광역시, 대구 = 대구광역시, 인천 = "
+    "인천광역시, 대전 = 대전광역시, 울산 = 울산광역시, 세종 = "
+    "세종특별자치시, 경기 = 경기도, 강원 = 강원특별자치도, 충북 = "
+    "충청북도, 충남 = 충청남도, 전북 = 전북특별자치도, 전남 = 전라남도, "
+    "경북 = 경상북도, 경남 = 경상남도, 제주 = 제주특별자치도. ★ These "
+    "short / full pairs are the SAME location entity.\n\n"
     "★ Rules:\n"
     "- ONLY match if you are HIGHLY confident the two surfaces denote the "
     "  same legal/real entity (not just a related entity).\n"
@@ -334,7 +388,12 @@ _CROSS_LINGUAL_SYSTEM_PROMPT = (
     "- 'Samsung Group' ≠ 'Samsung Electronics'.\n"
     "- 'SK' alone is ambiguous — DO NOT match to 'SK하이닉스' or 'SK텔레콤' "
     "  unless context disambiguates.\n"
-    "- Different classes (organization vs person) → NEVER match.\n\n"
+    "- 'SK' ≠ 'SK하이닉스' — parent group vs. subsidiary semiconductor "
+    "  company. NEVER match these.\n"
+    "- Different classes (organization vs person) → NEVER match.\n"
+    "- ★ Korean admin-area sub-units do NOT match the parent: '광주 동구' "
+    "  (구) ≠ '광주광역시' (광역시 전체). Only the bare short-form "
+    "  ('광주') equals the full form ('광주광역시').\n\n"
     "Output ONLY a single JSON object: "
     '{"match_index": <int or null>, "confidence": <0.0-1.0>, '
     '"reason": "<short string>"}\n'
