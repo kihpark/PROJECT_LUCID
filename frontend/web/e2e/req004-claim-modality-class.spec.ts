@@ -100,7 +100,11 @@ test.describe('REQ-004 결함 2 — claim modality 표시 클래스 전체 fix',
     await wipeAndSeed(page, CLAIM_MODALITY_SEED);
   });
 
-  test('/recall — 모든 CLAIM 카드에 modality 배지 (단정/판단/의견)', async ({ page }) => {
+  // ★ REQ-011-v1 (PO 2026-06-30) — /recall 은 분석형 리디자인으로 전환.
+  // 옛 fact list 표시 surface 가 사라졌고 modality 배지는 /ledger 에만
+  // 남는다. /ledger 시나리오는 그대로 유지 — modality 클래스 전체 fix
+  // 의 증거는 ledger 카드에 그대로 보존됨.
+  test.skip('/recall — 모든 CLAIM 카드에 modality 배지 (단정/판단/의견)', async ({ page }) => {
     await recallSearch(page, 'Alpha');
 
     // assertion → 단정
@@ -133,7 +137,8 @@ test.describe('REQ-004 결함 2 — claim modality 표시 클래스 전체 fix',
     await captureEvidence(page, 'req004-modality', 'recall-3-modalities');
   });
 
-  test('/recall — claim-strip 의 brackets 가 한국어 양태 라벨', async ({ page }) => {
+  // ★ REQ-011-v1 — 옛 claim-strip surface 가 /recall 에서 사라짐.
+  test.skip('/recall — claim-strip 의 brackets 가 한국어 양태 라벨', async ({ page }) => {
     await recallSearch(page, 'Alpha');
 
     // strip 의 speech_act 부분이 raw 영문 (assertion) 가 아닌 한국어 (단정) 로 보여야.
