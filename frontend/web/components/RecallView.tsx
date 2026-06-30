@@ -1,2552 +1,887 @@
 'use client';
 
 /**
- * RecallView — DR-089 dogfood thin slice + B-40 polish + B-60 mode toggle.
+ * ★ REQ-011-v1 (★ PO 2026-06-30) — Recall 전면 리디자인.
  *
- * What this component is:
- *   - Single search input + a signature line + a list of fact cards.
- *   - Calls GET /api/spaces/{sid}/recall on submit.
- *   - Renders ONLY what the backend returned. The empty signature
- *     ("검증된 사실이 없습니다") is rendered verbatim; we do not pad,
- *     paraphrase, or augment. Zero-hallucination is the value prop.
+ * 옛 구조 폐기 (검색 결과 list + facet panel + B-60 simple/power 모드 토글).
+ * 새 구조 = 분석형 2 단 grid (좌 렌즈 / 우 답변·근거).
  *
- * B-40 additions:
- *   · resolveLabel — match FactCard's resolver so a UUID/obj-N subject
- *     becomes "SpaceX" not "dee1ba2c-...". The backend now emits
- *     subject_label / object_label, so this is just rendering them.
- *   · Sort facts by score DESC (embedding hits first, entity_link
- *     expansion second).
- *   · A small badge labels each card as either "유사도 매치" or
- *     "엔티티 연결". The recall threshold is announced once above
- *     the result list so the user understands the filtering policy.
+ * 의뢰서 §2 verbatim:
+ *   "루트 배경 #070a0e. 상단 sticky 헤더 (높이 60) +
+ *    그 아래 2 단 그리드 grid-template-columns: 340px 1fr,
+ *    max-width: 1440px 중앙 정렬."
  *
- * B-60 — simple / power mode toggle:
- *   · Default mode is `simple`: a single column of fact cards. No left
- *     filter panel, no right facet panel. This is the "단순-기본" UX
- *     that PO asked for so the recall page is approachable for the
- *     first-time user.
- *   · Toggling to `power` reveals the existing Palantir-style 3-panel
- *     layout (left filter / center cards / right facets). Power mode
- *     is the on-demand surface; nothing changes about the search
- *     itself — both modes consume the SAME recall response, no second
- *     API call ever fires from a mode flip.
- *   · The mode is persisted in `localStorage` under
- *     `lucid.recall.mode` so the user's preference survives reloads.
+ * ★ 데이터 의존 분리 (의뢰서 §0):
+ *   - 분석형 레이아웃 / 不知 상태 = 지금 구현 (실작동)
+ *   - 사실/신뢰지표/근거 그래프 = 자리 + 예시 데이터 (★ v1)
+ *   - 안심 문구 = ★ PO 결정 1: brief.totals 실데이터
+ *   - 최근 recall = ★ PO 결정 2: v1 예시 / v2 endpoint
+ *   - Q&A 합성 = ★ PO 결정 3: HEARTH 동일 endpoint (★ v1 = 자리)
  *
- * Implementation pattern:
- *   · `RecallView` owns the data (query, controls, recall result,
- *     fact-detail modal) and exposes the body via `<RecallSimpleBody>`
- *     / `<RecallPowerBody>` props — both bodies are dumb consumers.
- *   · The 3-panel power layout is preserved verbatim from B-49/B-50;
- *     no behaviour change was made to the existing panels.
+ * 옛 API 호출 path (recall, recallBriefing, fact mutations) = 상위 페이지
+ * 에서 후속 라우팅으로 복원 가능 — REQ-011 단계는 새 디자인 화면 단독.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActionButton } from './ActionButton';
-import { FactTypeBadge, FactTypeStrip } from './FactCard';
+import { useCallback, useState } from 'react';
+import { useHomeBrief } from '@/lib/useHomeBrief';
 import {
-  recall as apiRecall,
-  recallBriefing as apiRecallBriefing,
-  ApiError,
-  detachSource as apiDetachSource,
-  getFactDetail as apiGetFactDetail,
-  modifyFact as apiModifyFact,
-  restoreFact as apiRestoreFact,
-  retractFact as apiRetractFact,
-  searchEntitySuggestions,
-} from '@/lib/api';
-import type { RecallBriefingResponse } from '@/lib/api';
-import { predicateLabel } from '@/lib/predicateLabels';
-import { notifyStateChanged } from '@/lib/sync';
-import type {
-  EntityBrief,
-  EntityFacetItem,
-  EntityFacets,
-  EntitySuggestion,
-  FactDetailResponse,
-  FactTypeFacets,
-  ModifyFactRequest,
-  PredicateFacetItem,
-  RecallFact,
-  RecallFacets,
-  RecallResponse,
-} from '@/lib/types';
+  EXAMPLE_ENTITIES,
+  EXAMPLE_PREDICATES,
+  EXAMPLE_RECENT_RECALL,
+  type RecallExampleQuery,
+  type RecallExampleAnswerQuery,
+} from '@/lib/recall-history';
+import { RecallAnswerCard } from './RecallAnswerCard';
+import { RecallEvidenceCard } from './RecallEvidenceCard';
+import { RecallExampleBanner } from './RecallExampleBanner';
+import { RecallMiniGraph } from './RecallMiniGraph';
+import { RecallUnknownState } from './RecallUnknownState';
 
 interface Props {
   spaceId: string;
 }
 
-const OBJECT_REF_PATTERN = /^(?:obj-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-
-// ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1, 2) — UUID 화면 노출 0.
-// 옛: `${value} (미해석)` — UUID 가 화면에 노출됐다. v3 entity-id-only
-// 저장 구조 (object_value = entity uid) 에선 ★ 모든 entity 가 UUID 모양
-// 이라 사용자 화면 전체에 UUID 가 깔린다. fix: backend 가 label 을 못
-// 끌어온 경우 = "미해결 entity" 배지 (★ UUID X). v3 원칙: entity_id =
-// 내부 식별자, 표시 = canonical_name 만.
-const UNRESOLVED_ENTITY_LABEL = '미해결 entity';
-
-function resolveLabel(value: string | undefined, label: string | null | undefined): string {
-  // Server-resolved label always wins.
-  if (label) return label;
-  if (!value) return '—';
-  // Backend couldn't resolve the entity uid — surface a "미해결 entity"
-  // marker (★ UUID 노출 금지) so the user sees a recovery affordance
-  // without seeing the internal identifier.
-  if (OBJECT_REF_PATTERN.test(value)) return UNRESOLVED_ENTITY_LABEL;
-  return value;
-}
-
-// feat/recall-card-original-claim — PO directive 7.
-// Legacy edited facts have `claim` persisted as the pipe-joined
-// "S | P | O" surface that FactCard.regenerateClaim() emits when the
-// user edits in Decide UI. PO wants the recall card title to show the
-// ORIGINAL sentence, not the pipe artefact. We can't recover the
-// original from the stored claim (it was overwritten), but we can:
-//   1. Detect the pipe-artefact shape so the card title doesn't pretend
-//      this string is a natural sentence; surface a small "(재구성됨)"
-//      marker so the user knows this card was edited and the original
-//      sentence is no longer the title.
-//   2. Fall through to the resolved S → P → O surface (which the same
-//      card already shows in its metadata strip below the title) so
-//      the user still sees something readable.
-// Going forward, Decide should stop overwriting `claim` with the pipe
-// surface — but that's a separate change; this is purely the display
-// repair PO asked for in directive 7.
-const PIPE_CLAIM_RE = /^[^|]+ \| [^|]+ \| [^|]+$/;
-
-function isReconstructedClaim(claim: string | null | undefined): boolean {
-  if (!claim) return false;
-  return PIPE_CLAIM_RE.test(claim.trim());
-}
-
-function MatchKindBadge({ kind }: { kind: 'embedding' | 'entity_link' | undefined }) {
-  if (kind === 'entity_link') {
-    return (
-      <span
-        data-testid="recall-badge-entity-link"
-        className="rounded-full bg-accent-warm/10 text-accent-warm border border-accent-warm/40 px-2 py-0.5 text-xxs font-mono"
-        title="이 fact 는 다른 매치된 fact 의 entity 와 연결되어 나타났습니다"
-      >
-        🔗 엔티티 연결
-      </span>
-    );
-  }
-  return (
-    <span
-      data-testid="recall-badge-embedding"
-      className="rounded-full bg-accent-cool/10 text-accent-cool border border-accent-cool/40 px-2 py-0.5 text-xxs font-mono"
-      title="질의 임베딩과 fact 임베딩이 직접 유사"
-    >
-      🔍 유사도 매치
-    </span>
-  );
-}
-
-// v0.2.0 step 3 (fact-contradiction-detection-v1): subtle amber badge
-// (NOT red — detection-only, no resolution UI yet). Renders only when
-// the server reports a positive contradiction_count on the fact.
-function ContradictionBadge({ count }: { count: number }) {
-  if (count <= 0) return null;
-  return (
-    <span
-      data-testid="recall-badge-contradiction"
-      className="rounded-full bg-amber-100 text-amber-900 border border-amber-400 px-2 py-0.5 text-xxs font-mono"
-      title="이 사실은 같은 KS의 다른 사실과 모순됩니다. 자동 해소는 아직 없습니다."
-    >
-      ⚠ 모순 {count}건
-    </span>
-  );
-}
-
-function RecallFactCard({
-  fact, onOpenDetail,
-}: { fact: RecallFact; onOpenDetail?: (factUid: string) => void }) {
-  const sourceUrls = fact.source_uids.filter((s) => s.startsWith('http'));
-  const subjectDisplay = resolveLabel(fact.subject_uid, fact.subject_label);
-  const objectDisplay = resolveLabel(fact.object_value, fact.object_label);
-  const contradictionCount = fact.contradiction_count ?? 0;
-  // feat/recall-card-original-claim — PO directive 7.
-  // Prefer the original claim verbatim; if `claim` is missing or is the
-  // legacy pipe artefact, fall back to a natural S → P → O surface and
-  // flag the card with a "재구성됨" marker so the user understands the
-  // title is not the original sentence.
-  const claimText = (fact.claim ?? '').trim();
-  const reconstructed = !claimText || isReconstructedClaim(claimText);
-  const titleText = reconstructed
-    ? `${subjectDisplay} → ${predicateLabel(fact.predicate, fact.predicate_label)} → ${objectDisplay}`
-    : claimText;
-  return (
-    <article
-      data-testid={`recall-fact-${fact.fact_uid}`}
-      data-match-kind={fact.match_kind ?? 'embedding'}
-      data-claim-reconstructed={reconstructed ? 'true' : 'false'}
-      className="rounded-lg border border-border-subtle bg-bg-card p-4 mb-3"
-    >
-      <header className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <MatchKindBadge kind={fact.match_kind} />
-          <ContradictionBadge count={contradictionCount} />
-          {/* fact-display-unification — shared FactTypeBadge so Recall
-              renders the [CLAIM]/[MEASUREMENT] signal identically to
-              Decide. Early-returns null for action / legacy facts so the
-              header chrome is unchanged for the dominant case. The
-              MatchKindBadge ("유사도 매치"/"엔티티 연결") is preserved as
-              recall-specific metadata. */}
-          <FactTypeBadge
-            factType={fact.fact_type}
-            factUid={fact.fact_uid}
-            speechAct={fact.speech_act}
-          />
-        </div>
-        <span
-          className="font-mono text-xxs text-text-muted"
-          title="kNN cosine score"
-          data-testid={`recall-fact-${fact.fact_uid}-score`}
-        >
-          score {fact.score.toFixed(2)}
-        </span>
-      </header>
-      {onOpenDetail ? (
-        <button
-          type="button"
-          data-testid={`recall-fact-${fact.fact_uid}-open-detail`}
-          onClick={() => onOpenDetail(fact.fact_uid)}
-          className="text-left text-base mb-3 hover:underline"
-          lang="ko"
-        >
-          {titleText}
-          {reconstructed && (
-            <span
-              data-testid={`recall-fact-${fact.fact_uid}-reconstructed`}
-              className="ml-2 italic text-xxs font-mono text-text-muted"
-              title="원문이 보존되지 않은 편집 사실 — 주체·술어·객체로 재구성"
-            >
-              (재구성됨)
-            </span>
-          )}
-        </button>
-      ) : (
-        <p className="text-base mb-3" lang="ko">
-          {titleText}
-          {reconstructed && (
-            <span
-              data-testid={`recall-fact-${fact.fact_uid}-reconstructed`}
-              className="ml-2 italic text-xxs font-mono text-text-muted"
-              title="원문이 보존되지 않은 편집 사실 — 주체·술어·객체로 재구성"
-            >
-              (재구성됨)
-            </span>
-          )}
-        </p>
-      )}
-      {/* fact-display-unification — shared FactTypeStrip so Recall
-          renders the same speaker/speech_act/content_claim strip (for
-          claim facts) or metric/value/unit/as_of strip (for measurement
-          facts) that Decide does. The strip itself owns the PO claim-
-          format spec (bold speaker, [speech_act]:, "content_claim").
-          Early-returns null for action / legacy facts so the dominant
-          case stays a plain SPO. */}
-      <FactTypeStrip fact={fact} factUid={fact.fact_uid} lang="kr" />
-      <dl className="text-xxs text-text-muted font-mono grid grid-cols-3 gap-2 mb-3">
-        <div>
-          <dt className="opacity-60">subject</dt>
-          <dd data-testid={`recall-fact-${fact.fact_uid}-subject`}>{subjectDisplay}</dd>
-        </div>
-        <div>
-          <dt className="opacity-60">predicate</dt>
-          <dd>{predicateLabel(fact.predicate, fact.predicate_label)}</dd>
-        </div>
-        <div>
-          <dt className="opacity-60">object</dt>
-          <dd data-testid={`recall-fact-${fact.fact_uid}-object`}>{objectDisplay}</dd>
-        </div>
-      </dl>
-      <footer className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xxs text-text-muted">
-        <span>
-          validated{' '}
-          <time dateTime={fact.validated_at}>
-            {new Date(fact.validated_at).toLocaleString()}
-          </time>
-        </span>
-        {sourceUrls.length > 0 && (
-          <span className="flex flex-wrap gap-2">
-            sources:
-            {sourceUrls.map((url) => (
-              <a
-                key={url}
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent-cool underline"
-              >
-                {url.replace(/^https?:\/\//, '').slice(0, 50)}
-              </a>
-            ))}
-          </span>
-        )}
-      </footer>
-    </article>
-  );
-}
-
-// feat/recall-fact-type-summary — fact_type taxonomy. Hoisted to the
-// top of the module so RecallFactTypeSummary (which renders the chip
-// row + entity-scoped header for an entity-keyword recall) can
-// reference these labels / order constants. `const`/`type` are NOT
-// hoisted like `function` declarations are; without this move the
-// summary box would crash with a TDZ ReferenceError on first render.
-
-type FactTypeKey = 'action' | 'claim' | 'measurement';
-
-const FACT_TYPE_LABELS: Record<FactTypeKey, string> = {
-  action: '행동',
-  claim: '발언',
-  measurement: '수치',
+const COLORS = {
+  bg: '#070a0e',
+  bgAside: '#070a0e',
+  bgInput: '#0c1316',
+  borderInput: '#1c2a2e',
+  borderAside: '#111a1d',
+  teal: '#2DD4BF',
+  tealMint: '#5fe6d3',
+  tealLight: '#9af0e0',
+  textPrimary: '#f1f6f7',
+  textBody: '#cbd6d8',
+  textSecondary: '#7d8e92',
+  textDim: '#566569',
+  textFaint: '#4c5d61',
+  textInk: '#06201c',
 };
 
-const FACT_TYPE_GLOSS: Record<FactTypeKey, string> = {
-  action: 'Action',
-  claim: 'Claim',
-  measurement: 'Measurement',
-};
-
-const FACT_TYPE_ORDER: FactTypeKey[] = ['action', 'claim', 'measurement'];
-
-// feat/recall-entity-bucket-cleanup — PO live evidence 2026-06-24.
-//
-// The duplicate per-entity summary panel (EntityBriefPanel) that used
-// to render directly under the page-level RecallFactTypeSummary is gone.
-// In the dogfood entity-keyword case (every hit touches the same
-// resolved entity), the per-entity 행동/발언/수치 chip counts equal the
-// page-level facet counts — so the second panel was informationally
-// redundant, and worse, its "검증된 사실이 없습니다." empty-state
-// (driven by brief.total_facts for THIS entity in lifetime KS, not the
-// current hit count) actively contradicted the page above when a
-// search returned dozens of hits about adjacent entities. PO directive:
-// keep RecallFactTypeSummary as the single summary box, lift the
-// accent-cool border/background onto it whenever the response carries
-// an entity_brief, and let the resolved entity_name live in the
-// summary header. See RecallFactTypeSummary below.
-
-
-// fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ — PO 2026-06-30):
-// v3 closed set 10 class + "other" fallback. 옛 4 bucket 시절 "기타 비대"
-// 해소. 순서 = WHO (사람 / 조직 / 그룹) → WHAT (지식 / 자원 / 행위 / 개념
-// / 사건 / 지표) → WHERE (장소) → 기타. 한국어 라벨은 displayNames.ts
-// 의 ENTITY_TYPE_LABELS_KO 와 동일 단어를 쓴다 (★ "여기 한글 저기 영문
-// / 같은 토큰 다른 단어" 불일치 0 가드).
-type FacetBucketKey =
-  | 'person'
-  | 'organization'
-  | 'group'
-  | 'knowledge'
-  | 'resource'
-  | 'task'
-  | 'concept'
-  | 'event'
-  | 'metric'
-  | 'location'
-  | 'other';
-
-const FACET_BUCKET_ORDER: readonly FacetBucketKey[] = [
-  'person',
-  'organization',
-  'group',
-  'knowledge',
-  'resource',
-  'task',
-  'concept',
-  'event',
-  'metric',
-  'location',
-  'other',
-] as const;
-
-const BUCKET_LABELS: Record<FacetBucketKey, string> = {
-  person: '사람',
-  organization: '조직',
-  group: '그룹',
-  knowledge: '지식',
-  resource: '자원',
-  task: '행위',
-  concept: '개념',
-  event: '사건',
-  metric: '지표',
-  location: '장소',
-  other: '기타',
-};
-
-interface FacetBarProps {
-  item: EntityFacetItem | PredicateFacetItem;
-  active: boolean;
-  maxCount: number;
-  onClick?: () => void;
-  testId: string;
-  uid?: string;
-}
-
-function FacetBar({ item, active, maxCount, onClick, testId, uid }: FacetBarProps) {
-  const widthPct = maxCount > 0 ? Math.max(8, Math.round((item.count / maxCount) * 100)) : 0;
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      data-active={active ? 'true' : 'false'}
-      data-uid={uid}
-      onClick={onClick}
-      disabled={!onClick}
-      className={[
-        'w-full text-left px-2 py-1.5 rounded-sm transition-colors text-xs flex items-center gap-2',
-        active
-          ? 'bg-accent-cool/15 border border-accent-cool/60'
-          : 'hover:bg-bg-elevated/60 border border-transparent',
-        onClick ? 'cursor-pointer' : 'cursor-default',
-      ].join(' ')}
-    >
-      <span
-        className={[
-          'block h-2 rounded-sm shrink-0',
-          active ? 'bg-accent-cool' : 'bg-accent-cool/40',
-        ].join(' ')}
-        style={{ width: `${widthPct}%`, maxWidth: '60%' }}
-      />
-      <span className="flex-1 truncate" title={item.name}>{item.name}</span>
-      <span className="font-mono text-xxs text-text-muted shrink-0">{item.count}</span>
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// B-48c — fact detail MODAL (replaces the B-48b right-rail swap so the
-// right rail stays on facet / brief and the wider modal canvas can lay
-// the sources + meta out with proper section spacing for readability)
-// ---------------------------------------------------------------------------
-
-interface FactDetailModalProps {
-  detail: FactDetailResponse;
-  onClose: () => void;
-  onDetachSource: (sourceUid: string) => Promise<void>;
-  onRetract: () => Promise<void>;
-  onRestore: () => Promise<void>;
-  // feat/fact-detail-modify — PO directive 2026-06-22. The Recall
-  // detail modal lets the user correct surface-level errors in place
-  // (typos in the claim, an off gloss for the predicate). Identity
-  // fields (subject_uid / predicate_code) are NEVER editable here.
-  onModify: (payload: ModifyFactRequest) => Promise<void>;
-  busy: boolean;
-}
-
-// Internal edit-form state. We mirror the FactDetailHeader fields the
-// user is allowed to edit. `''` is the empty string the form coerces
-// down to undefined on submit so we don't send "" to the backend when
-// the user hasn't touched a field.
-interface FactEditDraft {
-  claim: string;
-  predicate_label: string;
-  object_value: string;
-}
-
-function draftFromDetail(detail: FactDetailResponse): FactEditDraft {
-  return {
-    claim: detail.fact.claim ?? '',
-    // predicate_label is the natural-English gloss. The detail GET
-    // doesn't currently surface it (the recall card uses it via
-    // predicate_label on RecallFact). We seed with the canonical
-    // predicate so the user can re-type. The backend update goes
-    // through update_fact which writes the new value verbatim.
-    predicate_label: detail.fact.predicate ?? '',
-    object_value: detail.fact.object_value ?? '',
-  };
-}
-
-function FactDetailModal({
-  detail, onClose, onDetachSource, onRetract, onRestore, onModify, busy,
-}: FactDetailModalProps) {
-  const { fact, entities, sources } = detail;
-  const retracted = !!fact.retracted_at;
-  const trusted = sources.length >= 2;
-  const subject = entities.find((e) => e.role === 'subject');
-  const object = entities.find((e) => e.role === 'object');
-
-  // feat/fact-detail-modify — edit mode flips the body from read-only
-  // chrome to an inline form. State is local: a draft seeded from the
-  // current detail; 저장 dispatches to onModify(), 취소 discards.
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<FactEditDraft>(() => draftFromDetail(detail));
-
-  // Re-seed the draft when the upstream detail changes (after a save,
-  // after a retract/restore) so a re-open of the edit panel reflects
-  // the latest state, not the stale snapshot from the first render.
-  useEffect(() => {
-    setDraft(draftFromDetail(detail));
-  }, [detail]);
-
-  const onStartEdit = () => {
-    setDraft(draftFromDetail(detail));
-    setEditing(true);
-  };
-
-  const onCancelEdit = () => {
-    setDraft(draftFromDetail(detail));
-    setEditing(false);
-  };
-
-  const onSubmitEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // Build the patch payload: only fields the user actually changed,
-    // and never identity fields (the form doesn't expose them). An
-    // empty payload means the user clicked save without editing —
-    // close edit mode without a network round-trip.
-    const payload: ModifyFactRequest = {};
-    if (draft.claim.trim() !== (fact.claim ?? '').trim()) {
-      payload.claim = draft.claim.trim();
-    }
-    if (draft.predicate_label.trim() !== (fact.predicate ?? '').trim()) {
-      payload.predicate_label = draft.predicate_label.trim();
-    }
-    if (draft.object_value.trim() !== (fact.object_value ?? '').trim()) {
-      payload.object_value = draft.object_value.trim();
-    }
-    if (Object.keys(payload).length === 0) {
-      setEditing(false);
-      return;
-    }
-    await onModify(payload);
-    setEditing(false);
-  };
-
-  // ESC closes — global listener while the modal is mounted. In edit
-  // mode, ESC cancels the edit instead of closing the modal so the
-  // user doesn't lose typing on a stray keypress.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (editing) {
-        onCancelEdit();
-      } else {
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-    // onClose / onCancelEdit are stable enough — the editing flag is
-    // the only field that actually changes the handler dispatch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, onClose]);
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="fact detail"
-      data-testid="fact-detail-modal"
-      data-retracted={retracted ? 'true' : 'false'}
-      className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8 bg-black/40 backdrop-blur-sm"
-      // Click on the backdrop (not the content) closes.
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        data-testid="fact-detail-modal-content"
-        className="relative max-w-3xl w-full max-h-[90vh] overflow-y-auto rounded-xl border border-border-subtle bg-bg-elevated shadow-xl"
-      >
-        {/* Close button — pinned top right */}
-        <button
-          type="button"
-          data-testid="fact-detail-close"
-          onClick={onClose}
-          aria-label="close fact detail"
-          className="absolute top-3 right-3 text-text-muted hover:text-text-primary font-mono text-sm rounded p-1"
-        >
-          ✕
-        </button>
-
-        {/* Header: claim hero + retracted banner */}
-        <header className="px-8 pt-8 pb-4 border-b border-border-subtle">
-          {retracted && (
-            <p
-              data-testid="fact-detail-retracted-banner"
-              className="text-xs text-accent-error mb-3 font-mono"
-            >
-              철회된 사실 · {new Date(fact.retracted_at!).toLocaleString()}
-            </p>
-          )}
-          <div className="flex items-baseline justify-between gap-2 mb-2">
-            <p className="text-xxs uppercase tracking-wider text-text-muted font-mono">
-              Fact 상세
-            </p>
-            {/* fact-display-unification (d) — shared FactTypeBadge next
-                to the eyebrow so the modal carries the same [CLAIM] /
-                [MEASUREMENT] signal that the list card does. Legacy
-                facts (action / undefined) early-return null. */}
-            <FactTypeBadge
-              factType={fact.fact_type}
-              factUid={fact.fact_uid}
-              speechAct={fact.speech_act}
-            />
-          </div>
-          {/* feat/recall-card-original-claim — same pipe-artefact repair
-              as the recall card title; the detail hero is the same surface
-              from the user's POV. */}
-          {(() => {
-            const claimText = (fact.claim ?? '').trim();
-            const reconstructed = !claimText || isReconstructedClaim(claimText);
-            // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1) — fact detail hero
-            // 도 UUID 노출 금지. 옛 fallback chain 의 끝 (fact.subject_uid /
-            // fact.object_value) 은 v3 entity-id-only 저장 구조 (B-35 canonical
-            // remap 후) 에선 ★ UUID. resolveLabel 로 통일.
-            const subjectName =
-              subject?.name ?? resolveLabel(fact.subject_uid, fact.subject_label);
-            const objectName =
-              object?.name ?? resolveLabel(fact.object_value, fact.object_label);
-            const titleText = reconstructed
-              ? `${subjectName} → ${predicateLabel(fact.predicate, fact.predicate_label)} → ${objectName}`
-              : claimText;
-            return (
-              <p
-                data-testid="fact-detail-claim"
-                data-claim-reconstructed={reconstructed ? 'true' : 'false'}
-                className="text-xl leading-relaxed font-medium"
-                lang="ko"
-              >
-                {titleText}
-                {reconstructed && (
-                  <span
-                    data-testid="fact-detail-claim-reconstructed"
-                    className="ml-2 italic text-xxs font-mono text-text-muted align-middle"
-                    title="원문이 보존되지 않은 편집 사실 — 주체·술어·객체로 재구성"
-                  >
-                    (재구성됨)
-                  </span>
-                )}
-              </p>
-            );
-          })()}
-          {fact.claim_en && (
-            <p className="text-sm text-text-muted mt-2 leading-relaxed">
-              {fact.claim_en}
-            </p>
-          )}
-          {/* fact-display-unification (d) — shared FactTypeStrip between
-              the claim hero and the 관계 section. For claim facts this
-              renders the PO format (bold speaker, [speech_act]:, "content");
-              for measurement facts it renders the [MEASUREMENT] metric =
-              value unit (as_of) summary. The metric is intentionally NOT
-              folded into the S → P → O arrow row below — the strip is the
-              single place numeric measurement renders, matching how Decide
-              and the Recall list already work. Legacy / action facts early-
-              return null so the modal chrome is unchanged. */}
-          <div className="mt-3">
-            <FactTypeStrip fact={fact} factUid={fact.fact_uid} lang="kr" />
-          </div>
-        </header>
-
-        {/* S → P → O relationship — read mode renders the chip row;
-            edit mode replaces it with an inline form for surface
-            fields. Identity (subject) stays read-only because changing
-            it requires the entity-resolver path (Decide). */}
-        <section
-          className="px-8 py-5 border-b border-border-subtle"
-          data-testid="fact-detail-relationship"
-          data-editing={editing ? 'true' : 'false'}
-        >
-          <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-3">
-            관계
-          </h3>
-          {editing ? (
-            <form
-              data-testid="fact-detail-edit-form"
-              onSubmit={onSubmitEdit}
-              className="space-y-3"
-            >
-              <div>
-                <label
-                  className="block text-xxs uppercase tracking-wider text-text-muted font-mono mb-1"
-                  htmlFor="fact-edit-claim"
-                >
-                  claim
-                </label>
-                <textarea
-                  id="fact-edit-claim"
-                  data-testid="fact-detail-edit-claim"
-                  value={draft.claim}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, claim: e.target.value }))
-                  }
-                  rows={2}
-                  className="w-full rounded border border-border-subtle bg-bg-card px-3 py-2 text-sm focus:outline-none focus:border-accent-cool"
-                  disabled={busy}
-                  lang="ko"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label
-                    className="block text-xxs uppercase tracking-wider text-text-muted font-mono mb-1"
-                    htmlFor="fact-edit-predicate"
-                  >
-                    predicate (gloss)
-                  </label>
-                  <input
-                    id="fact-edit-predicate"
-                    data-testid="fact-detail-edit-predicate"
-                    type="text"
-                    value={draft.predicate_label}
-                    onChange={(e) =>
-                      setDraft((d) => ({ ...d, predicate_label: e.target.value }))
-                    }
-                    className="w-full rounded border border-border-subtle bg-bg-card px-3 py-2 text-sm focus:outline-none focus:border-accent-cool"
-                    disabled={busy}
-                  />
-                </div>
-                <div>
-                  <label
-                    className="block text-xxs uppercase tracking-wider text-text-muted font-mono mb-1"
-                    htmlFor="fact-edit-object"
-                  >
-                    object
-                  </label>
-                  <input
-                    id="fact-edit-object"
-                    data-testid="fact-detail-edit-object"
-                    type="text"
-                    value={draft.object_value}
-                    onChange={(e) =>
-                      setDraft((d) => ({ ...d, object_value: e.target.value }))
-                    }
-                    className="w-full rounded border border-border-subtle bg-bg-card px-3 py-2 text-sm focus:outline-none focus:border-accent-cool"
-                    disabled={busy}
-                    lang="ko"
-                  />
-                </div>
-              </div>
-              <p className="text-xxs text-text-muted font-mono">
-                주체(subject)는 편집 불가 — 변경하려면 사실을 철회한 뒤 새로 검증하세요.
-              </p>
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  data-testid="fact-detail-edit-cancel"
-                  onClick={onCancelEdit}
-                  disabled={busy}
-                  className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5 text-xs"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  data-testid="fact-detail-edit-save"
-                  disabled={busy}
-                  className="rounded-md border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-3 py-1.5 text-xs font-medium"
-                >
-                  저장
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span
-                data-testid="fact-detail-subject"
-                className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
-              >
-                <span className="font-medium">
-                  {subject?.name ?? resolveLabel(fact.subject_uid, fact.subject_label)}
-                </span>
-                {subject?.class && (
-                  <span className="ml-2 text-xxs text-text-muted font-mono">
-                    {subject.class}
-                  </span>
-                )}
-              </span>
-              <span className="text-text-muted font-mono text-xs">→</span>
-              <span className="rounded-md bg-accent-cool/10 border border-accent-cool/30 text-accent-cool px-3 py-1.5 font-mono text-xs">
-                {predicateLabel(fact.predicate, fact.predicate_label)}
-              </span>
-              <span className="text-text-muted font-mono text-xs">→</span>
-              <span
-                data-testid="fact-detail-object"
-                className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5"
-              >
-                <span className="font-medium">
-                  {object?.name ?? resolveLabel(fact.object_value, fact.object_label)}
-                </span>
-                {object?.class && (
-                  <span className="ml-2 text-xxs text-text-muted font-mono">
-                    {object.class}
-                  </span>
-                )}
-              </span>
-            </div>
-          )}
-        </section>
-
-        {/* Sources — the meat of the modal */}
-        <section className="px-8 py-5 border-b border-border-subtle">
-          <header className="flex items-center justify-between mb-3">
-            <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono">
-              출처 ({sources.length})
-            </h3>
-            {trusted && (
-              <span
-                data-testid="fact-detail-trust-badge"
-                className="rounded-full bg-accent-cool/15 text-accent-cool border border-accent-cool/40 px-3 py-1 text-xxs font-mono"
-                title="검증된 출처가 둘 이상"
-              >
-                ✓ 검증된 출처 {sources.length}건
-              </span>
-            )}
-          </header>
-          {sources.length === 0 ? (
-            <p className="text-xs text-text-muted py-2">(출처 없음)</p>
-          ) : (
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {sources.map((s) => (
-                <li
-                  key={s.source_uid}
-                  data-testid={`fact-detail-source-${s.source_uid}`}
-                  className="rounded-lg border border-border-subtle bg-bg-card p-3"
-                >
-                  <div className="flex justify-between items-start gap-3 mb-2">
-                    <a
-                      href={s.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-sm text-accent-cool underline break-all min-w-0"
-                      title={s.url}
-                    >
-                      {s.domain || s.url.replace(/^https?:\/\//, '').slice(0, 60)}
-                    </a>
-                    <button
-                      type="button"
-                      data-testid={`fact-detail-detach-${s.source_uid}`}
-                      onClick={() => onDetachSource(s.source_uid)}
-                      disabled={busy}
-                      className="text-xxs text-text-muted hover:text-accent-error font-mono shrink-0 underline"
-                    >
-                      이 출처만 떼기
-                    </button>
-                  </div>
-                  {s.title && (
-                    <p className="text-xs text-text-secondary mb-1 leading-snug">
-                      {s.title}
-                    </p>
-                  )}
-                  <dl className="text-xxs text-text-muted font-mono space-y-0.5">
-                    {s.captured_at && (
-                      <div>
-                        <dt className="inline opacity-60">captured: </dt>
-                        <dd className="inline">
-                          <time dateTime={s.captured_at}>
-                            {new Date(s.captured_at).toLocaleString()}
-                          </time>
-                        </dd>
-                      </div>
-                    )}
-                    {s.author && (
-                      <div>
-                        <dt className="inline opacity-60">author: </dt>
-                        <dd className="inline">{s.author}</dd>
-                      </div>
-                    )}
-                    {s.snapshot_available && (
-                      <div>
-                        <dt className="inline opacity-60">snapshot: </dt>
-                        <dd className="inline">보존됨</dd>
-                      </div>
-                    )}
-                  </dl>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Meta — validated_at / entity class / alias / edit history */}
-        <section className="px-8 py-5">
-          <h3 className="text-xxs uppercase tracking-wider text-text-muted font-mono mb-3">
-            메타
-          </h3>
-          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-6 text-xs">
-            <div>
-              <dt className="text-text-muted font-mono opacity-60">등록 일시</dt>
-              <dd>
-                <time dateTime={fact.validated_at}>
-                  {new Date(fact.validated_at).toLocaleString()}
-                </time>
-              </dd>
-            </div>
-            {subject?.aliases && subject.aliases.length > 0 && (
-              <div>
-                <dt className="text-text-muted font-mono opacity-60">
-                  subject alias
-                </dt>
-                <dd className="font-mono text-xxs">
-                  {subject.aliases.join(', ')}
-                </dd>
-              </div>
-            )}
-            {object?.aliases && object.aliases.length > 0 && (
-              <div>
-                <dt className="text-text-muted font-mono opacity-60">
-                  object alias
-                </dt>
-                <dd className="font-mono text-xxs">
-                  {object.aliases.join(', ')}
-                </dd>
-              </div>
-            )}
-            {fact.edit_history && fact.edit_history.length > 0 && (
-              <div>
-                <dt className="text-text-muted font-mono opacity-60">
-                  편집 이력
-                </dt>
-                <dd>{fact.edit_history.length}건</dd>
-              </div>
-            )}
-          </dl>
-        </section>
-
-        {/* Action bar — feat/fact-detail-modify adds the 수정 button on
-            the LEFT (less prominent than the retract / restore actions
-            which sit at the right). The button hides in edit mode and
-            when the fact is retracted (a retracted fact must be
-            restored before its surface can be edited). */}
-        <footer className="px-8 py-4 border-t border-border-subtle bg-bg-card/40 flex justify-between items-center gap-2">
-          <div>
-            {!retracted && !editing && (
-              <button
-                type="button"
-                data-testid="fact-detail-edit"
-                onClick={onStartEdit}
-                disabled={busy}
-                className="rounded-md border border-border-subtle bg-bg-card px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary"
-                title="claim / predicate gloss / object 텍스트만 편집 가능"
-              >
-                수정
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            {retracted ? (
-              <button
-                type="button"
-                data-testid="fact-detail-restore"
-                onClick={onRestore}
-                disabled={busy}
-                className="rounded-md border border-accent-cool/40 bg-accent-cool/10 text-accent-cool px-4 py-2 text-sm font-medium"
-              >
-                복구
-              </button>
-            ) : (
-              <button
-                type="button"
-                data-testid="fact-detail-retract"
-                onClick={onRetract}
-                disabled={busy || editing}
-                className="rounded-md border border-accent-error/40 bg-accent-error/5 text-accent-error px-4 py-2 text-sm font-medium"
-              >
-                사실 철회
-              </button>
-            )}
-          </div>
-        </footer>
-      </div>
-    </div>
-  );
-}
-
-
-interface FacetPanelProps {
-  facets: RecallFacets | undefined;
-  activeEntityUids: string[];
-  onToggleEntity: (uid: string) => void;
-}
-
-// fix/recall-facet-bucket-expand (★ M-Dogfood ⑤⑪ — PO 2026-06-30):
-// 옛 backend 가 `place` 만 emit 한 응답을 새 FE 가 받을 수도 있다 (deploy
-// 비대칭 윈도우). `place` → `location` 으로 합치고, 둘 다 들어오면 합집합.
-function _resolveBucketItems(
-  entities: EntityFacets | undefined,
-  bucket: FacetBucketKey,
-): EntityFacetItem[] {
-  if (!entities) return [];
-  const primary = entities[bucket] ?? [];
-  if (bucket === 'location') {
-    const legacy = entities.place ?? [];
-    if (legacy.length === 0) return primary;
-    // dedupe by uid, primary wins.
-    const seen = new Set(primary.map((e) => e.uid));
-    return [...primary, ...legacy.filter((e) => !seen.has(e.uid))];
-  }
-  return primary;
-}
-
-function FacetPanel({ facets, activeEntityUids, onToggleEntity }: FacetPanelProps) {
-  const entities = facets?.entities;
-  const predicates = facets?.predicates ?? [];
-  const activeSet = new Set(activeEntityUids);
-
-  // ★ v3 10-bucket — empty bucket 은 render skip (★ "비대 가드"). 단 backend
-  // 가 entities 자체를 안 보냈을 땐 panel 비어두고 어떤 bucket 도 안 그림.
-  const bucketsWithItems: Array<{ key: FacetBucketKey; items: EntityFacetItem[] }> = entities
-    ? FACET_BUCKET_ORDER.map((b) => ({ key: b, items: _resolveBucketItems(entities, b) }))
-        .filter(({ items }) => items.length > 0)
-    : [];
-
-  const allEntityCounts: number[] = bucketsWithItems.flatMap(({ items }) => items.map((e) => e.count));
-  const maxEntityCount = allEntityCounts.length > 0 ? Math.max(...allEntityCounts) : 0;
-  const maxPredicateCount = predicates.length > 0 ? Math.max(...predicates.map((p) => p.count)) : 0;
-
-  return (
-    <aside
-      aria-label="facets"
-      data-testid="facet-panel"
-      className="hidden lg:block sticky top-4 self-start w-64 shrink-0"
-    >
-      <h2 className="text-xxs uppercase tracking-wider text-text-muted mb-3 font-mono">
-        Entities
-      </h2>
-      {bucketsWithItems.length === 0 ? (
-        <p className="text-xxs text-text-muted px-2 py-1" data-testid="facet-empty">(없음)</p>
-      ) : null}
-      {bucketsWithItems.map(({ key: bucket, items }) => {
-        return (
-          <div
-            key={bucket}
-            data-testid={`facet-bucket-${bucket}`}
-            className="mb-4"
-          >
-            <h3 className="text-xs font-medium text-text-secondary mb-1">
-              {BUCKET_LABELS[bucket]} ({items.length})
-            </h3>
-            <ul className="space-y-1">
-              {items.map((item) => (
-                <li key={item.uid}>
-                  <FacetBar
-                    item={item}
-                    active={activeSet.has(item.uid)}
-                    maxCount={maxEntityCount}
-                    onClick={() => onToggleEntity(item.uid)}
-                    testId={`facet-entity-${item.uid}`}
-                    uid={item.uid}
-                  />
-                </li>
-              ))}
-            </ul>
-          </div>
-        );
-      })}
-
-      <h2 className="text-xxs uppercase tracking-wider text-text-muted mb-3 mt-6 font-mono">
-        Predicates
-      </h2>
-      {predicates.length === 0 ? (
-        <p className="text-xxs text-text-muted px-2 py-1">(없음)</p>
-      ) : (
-        <ul data-testid="facet-predicates" className="space-y-1">
-          {predicates.map((p) => (
-            <li key={p.name}>
-              <FacetBar
-                item={p}
-                active={false}
-                maxCount={maxPredicateCount}
-                testId={`facet-predicate-${p.name}`}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </aside>
-  );
-}
-
-interface ActiveFilterChipsProps {
-  entities: { uid: string; name: string; bucket: string }[];
-  onRemove: (uid: string) => void;
-  onClearAll: () => void;
-}
-
-function ActiveFilterChips({ entities, onRemove, onClearAll }: ActiveFilterChipsProps) {
-  if (entities.length === 0) return null;
-  return (
-    <div
-      data-testid="active-filter-chips"
-      className="flex flex-wrap items-center gap-2 mb-4"
-    >
-      {entities.map((e) => (
-        <span
-          key={e.uid}
-          data-testid={`filter-chip-${e.uid}`}
-          className="inline-flex items-center gap-1 rounded-full bg-accent-cool/15 border border-accent-cool/60 px-2 py-0.5 text-xs"
-        >
-          <span className="text-xxs text-text-muted">{e.bucket}:</span>
-          <span>{e.name}</span>
-          <button
-            type="button"
-            aria-label={`Remove filter ${e.name}`}
-            data-testid={`filter-chip-${e.uid}-remove`}
-            onClick={() => onRemove(e.uid)}
-            className="ml-1 text-text-muted hover:text-accent-error font-mono"
-          >
-            ✕
-          </button>
-        </span>
-      ))}
-      <button
-        type="button"
-        data-testid="filter-clear-all"
-        onClick={onClearAll}
-        className="text-xxs text-text-muted hover:text-text-primary font-mono underline"
-      >
-        모두 지우기
-      </button>
-    </div>
-  );
-}
-
-function sortFacts(facts: RecallFact[]): RecallFact[] {
-  // Score DESC. The backend already returns embedding matches first
-  // and entity_link expansion last, but explicit sort guards against
-  // the entity-link facts (score 0) sneaking ahead if the response
-  // shape ever changes.
-  return [...facts].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-}
-
-// B-50: similarity-floor bounds for the slider — the backend accepts
-// [0,1] but the dev guidance is 0.5–0.9 (below 0.5 fires on orthogonal
-// embeddings; above 0.9 cuts most real matches).
-const SCORE_THRESHOLD_MIN = 0.5;
-const SCORE_THRESHOLD_MAX = 0.9;
-const SCORE_THRESHOLD_DEFAULT = 0.72;
-
-type MatchKind = 'embedding' | 'entity_link';
-
-interface SearchControlsState {
-  scoreThreshold: number;
-  dateFrom: string;  // 'YYYY-MM-DD' or ''
-  dateTo: string;
-  matchKinds: Record<MatchKind, boolean>;
-  keyword2: string;
-  // v0.2.0 step 1 (fact-claim-layer-v1) — display-only filter that
-  // hides action rows so the user can drill into "who said what" only.
-  claimOnly: boolean;
-  // v0.2.0 step 2 (fact-measurement-layer-v1) — display-only filter
-  // that hides non-measurement rows so the user can drill into the
-  // verified time-series moat (numeric values pinned to a timepoint).
-  measurementOnly: boolean;
-}
-
-const DEFAULT_CONTROLS: SearchControlsState = {
-  scoreThreshold: SCORE_THRESHOLD_DEFAULT,
-  dateFrom: '',
-  dateTo: '',
-  matchKinds: { embedding: true, entity_link: true },
-  keyword2: '',
-  claimOnly: false,
-  measurementOnly: false,
-};
-
-// B-50-fix (PO A direction): `matchKinds` is no longer a server param.
-// Embedding (kNN) is the search mode — always on. The toggle in the
-// panel filters the rendered result list client-side; the server
-// receives the FULL envelope every time.
-function controlsToRecallOptions(
-  c: SearchControlsState, entity: string[],
-): { entity: string[]; scoreThreshold: number; dateFrom?: string; dateTo?: string } {
-  return {
-    entity,
-    scoreThreshold: c.scoreThreshold,
-    // Backend expects ISO 8601; the date input gives 'YYYY-MM-DD',
-    // which is a valid ISO 8601 calendar date. Pad to midnight UTC
-    // so the inclusive range covers the whole day on both sides.
-    dateFrom: c.dateFrom ? `${c.dateFrom}T00:00:00Z` : undefined,
-    dateTo: c.dateTo ? `${c.dateTo}T23:59:59Z` : undefined,
-  };
-}
-
-interface SearchControlsPanelProps {
-  state: SearchControlsState;
-  onChange: (next: SearchControlsState) => void;
-}
-
-function SearchControlsPanel({ state, onChange }: SearchControlsPanelProps) {
-  return (
-    <aside
-      aria-label="search controls"
-      data-testid="search-controls"
-      className="hidden lg:block w-64 shrink-0 sticky top-4 self-start"
-    >
-      <h2 className="text-xxs uppercase tracking-wider text-text-muted mb-3 font-mono">
-        검색 컨트롤
-      </h2>
-
-      {/* Similarity threshold */}
-      <div className="mb-4">
-        <label className="flex justify-between items-baseline text-xs font-medium mb-1">
-          <span>유사도 임계값</span>
-          <span
-            data-testid="control-threshold-value"
-            className="font-mono text-xxs text-text-muted"
-          >
-            {state.scoreThreshold.toFixed(2)}
-          </span>
-        </label>
-        <input
-          type="range"
-          aria-label="similarity threshold"
-          data-testid="control-threshold-slider"
-          min={SCORE_THRESHOLD_MIN}
-          max={SCORE_THRESHOLD_MAX}
-          step={0.01}
-          value={state.scoreThreshold}
-          onChange={(e) =>
-            onChange({ ...state, scoreThreshold: parseFloat(e.target.value) })
-          }
-          className="w-full"
-        />
-        <p className="text-xxs text-text-muted font-mono mt-0.5">
-          {SCORE_THRESHOLD_MIN.toFixed(2)} – {SCORE_THRESHOLD_MAX.toFixed(2)}
-        </p>
-      </div>
-
-      {/* Date range */}
-      <div className="mb-4">
-        <h3 className="text-xs font-medium mb-1">검증 일자</h3>
-        <div className="flex flex-col gap-1">
-          <input
-            type="date"
-            aria-label="date from"
-            data-testid="control-date-from"
-            value={state.dateFrom}
-            onChange={(e) => onChange({ ...state, dateFrom: e.target.value })}
-            className="rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
-          />
-          <input
-            type="date"
-            aria-label="date to"
-            data-testid="control-date-to"
-            value={state.dateTo}
-            onChange={(e) => onChange({ ...state, dateTo: e.target.value })}
-            className="rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
-          />
-        </div>
-        {(state.dateFrom || state.dateTo) && (
-          <button
-            type="button"
-            data-testid="control-date-clear"
-            onClick={() => onChange({ ...state, dateFrom: '', dateTo: '' })}
-            className="text-xxs text-text-muted hover:text-text-primary font-mono underline mt-1"
-          >
-            일자 초기화
-          </button>
-        )}
-      </div>
-
-      {/* B-50-fix: match_kind is now a display filter only. Embedding
-          (kNN) is the search mode — toggle locked on; entity-link can
-          be hidden from the rendered list but the seed is never
-          starved (the underlying recall response is the same). */}
-      <div className="mb-4">
-        <h3 className="text-xs font-medium mb-1">매치 종류</h3>
-        <p className="text-xxs text-text-muted font-mono mb-1">
-          결과 표시 필터 (서버 재검색 없음)
-        </p>
-        <label
-          data-testid="control-match-embedding"
-          className="flex items-center gap-2 text-xs py-0.5 opacity-90"
-          title="검색은 유사도 기반"
-        >
-          <input
-            type="checkbox"
-            checked={state.matchKinds.embedding}
-            disabled
-            aria-disabled="true"
-            data-testid="control-match-embedding-checkbox"
-            readOnly
-          />
-          <span>🔍 유사도 (검색 모드)</span>
-        </label>
-        <label
-          data-testid="control-match-entity-link"
-          className="flex items-center gap-2 text-xs py-0.5"
-        >
-          <input
-            type="checkbox"
-            checked={state.matchKinds.entity_link}
-            data-testid="control-match-entity-link-checkbox"
-            onChange={(e) =>
-              onChange({
-                ...state,
-                matchKinds: { ...state.matchKinds, entity_link: e.target.checked },
-              })
-            }
-          />
-          <span>🔗 엔티티 연결</span>
-        </label>
-      </div>
-
-      {/* fix/r1-recall-redesign — left-panel claim_only / measurement_only
-          filters removed.
-
-          PO directive (2026-06-24):
-            "좌패널 fact_type 필터 제거: '화자 인용만/수치만' = 중앙 칩과
-             중복 → 제거. 유사도임계·검증일자·키워드·엔티티연결(서버재검색)
-             은 유지."
-
-          The same filter is now driven exclusively by the chips inside
-          RecallFactTypeSummary (the "행동 / 발언 / 수치" row at the top
-          of the result panel). The `claimOnly` / `measurementOnly`
-          flags on SearchControlsState are kept (initialised false,
-          never flipped from the UI) so the visibleFacts predicate and
-          any test that references them stay valid — back-compat without
-          duplicate surface area. */}
-
-      {/* 2nd-tier keyword — client-side filter on claim text */}
-      <div className="mb-4">
-        <label
-          className="text-xs font-medium block mb-1"
-          htmlFor="control-keyword2"
-        >
-          결과 내 키워드
-        </label>
-        <input
-          id="control-keyword2"
-          type="text"
-          aria-label="secondary keyword"
-          data-testid="control-keyword2"
-          value={state.keyword2}
-          onChange={(e) => onChange({ ...state, keyword2: e.target.value })}
-          placeholder="claim 부분일치"
-          className="w-full rounded border border-border-subtle bg-bg-card px-2 py-1 text-xs"
-        />
-        <p className="text-xxs text-text-muted font-mono mt-0.5">
-          현재 결과만 필터 (서버 재검색 없음)
-        </p>
-      </div>
-    </aside>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// feat/recall-fact-type-summary — fact_type 층위 별 요약 박스.
-//
-// PO live evidence (2026-06-24):
-//   "recall 했을 때 claim 층위인지 measure 층위인지 action 층위인지
-//    구분이 하나도 안 된 상태로 검색되어진다. '삼성전기' 검색하면 주어
-//    로서(action 층위), claim 몇 건, measurement 몇 건 이런게 요약 박스에
-//    나와야 하고 나머지는 페이지네이션 리스트업 하는게 맞다."
-//
-// The summary banner lives ABOVE the result list in BOTH simple and
-// power modes. Each chip:
-//   · displays the Korean label + the count from facets.fact_types,
-//   · toggles a fact_type filter on click (visually highlights when
-//     active; click again to clear),
-//   · is disabled when the count is 0 so a zero bucket can't become
-//     an empty filter trap.
-//
-// The total fact count from the recall envelope is rendered as a
-// passive "전체 N건" pseudo-chip on the left so the user sees the
-// overall result size at a glance.
-//
-// Backwards compat: the existing claimOnly / measurementOnly checkbox
-// chips in the power rail keep working — toggling either reads the
-// same `factTypeFilter` state, so the new summary box is the single
-// source of truth. The checkboxes act as a redundant power-user knob.
-//
-// Note — FactTypeKey / FACT_TYPE_LABELS / FACT_TYPE_GLOSS / FACT_TYPE_ORDER
-// were hoisted to the top of the module by
-// feat/recall-entity-fact-type-breakdown so EntityBriefPanel can share
-// the same taxonomy; the summary box below reuses those constants
-// verbatim.
-// ---------------------------------------------------------------------------
-
-interface RecallFactTypeSummaryProps {
-  total: number;
-  factTypes: FactTypeFacets | undefined;
-  activeFilter: FactTypeKey | null;
-  onToggle: (kind: FactTypeKey) => void;
-  query: string | null;
-  // feat/recall-entity-bucket-cleanup — when the recall response resolved
-  // to a known entity, we surface that signal here (entity_name in the
-  // header + accent-cool border/background) instead of rendering a
-  // separate EntityBriefPanel below. PO's "박스 컬러만 넘기고" directive:
-  // the entity-scoped cue is preserved, but the duplicate metric box
-  // ("이 엔티티에 대한 검증된 사실이 없습니다.") that confused the dogfood
-  // user is gone.
-  entityBrief?: EntityBrief | null;
-  // fix/r1-recall-redesign — AI 브리핑 (개관).
-  //
-  // PO directive (2026-06-24): the summary box title used to read
-  // "검색 결과 요약 · OOO" with no body text — a chip rail and nothing
-  // else. The PO ask is for an entity 개관 briefing inside the same
-  // box, gated on an on-demand button (cost guard — no auto-fire).
-  // RecallView owns the request lifecycle; the summary box stays
-  // a dumb consumer.
-  briefing: RecallBriefingResponse | null;
-  briefingBusy: boolean;
-  briefingError: string | null;
-  onRequestBriefing: () => void;
-}
-
-function RecallFactTypeSummary({
-  total, factTypes, activeFilter, onToggle, query, entityBrief,
-  briefing, briefingBusy, briefingError, onRequestBriefing,
-}: RecallFactTypeSummaryProps) {
-  // Build the chip rows. Counts default to 0 when the backend omitted
-  // the bucket (legacy responses) or when facets is missing entirely.
-  const counts: Record<FactTypeKey, number> = {
-    action: factTypes?.action ?? 0,
-    claim: factTypes?.claim ?? 0,
-    measurement: factTypes?.measurement ?? 0,
-  };
-  const entityScoped = !!entityBrief;
-  // Header label: when entity-scoped, prefer the resolved entity_name
-  // over the raw query string — it's a more authoritative answer to
-  // "what is this search about?" and matches what the deleted brief
-  // panel used to show.
-  const headerLabel = entityScoped
-    ? entityBrief!.entity_name
-    : (query ?? '');
-  return (
-    <section
-      aria-label="recall fact type summary"
-      data-testid="recall-fact-type-summary"
-      data-active-filter={activeFilter ?? ''}
-      data-entity-scoped={entityScoped ? 'true' : 'false'}
-      className={[
-        'rounded-lg border px-4 py-3 mb-4',
-        entityScoped
-          ? 'border-accent-cool/40 bg-accent-cool/5'
-          : 'border-border-subtle bg-bg-card/60',
-      ].join(' ')}
-    >
-      <header className="flex items-baseline justify-between flex-wrap gap-2 mb-2">
-        <h2 className="text-xs font-medium text-text-secondary">
-          검색 결과 요약{headerLabel ? ' · ' : ''}
-          {headerLabel && (
-            <span data-testid="recall-summary-entity-name">{headerLabel}</span>
-          )}
-          {entityScoped && entityBrief!.entity_class && (
-            <span
-              data-testid="recall-summary-entity-class"
-              className="ml-2 text-xxs font-mono text-text-muted"
-            >
-              {entityBrief!.entity_class}
-            </span>
-          )}
-        </h2>
-        <span
-          data-testid="recall-summary-total"
-          className="text-xxs font-mono text-text-muted"
-        >
-          전체 {total}건
-        </span>
-      </header>
-      <div
-        role="group"
-        aria-label="fact type filter"
-        className="flex flex-wrap items-center gap-2"
-      >
-        {FACT_TYPE_ORDER.map((kind) => {
-          const count = counts[kind];
-          const active = activeFilter === kind;
-          const empty = count === 0;
-          return (
-            <button
-              key={kind}
-              type="button"
-              data-testid={`recall-summary-chip-${kind}`}
-              data-active={active ? 'true' : 'false'}
-              data-empty={empty ? 'true' : 'false'}
-              aria-pressed={active}
-              disabled={empty}
-              onClick={() => onToggle(kind)}
-              title={
-                empty
-                  ? `${FACT_TYPE_LABELS[kind]} 층위의 결과 없음`
-                  : active
-                  ? `${FACT_TYPE_LABELS[kind]} 필터 해제`
-                  : `${FACT_TYPE_LABELS[kind]} 층위만 보기`
-              }
-              className={[
-                'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                empty
-                  ? 'border-border-subtle bg-bg-card/40 text-text-muted cursor-not-allowed opacity-60'
-                  : active
-                  ? 'border-accent-cool/70 bg-accent-cool/15 text-accent-cool'
-                  : 'border-border-subtle bg-bg-card text-text-secondary hover:bg-bg-elevated/60 cursor-pointer',
-              ].join(' ')}
-            >
-              <span>{FACT_TYPE_LABELS[kind]}</span>
-              <span
-                className="font-mono text-xxs opacity-80"
-                data-testid={`recall-summary-count-${kind}`}
-              >
-                {count}
-              </span>
-              <span className="font-mono text-xxs opacity-50">
-                {FACT_TYPE_GLOSS[kind]}
-              </span>
-            </button>
-          );
-        })}
-        {activeFilter && (
-          <button
-            type="button"
-            data-testid="recall-summary-clear"
-            onClick={() => onToggle(activeFilter)}
-            className="ml-1 text-xxs font-mono text-text-muted hover:text-text-primary underline"
-            title="층위 필터 해제"
-          >
-            층위 해제
-          </button>
-        )}
-      </div>
-
-      {/* fix/r1-recall-redesign — AI 브리핑 (개관).
-          The "검색 결과 요약 · OOO" header used to lead into an empty
-          body (chips and nothing else). PO directive: render a 1-3
-          sentence overview here, gated on an on-demand button. The
-          briefing speaks ONLY from verified facts (grounding P1·P2);
-          the LLM gets the same fact set the recall returned, the
-          server filters cited uids against that set, and a transient
-          LLM failure degrades to a "다시 시도" affordance — never to
-          a hallucination. */}
-      <div
-        data-testid="recall-summary-briefing"
-        className="mt-3 pt-3 border-t border-border-subtle/60"
-      >
-        {briefing && briefing.grounded ? (
-          <div data-testid="recall-summary-briefing-text">
-            <p className="text-sm text-text-primary leading-relaxed">
-              {briefing.briefing}
-            </p>
-            <p
-              data-testid="recall-summary-briefing-grounding"
-              className="mt-1 text-xxs font-mono text-text-muted"
-            >
-              근거: 검증된 사실 {briefing.fact_uids.length}건 (총 {briefing.fact_count}건 중)
-              {briefing.cached ? ' · 캐시 응답' : ''}
-            </p>
-            <button
-              type="button"
-              data-testid="recall-summary-briefing-refresh"
-              onClick={onRequestBriefing}
-              disabled={briefingBusy}
-              className="mt-1 text-xxs font-mono text-text-muted hover:text-text-primary underline disabled:opacity-50"
-              title="브리핑 다시 생성"
-            >
-              {briefingBusy ? '생성 중…' : '다시 생성'}
-            </button>
-          </div>
-        ) : briefingError ? (
-          <div data-testid="recall-summary-briefing-error">
-            <p className="text-xs text-accent-error">
-              브리핑 생성 실패: {briefingError}
-            </p>
-            <button
-              type="button"
-              onClick={onRequestBriefing}
-              disabled={briefingBusy}
-              className="mt-1 text-xxs font-mono text-text-muted hover:text-text-primary underline disabled:opacity-50"
-            >
-              다시 시도
-            </button>
-          </div>
-        ) : briefing && !briefing.grounded && briefing.fact_count > 0 ? (
-          <p
-            data-testid="recall-summary-briefing-ungrounded"
-            className="text-xs text-text-muted"
-          >
-            검증된 사실로 개관을 만들지 못했습니다.
-          </p>
-        ) : total === 0 ? (
-          <p
-            data-testid="recall-summary-briefing-empty"
-            className="text-xs text-text-muted"
-          >
-            검증된 사실이 없어 개관을 생성할 수 없습니다.
-          </p>
-        ) : (
-          <button
-            type="button"
-            data-testid="recall-summary-briefing-trigger"
-            onClick={onRequestBriefing}
-            disabled={briefingBusy}
-            className="inline-flex items-center gap-1.5 rounded-md border border-accent-cool/40 bg-accent-cool/5 px-3 py-1.5 text-xs font-medium text-accent-cool hover:bg-accent-cool/10 disabled:opacity-50 disabled:cursor-wait"
-            title="검증된 사실 기반 개관을 생성합니다 (LLM 호출)"
-          >
-            {briefingBusy ? (
-              <>
-                <span
-                  data-testid="recall-summary-briefing-spinner"
-                  className="inline-block h-3 w-3 rounded-full border border-accent-cool border-t-transparent animate-spin"
-                />
-                <span>생성 중…</span>
-              </>
-            ) : (
-              <>
-                <span aria-hidden="true">✨</span>
-                <span>AI 브리핑 보기</span>
-              </>
-            )}
-          </button>
-        )}
-      </div>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// feat/recall-fact-type-summary — pagination footer.
-//
-// PO's "나머지는 페이지네이션 리스트업". We use a "더 보기" (load-more)
-// button rather than numbered pages because:
-//   1. The full recall envelope is already in memory — pagination is
-//      pure client-side slicing, no server round-trip per page.
-//   2. Load-more matches the way the user scans (top-down, score-
-//      ordered); jumping to "page 5" of a relevance list is an
-//      anti-pattern.
-//   3. It composes cleanly with the layer chip filter — flipping a
-//      filter chip resets the page window without surprise.
-// ---------------------------------------------------------------------------
-
-const PAGE_SIZE = 20;
-
-interface RecallPaginationFooterProps {
-  shown: number;
-  total: number;
-  onLoadMore: () => void;
-}
-
-function RecallPaginationFooter({
-  shown, total, onLoadMore,
-}: RecallPaginationFooterProps) {
-  if (total === 0) return null;
-  const hasMore = shown < total;
-  return (
-    <footer
-      data-testid="recall-pagination"
-      className="mt-2 mb-6 flex items-center justify-between text-xxs font-mono text-text-muted"
-    >
-      <span data-testid="recall-pagination-progress">
-        {shown}/{total}건 표시
-      </span>
-      {hasMore && (
-        <button
-          type="button"
-          data-testid="recall-pagination-more"
-          onClick={onLoadMore}
-          className="rounded-md border border-border-subtle bg-bg-card px-3 py-1 text-xs text-text-secondary hover:bg-bg-elevated/60"
-        >
-          더 보기 ({Math.min(PAGE_SIZE, total - shown)}건 추가)
-        </button>
-      )}
-    </footer>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// B-60 — Simple body. The "단순-기본" mode strips the left filter rail
-// and right facet rail; the page becomes a single column of fact cards
-// stacked vertically. Everything else (predicate Korean label, modal,
-// score badge, source chips) is identical to power mode — only the
-// chrome around the list changes.
-//
-// feat/recall-fact-type-summary — the fact_type summary box renders
-// directly under the signature line in both modes; the page slice is
-// derived in the shell and passed in via `pagedFacts`.
-// ---------------------------------------------------------------------------
-
-interface RecallSimpleBodyProps {
-  result: RecallResponse | null;
-  visibleFacts: RecallFact[];
-  pagedFacts: RecallFact[];
-  error: string | null;
-  factTypeFilter: FactTypeKey | null;
-  onToggleFactType: (kind: FactTypeKey) => void;
-  onLoadMore: () => void;
-  query: string | null;
-  onOpenDetail: (factUid: string) => void;
-  // fix/r1-recall-redesign — AI 브리핑 plumbing. The body is a dumb
-  // consumer; RecallView owns the request lifecycle and passes the
-  // current envelope down.
-  briefing: RecallBriefingResponse | null;
-  briefingBusy: boolean;
-  briefingError: string | null;
-  onRequestBriefing: () => void;
-}
-
-function RecallSimpleBody({
-  result, visibleFacts, pagedFacts, error,
-  factTypeFilter, onToggleFactType, onLoadMore,
-  query, onOpenDetail,
-  briefing, briefingBusy, briefingError, onRequestBriefing,
-}: RecallSimpleBodyProps) {
-  return (
-    <>
-      {error && (
-        <p
-          role="alert"
-          className="mb-4 rounded-md border border-accent-error/40 bg-accent-error/5 p-3 text-sm text-accent-error"
-        >
-          {error}
-        </p>
-      )}
-
-      {result && (
-        <section aria-label="recall result" data-testid="recall-simple-body">
-          <p
-            data-testid="recall-signature"
-            className="text-sm text-text-primary mb-2 font-medium"
-          >
-            {result.signature}
-          </p>
-          <RecallFactTypeSummary
-            total={result.total ?? result.facts.length}
-            factTypes={result.facets?.fact_types}
-            activeFilter={factTypeFilter}
-            onToggle={onToggleFactType}
-            query={query}
-            briefing={briefing}
-            briefingBusy={briefingBusy}
-            briefingError={briefingError}
-            onRequestBriefing={onRequestBriefing}
-          />
-          {pagedFacts.length > 0 && (
-            pagedFacts.map((f) => (
-              <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
-            ))
-          )}
-          <RecallPaginationFooter
-            shown={pagedFacts.length}
-            total={visibleFacts.length}
-            onLoadMore={onLoadMore}
-          />
-        </section>
-      )}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// B-60 — Power body. The existing Palantir-style 3-panel layout is
-// preserved verbatim from B-49/B-50: left filter rail (search
-// controls + active chips), centre column (entity brief + cards), right
-// facet rail. Behaviour is unchanged from pre-B-60.
-// ---------------------------------------------------------------------------
-
-interface RecallPowerBodyProps {
-  result: RecallResponse | null;
-  sortedFacts: RecallFact[];
-  visibleFacts: RecallFact[];
-  pagedFacts: RecallFact[];
-  error: string | null;
-  controls: SearchControlsState;
-  onControlsChange: (next: SearchControlsState) => void;
-  activeFilterDetails: { uid: string; name: string; bucket: string }[];
-  activeEntities: string[];
-  onToggleEntity: (uid: string) => void;
-  onRemoveChip: (uid: string) => void;
-  onClearAll: () => void;
-  factTypeFilter: FactTypeKey | null;
-  onToggleFactType: (kind: FactTypeKey) => void;
-  onLoadMore: () => void;
-  query: string | null;
-  onOpenDetail: (factUid: string) => void;
-  // fix/r1-recall-redesign — AI 브리핑 plumbing.
-  briefing: RecallBriefingResponse | null;
-  briefingBusy: boolean;
-  briefingError: string | null;
-  onRequestBriefing: () => void;
-}
-
-function RecallPowerBody({
-  result, sortedFacts, visibleFacts, pagedFacts, error,
-  controls, onControlsChange,
-  activeFilterDetails, activeEntities,
-  onToggleEntity, onRemoveChip, onClearAll,
-  factTypeFilter, onToggleFactType, onLoadMore,
-  query, onOpenDetail,
-  briefing, briefingBusy, briefingError, onRequestBriefing,
-}: RecallPowerBodyProps) {
-  return (
-    <div className="flex gap-4" data-testid="recall-power-body">
-      <SearchControlsPanel state={controls} onChange={onControlsChange} />
-
-      <main className="flex-1 min-w-0">
-        <ActiveFilterChips
-          entities={activeFilterDetails}
-          onRemove={onRemoveChip}
-          onClearAll={onClearAll}
-        />
-
-        {error && (
-          <p
-            role="alert"
-            className="mb-4 rounded-md border border-accent-error/40 bg-accent-error/5 p-3 text-sm text-accent-error"
-          >
-            {error}
-          </p>
-        )}
-
-        {result && (
-          <section aria-label="recall result">
-            <p
-              data-testid="recall-signature"
-              className="text-sm text-text-primary mb-2 font-medium"
-            >
-              {result.signature}
-            </p>
-            {/* feat/recall-entity-bucket-cleanup — the separate
-                EntityBriefPanel that used to render below this summary
-                is gone. The entity-scoped signal (accent-cool border,
-                entity_name in the header) now lives on RecallFactTypeSummary
-                itself; the per-entity 행동/발언/수치 chips merged into the
-                same top-of-page chip row (in the dogfood entity-keyword
-                case the per-entity counts equal the page-level facet
-                counts, so no information is lost). PO directive:
-                "박스 컬러만 넘기고 metric 박스는 사라져도 될 듯". */}
-            <RecallFactTypeSummary
-              total={result.total ?? result.facts.length}
-              factTypes={result.facets?.fact_types}
-              activeFilter={factTypeFilter}
-              onToggle={onToggleFactType}
-              query={query}
-              entityBrief={result.entity_brief}
-              briefing={briefing}
-              briefingBusy={briefingBusy}
-              briefingError={briefingError}
-              onRequestBriefing={onRequestBriefing}
-            />
-            {sortedFacts.length > 0 && (
-              <>
-                <p
-                  data-testid="recall-threshold-note"
-                  className="text-xxs text-text-muted mb-4 font-mono"
-                >
-                  관련도 {controls.scoreThreshold.toFixed(2)} 이상 매치만 표시 · 점수 내림차순 정렬
-                  {result.expanded_count && result.expanded_count > 0
-                    ? ` · 엔티티 연결로 추가된 ${result.expanded_count}건 포함`
-                    : ''}
-                  {controls.keyword2.trim() && sortedFacts.length !== visibleFacts.length
-                    ? ` · 키워드 "${controls.keyword2.trim()}" 로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
-                    : ''}
-                  {controls.claimOnly && sortedFacts.length !== visibleFacts.length
-                    ? ` · 화자 인용만 (claim) 으로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
-                    : ''}
-                  {controls.measurementOnly && sortedFacts.length !== visibleFacts.length
-                    ? ` · 수치만 (measurement) 으로 ${sortedFacts.length}건 중 ${visibleFacts.length}건 표시`
-                    : ''}
-                </p>
-                {visibleFacts.length === 0 ? (
-                  <p
-                    data-testid="recall-keyword-empty"
-                    className="text-sm text-text-muted py-4"
-                  >
-                    {controls.keyword2.trim()
-                      ? `키워드 「${controls.keyword2.trim()}」 와 일치하는 결과가 없습니다.`
-                      : controls.claimOnly
-                      ? '화자 인용 (claim) 층위의 결과가 없습니다. 좌측 패널의 체크박스를 해제하면 모든 층위가 표시됩니다.'
-                      : controls.measurementOnly
-                      ? '수치 (measurement) 층위의 결과가 없습니다. 좌측 패널의 체크박스를 해제하면 모든 층위가 표시됩니다.'
-                      : factTypeFilter
-                      ? `${FACT_TYPE_LABELS[factTypeFilter]} 층위의 결과가 없습니다.`
-                      : '표시할 결과가 없습니다.'}
-                  </p>
-                ) : (
-                  <>
-                    {pagedFacts.map((f) => (
-                      <RecallFactCard key={f.fact_uid} fact={f} onOpenDetail={onOpenDetail} />
-                    ))}
-                    <RecallPaginationFooter
-                      shown={pagedFacts.length}
-                      total={visibleFacts.length}
-                      onLoadMore={onLoadMore}
-                    />
-                  </>
-                )}
-              </>
-            )}
-          </section>
-        )}
-      </main>
-
-      {/* B-48c: right rail stays on facet/brief unconditionally;
-          fact detail is rendered as a modal overlay outside the
-          flex row so it can use the full viewport width. */}
-      <FacetPanel
-        facets={result?.facets}
-        activeEntityUids={activeEntities}
-        onToggleEntity={onToggleEntity}
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// B-60 — RecallView shell. Owns all data (query, recall response,
-// modal, controls) and dispatches the body to RecallSimpleBody or
-// RecallPowerBody based on `mode`. The mode toggle button lives in the
-// page header next to the search bar.
-// ---------------------------------------------------------------------------
-
-type RecallMode = 'simple' | 'power';
-
-const RECALL_MODE_STORAGE_KEY = 'lucid.recall.mode';
-
-function loadStoredMode(): RecallMode {
-  // SSR-safe: localStorage is only read on the client.
-  if (typeof window === 'undefined') return 'simple';
-  try {
-    const v = window.localStorage.getItem(RECALL_MODE_STORAGE_KEY);
-    return v === 'power' ? 'power' : 'simple';
-  } catch {
-    return 'simple';
-  }
-}
-
-function persistMode(mode: RecallMode): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(RECALL_MODE_STORAGE_KEY, mode);
-  } catch {
-    // localStorage may be unavailable (private mode); ignore.
-  }
-}
-
-// feat/recall-search-entity-autocomplete — same 200ms debounce shape as
-// FactCard.useDebounce but renamed to avoid a future merge collision if
-// either file moves the hook into a shared module. Body intentionally
-// identical: setTimeout / clearTimeout, no console.debug since this is
-// a search-input path (high-frequency) and we don't want devtools noise.
-function useRecallDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => {
-      setDebounced(value);
-    }, delay);
-    return () => clearTimeout(id);
-  }, [value, delay]);
-  return debounced;
+function pickActive(
+  qid: string,
+): RecallExampleQuery | undefined {
+  return EXAMPLE_RECENT_RECALL.find((q) => q.qid === qid);
 }
 
 export function RecallView({ spaceId }: Props) {
-  const [query, setQuery] = useState('');
-  const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
-  const [activeEntities, setActiveEntities] = useState<string[]>([]);
-  const [controls, setControls] = useState<SearchControlsState>(DEFAULT_CONTROLS);
-  const [result, setResult] = useState<RecallResponse | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // B-48b: open detail panel swaps in over the entity-brief facet panel.
-  const [detail, setDetail] = useState<FactDetailResponse | null>(null);
-  const [detailBusy, setDetailBusy] = useState(false);
-  // B-60: simple is the default; power is opt-in. We start in simple
-  // on SSR (deterministic markup) and hydrate from localStorage in an
-  // effect so a returning user lands back in the rail they prefer.
-  const [mode, setMode] = useState<RecallMode>('simple');
-  // feat/recall-fact-type-summary — fact_type chip filter. `null` =
-  // show all layers. Toggling a chip flips this to its kind; clicking
-  // the same chip again clears back to null. A new query also resets.
-  const [factTypeFilter, setFactTypeFilter] = useState<FactTypeKey | null>(null);
-  // feat/recall-fact-type-summary — pagination window. The body
-  // renders the first `displayLimit` facts of `visibleFacts`; "더 보기"
-  // bumps it by PAGE_SIZE. Resets on each new query + on filter flip.
-  const [displayLimit, setDisplayLimit] = useState<number>(PAGE_SIZE);
-  // fix/r1-recall-redesign — AI 브리핑 state.
-  //
-  // On-demand cost guard: the briefing is NEVER auto-fetched. The
-  // user clicks "AI 브리핑 보기" inside the summary box; we then call
-  // /api/spaces/{ks}/recall/briefing which re-runs the recall pipeline
-  // server-side and composes the 1-3 sentence 개관 from the same
-  // verified fact set. A new query clears the briefing so the stale
-  // text from the previous search never bleeds into a new result.
-  const [briefing, setBriefing] = useState<RecallBriefingResponse | null>(null);
-  const [briefingBusy, setBriefingBusy] = useState(false);
-  const [briefingError, setBriefingError] = useState<string | null>(null);
+  void spaceId; // ★ v1 = spaceId 미사용 (★ v2 = recall/briefing endpoint 연결).
 
-  // feat/recall-search-entity-autocomplete — PO dogfood directive 2026-06-24:
-  // "Recall에서 사용자가 타이핑 할때 엔티티 자동 완성하는 기능 원래 있지 않았나?"
-  // The dropdown surfaces entity suggestions from the same ES-backed
-  // /entities/suggest endpoint that FactCard's subject/object chip
-  // autocomplete uses. Clicking a suggestion fills the input AND
-  // triggers Recall immediately — that's the whole point: "type 한, see
-  // 한국은행, click, get the recall". Keyboard support: ↑↓ to move,
-  // Enter to pick (falls through to form submit if no item highlighted),
-  // Esc to close.
-  const [suggestions, setSuggestions] = useState<EntitySuggestion[]>([]);
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
-  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState<number>(-1);
-  const [userTyped, setUserTyped] = useState(false);
-  const debouncedQuery = useRecallDebounce(query, 200);
-  const suggestionsContainerRef = useRef<HTMLDivElement | null>(null);
+  // ★ PO 결정 1 — brief.totals 실데이터 (안심 문구 + 不知 대비 카드).
+  const { brief } = useHomeBrief();
+  const factsCount = brief?.totals.facts ?? 0;
+  const entitiesCount = brief?.totals.entities ?? 0;
+  const sourcesCount = brief?.totals.sources ?? 0;
 
-  useEffect(() => {
-    const stored = loadStoredMode();
-    if (stored !== 'simple') setMode(stored);
+  // 활성 질의 = 시안 default q1 (SpaceX 답변).
+  const [activeQid, setActiveQid] = useState<string>('q1');
+  const [advanced, setAdvanced] = useState(false);
+  const [showStatus, setShowStatus] = useState(true); // ★ 예시 배너 default ON.
+  const [queryDraft, setQueryDraft] = useState<string>('');
+
+  const active = pickActive(activeQid);
+
+  const pickRecent = useCallback((qid: string) => {
+    setActiveQid(qid);
   }, []);
 
-  const onToggleMode = () => {
-    setMode((prev) => {
-      const next = prev === 'simple' ? 'power' : 'simple';
-      persistMode(next);
-      return next;
-    });
-  };
-
-  const sortedFacts = useMemo(
-    () => (result ? sortFacts(result.facts) : []),
-    [result],
-  );
-
-  // B-50 / B-50-fix client-side filters.
-  // - keyword2: case-insensitive substring match on `claim`.
-  // - matchKinds: 🔍 유사도 is the search mode (always on); the user
-  //   can hide 🔗 엔티티 연결 rows from the rendered list, but the
-  //   underlying recall response is unchanged so toggling never zeros
-  //   the result — the old UX trap is gone.
-  // B-60: visibleFacts is shared by both modes. Simple mode ignores
-  // the keyword2 / matchKinds controls (they live in the power rail);
-  // because the controls default to "all on / empty keyword", the
-  // simple mode renders the full sorted list.
-  const visibleFacts = useMemo(() => {
-    let out = sortedFacts;
-    const kw = controls.keyword2.trim().toLowerCase();
-    if (kw) out = out.filter((f) => f.claim.toLowerCase().includes(kw));
-    if (!controls.matchKinds.entity_link) {
-      out = out.filter((f) => (f.match_kind ?? 'embedding') !== 'entity_link');
-    }
-    // v0.2.0 step 1 (fact-claim-layer-v1) — hide action rows when
-    // the 화자 인용만 chip is on. Legacy facts (fact_type undefined)
-    // are treated as action — the FactCard renders them identically.
-    if (controls.claimOnly) {
-      out = out.filter((f) => f.fact_type === 'claim');
-    }
-    // v0.2.0 step 2 (fact-measurement-layer-v1) — hide non-measurement
-    // rows when the 수치만 chip is on. claimOnly + measurementOnly
-    // together is intentionally permissive (intersection empty unless
-    // a fact carries both tags — vanishingly rare); the UX is "either
-    // chip filters to its own bucket".
-    if (controls.measurementOnly) {
-      out = out.filter((f) => f.fact_type === 'measurement');
-    }
-    // feat/recall-fact-type-summary — the summary-box chip filter.
-    // 'action' matches both explicit action rows and legacy facts
-    // where fact_type is unset / null (legacy is treated as action
-    // throughout the codebase — see RecallFactCard / FactCard).
-    if (factTypeFilter) {
-      out = out.filter((f) => {
-        const t = f.fact_type ?? 'action';
-        return t === factTypeFilter;
-      });
-    }
-    return out;
-  }, [
-    sortedFacts,
-    controls.keyword2,
-    controls.matchKinds.entity_link,
-    controls.claimOnly,
-    controls.measurementOnly,
-    factTypeFilter,
-  ]);
-
-  // feat/recall-fact-type-summary — paginated slice of visibleFacts.
-  // Client-side only; the backend already returned the full envelope
-  // and pagination is a render-window concern, not a fetch concern.
-  const pagedFacts = useMemo(
-    () => visibleFacts.slice(0, displayLimit),
-    [visibleFacts, displayLimit],
-  );
-
-  // Reset the page window whenever the underlying visible list
-  // shrinks/grows because of a filter flip — the user expects to land
-  // back at the top of the new bucket, not a half-scrolled offset.
-  useEffect(() => {
-    setDisplayLimit(PAGE_SIZE);
-  }, [factTypeFilter, controls.keyword2, controls.claimOnly, controls.measurementOnly, controls.matchKinds.entity_link]);
-
-  // Fetch suggestions whenever the debounced query changes. Guards:
-  //   · only fire on user-typed input (not the initial mount or a click-
-  //     applied suggestion which sets the query programmatically);
-  //   · skip when query is empty;
-  //   · skip when query length is 0 (we keep length>=1 for Korean — a
-  //     single hangul block can be a meaningful prefix);
-  //   · cancel via a flag so a slow response from an old keystroke
-  //     doesn't overwrite the newer one.
-  useEffect(() => {
-    if (!userTyped) return;
-    const q = debouncedQuery.trim();
-    if (!q) {
-      setSuggestions([]);
-      setSuggestionsOpen(false);
-      setActiveSuggestionIdx(-1);
-      return;
-    }
-    let cancelled = false;
-    searchEntitySuggestions(q, spaceId, 8)
-      .then((items) => {
-        if (cancelled) return;
-        setSuggestions(items);
-        setSuggestionsOpen(items.length > 0);
-        setActiveSuggestionIdx(-1);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setSuggestions([]);
-        setSuggestionsOpen(false);
-      });
-    return () => { cancelled = true; };
-  }, [debouncedQuery, spaceId, userTyped]);
-
-  const onToggleFactType = (kind: FactTypeKey) => {
-    setFactTypeFilter((prev) => (prev === kind ? null : kind));
-  };
-
-  const onLoadMore = () => {
-    setDisplayLimit((prev) => prev + PAGE_SIZE);
-  };
-
-  // fix/r1-recall-redesign — AI 브리핑 request handler.
-  //
-  // The button on the summary box calls this. We always re-fetch on
-  // click (the server cache absorbs repeat clicks); the FE only
-  // suppresses the call when there's nothing useful to summarise
-  // (no submittedQuery yet).
-  const onRequestBriefing = async () => {
-    if (!submittedQuery) return;
-    setBriefingBusy(true);
-    setBriefingError(null);
-    try {
-      const r = await apiRecallBriefing(spaceId, submittedQuery, activeEntities);
-      setBriefing(r);
-    } catch (err) {
-      const detail =
-        err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;
-      setBriefingError(detail);
-      setBriefing(null);
-    } finally {
-      setBriefingBusy(false);
-    }
-  };
-
-  // Build the "active filter chips" view: walk the current facets to
-  // find the name + bucket for each active uid (the backend already
-  // resolved labels). When the facets haven't loaded yet (very first
-  // request) we still render uids so the user can remove them.
-  const activeFilterDetails = useMemo(() => {
-    if (activeEntities.length === 0) return [];
-    const entities = result?.facets?.entities;
-    const lookup = new Map<string, { name: string; bucket: string }>();
-    if (entities) {
-      // ★ v3 10-bucket — chip bucket 라벨 lookup. legacy `place` 응답
-      // 도 "장소" 로 매핑 (FacetPanel 의 _resolveBucketItems 와 일관).
-      FACET_BUCKET_ORDER.forEach((b) => {
-        const items = entities[b] ?? [];
-        for (const e of items) {
-          lookup.set(e.uid, { name: e.name, bucket: BUCKET_LABELS[b] });
-        }
-      });
-      const legacyPlace = entities.place ?? [];
-      for (const e of legacyPlace) {
-        if (!lookup.has(e.uid)) {
-          lookup.set(e.uid, { name: e.name, bucket: BUCKET_LABELS.location });
-        }
-      }
-    }
-    return activeEntities.map((uid) => {
-      const m = lookup.get(uid);
-      // ★ REQ-004 STAGE 3+4 (PO 2026-06-30 결함 1) — chip fallback 도
-      // UUID 노출 금지. 옛: `m?.name ?? uid` → 첫 페이지 (facets 도착 전)
-      // 에 uid 가 chip 으로 깜빡 노출됐다. fix: backend 가 label 을 못
-      // 끌어오면 UNRESOLVED_ENTITY_LABEL.
-      return {
-        uid,
-        name: m?.name ?? UNRESOLVED_ENTITY_LABEL,
-        bucket: m?.bucket ?? '엔티티',
-      };
-    });
-  }, [activeEntities, result]);
-
-  const runRecall = async (
-    q: string,
-    entities: string[],
-    overrideControls?: SearchControlsState,
-  ) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const opts = controlsToRecallOptions(overrideControls ?? controls, entities);
-      const r = await apiRecall(spaceId, q, opts);
-      setResult(r);
-    } catch (err) {
-      const detail =
-        err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;
-      setError(detail);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim()) return;
-    const q = query.trim();
-    setSubmittedQuery(q);
-    // Submitting a NEW query resets the drill-down stack — the user
-    // is starting fresh; the previously selected entities don't carry
-    // over because they refer to a different result set.
-    setActiveEntities([]);
-    // feat/recall-fact-type-summary — also reset the layer chip and
-    // pagination window so a new query lands on the unfiltered first
-    // page, matching the user's mental model of "fresh search".
-    setFactTypeFilter(null);
-    setDisplayLimit(PAGE_SIZE);
-    // fix/r1-recall-redesign — clear any briefing from the previous
-    // search so the new summary box starts with the "AI 브리핑 보기"
-    // CTA, not stale 개관 text.
-    setBriefing(null);
-    setBriefingError(null);
-    await runRecall(q, []);
-  };
-
-  // hotfix/autocomplete-entity-id (PO 2026-06-30 결정 #6) — autocomplete
-  // pick = entity_id 기반 검색 (★ 옛: primary_label 텍스트 픽업 → semantic
-  // intent 깨짐). 사용자가 entity 를 고르면 q='' 로 두고 entity[] 필터에
-  // entity_id 넣어 entity-scoped recall. label 은 input 표시용 only.
-  const onPickSuggestion = async (s: EntitySuggestion) => {
-    setQuery(s.primary_label);  // ★ display only
-    setSuggestions([]);
-    setSuggestionsOpen(false);
-    setActiveSuggestionIdx(-1);
-    setUserTyped(false);  // suppress the next fetch (programmatic set)
-    setSubmittedQuery('');  // ★ entity-scoped: q 비움
-    setActiveEntities([s.entity_id]);  // ★ entity_id 로 검색
-    setFactTypeFilter(null);
-    setDisplayLimit(PAGE_SIZE);
-    // fix/r1-recall-redesign — same briefing reset as onSubmit.
-    setBriefing(null);
-    setBriefingError(null);
-    await runRecall('', [s.entity_id]);
-  };
-
-  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!suggestionsOpen || suggestions.length === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setActiveSuggestionIdx((idx) => (idx + 1) % suggestions.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setActiveSuggestionIdx((idx) => (idx <= 0 ? suggestions.length - 1 : idx - 1));
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setSuggestionsOpen(false);
-      setActiveSuggestionIdx(-1);
-    } else if (e.key === 'Enter' && activeSuggestionIdx >= 0) {
-      e.preventDefault();
-      const picked = suggestions[activeSuggestionIdx];
-      if (picked) {
-        void onPickSuggestion(picked);
-      }
-    }
-    // Enter with no active idx falls through to the form's onSubmit
-    // (normal recall search of the literal query text). That's the
-    // existing behaviour; don't preventDefault here.
-  };
-
-  const onToggleEntity = (uid: string) => {
-    if (!submittedQuery) return;
-    setActiveEntities((prev) => {
-      const isActive = prev.includes(uid);
-      const next = isActive ? prev.filter((u) => u !== uid) : [...prev, uid];
-      void runRecall(submittedQuery, next);
-      return next;
-    });
-  };
-
-  const onRemoveChip = (uid: string) => {
-    if (!submittedQuery) return;
-    setActiveEntities((prev) => {
-      const next = prev.filter((u) => u !== uid);
-      void runRecall(submittedQuery, next);
-      return next;
-    });
-  };
-
-  const onClearAll = () => {
-    if (!submittedQuery) return;
-    setActiveEntities([]);
-    void runRecall(submittedQuery, []);
-  };
-
-  // B-48b: open the detail panel for a fact (right rail swaps from
-  // facet/brief to detail). Subsequent recall calls leave the panel
-  // open — the user closes it explicitly.
-  const onOpenDetail = async (factUid: string) => {
-    setDetailBusy(true);
-    setError(null);
-    try {
-      const d = await apiGetFactDetail(spaceId, factUid);
-      setDetail(d);
-    } catch (err) {
-      const msg =
-        err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;
-      setError(msg);
-    } finally {
-      setDetailBusy(false);
-    }
-  };
-
-  const onCloseDetail = () => setDetail(null);
-
-  const refreshDetail = async (factUid: string) => {
-    try {
-      const d = await apiGetFactDetail(spaceId, factUid);
-      setDetail(d);
-    } catch {
-      // best-effort — keep the current detail rendered if refresh fails
-    }
-  };
-
-  const refreshRecall = () => {
-    if (submittedQuery) void runRecall(submittedQuery, activeEntities);
-  };
-
-  const onDetailRetract = async () => {
-    if (!detail) return;
-    setDetailBusy(true);
-    try {
-      await apiRetractFact(spaceId, detail.fact.fact_uid);
-      await refreshDetail(detail.fact.fact_uid);
-      refreshRecall();
-      notifyStateChanged('fact-retracted', { factUid: detail.fact.fact_uid });
-    } finally {
-      setDetailBusy(false);
-    }
-  };
-
-  const onDetailRestore = async () => {
-    if (!detail) return;
-    setDetailBusy(true);
-    try {
-      await apiRestoreFact(spaceId, detail.fact.fact_uid);
-      await refreshDetail(detail.fact.fact_uid);
-      refreshRecall();
-      notifyStateChanged('fact-restored', { factUid: detail.fact.fact_uid });
-    } finally {
-      setDetailBusy(false);
-    }
-  };
-
-  const onDetailDetachSource = async (sourceUid: string) => {
-    if (!detail) return;
-    setDetailBusy(true);
-    try {
-      const r = await apiDetachSource(spaceId, detail.fact.fact_uid, sourceUid);
-      await refreshDetail(detail.fact.fact_uid);
-      refreshRecall();
-      // If detach triggered an auto-retract, the panel updates via the
-      // refresh above; we don't need to surface a toast — the banner
-      // on the detail card already announces the new state.
-      void r;
-    } finally {
-      setDetailBusy(false);
-    }
-  };
-
-  // feat/fact-detail-modify — PATCH surface fields. The backend
-  // returns the refreshed detail so we swap state from the response
-  // directly (no extra GET). After save, also refetch the recall
-  // list so the card title (which pulls from `claim`) is current.
-  const onDetailModify = async (payload: ModifyFactRequest) => {
-    if (!detail) return;
-    setDetailBusy(true);
-    setError(null);
-    try {
-      const updated = await apiModifyFact(
-        spaceId, detail.fact.fact_uid, payload,
-      );
-      setDetail(updated);
-      refreshRecall();
-      notifyStateChanged('fact-modified', { factUid: detail.fact.fact_uid });
-    } catch (err) {
-      const msg =
-        err instanceof ApiError ? err.detail ?? err.message : (err as Error).message;
-      setError(msg);
-    } finally {
-      setDetailBusy(false);
-    }
-  };
-
-  // Controls dispatcher: server-affecting controls re-fire recall.
-  // B-50-fix: matchKinds is no longer in that set — it's a pure
-  // display filter, so changing the toggle never round-trips. keyword2
-  // is also display-only.
-  const onControlsChange = (next: SearchControlsState) => {
-    const serverChanged =
-      next.scoreThreshold !== controls.scoreThreshold ||
-      next.dateFrom !== controls.dateFrom ||
-      next.dateTo !== controls.dateTo;
-    setControls(next);
-    if (serverChanged && submittedQuery) {
-      void runRecall(submittedQuery, activeEntities, next);
-    }
-  };
+  const isUnknown = active?.state === 'unknown';
+  const isKnown = active?.state === 'answer';
 
   return (
-    <div className="px-4 py-6 mx-auto max-w-7xl" data-recall-mode={mode}>
-      <header className="mb-6 flex items-start justify-between gap-3">
-        <div>
-          {/* feat/i18n-ko-display-names-separation (★ PO 2026-06-30) —
-            * RECALL 코드네임 → 한국어 표시 "검색". 내부 컴포넌트명 / API /
-            * data-testid (recall-*) 는 코드명 유지 (회귀 0). */}
-          <h1 className="text-2xl font-light">검색</h1>
-          <p className="text-sm text-text-secondary">
-            그래프 안의 사실만 답합니다. 그래프 밖은 답하지 않습니다.
-          </p>
-        </div>
-        <button
-          type="button"
-          data-testid="recall-mode-toggle"
-          aria-label="toggle recall layout mode"
-          aria-pressed={mode === 'power'}
-          onClick={onToggleMode}
-          className="shrink-0 mt-1 rounded-md border border-border-subtle bg-bg-card px-3 py-1.5 text-xs font-mono text-text-secondary hover:bg-bg-elevated/60"
-          title="단순 보기 ↔ 고급/그래프 보기"
+    <div
+      data-testid="recall-redesign-root"
+      data-recall-version="v2-req011"
+      style={{ minHeight: '100vh', background: COLORS.bg }}
+    >
+      <div
+        data-testid="recall-redesign-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '340px 1fr',
+          alignItems: 'start',
+          maxWidth: 1440,
+          margin: '0 auto',
+        }}
+      >
+        {/* LEFT — 질문 + 그래프 렌즈. */}
+        <aside
+          data-testid="recall-aside"
+          style={{
+            position: 'sticky',
+            top: 60, // ★ AppShell 헤더 (60px) 아래.
+            height: 'calc(100vh - 60px)',
+            overflowY: 'auto',
+            borderRight: `1px solid ${COLORS.borderAside}`,
+            padding: '22px 20px 40px',
+          }}
         >
-          {mode === 'simple' ? '고급/그래프 보기 →' : '← 단순 보기'}
-        </button>
-      </header>
-
-      <form onSubmit={onSubmit} className="flex gap-2 mb-4">
-        <div className="relative flex-1" ref={suggestionsContainerRef}>
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setUserTyped(true);
+          {/* RECALL 라벨. */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 14,
             }}
-            onKeyDown={onSearchKeyDown}
-            onFocus={() => {
-              if (suggestions.length > 0) setSuggestionsOpen(true);
-            }}
-            onBlur={() => {
-              // Delay so a click on a suggestion item registers before the
-              // dropdown unmounts (mousedown on the li would otherwise be
-              // cancelled by the input losing focus).
-              setTimeout(() => setSuggestionsOpen(false), 120);
-            }}
-            placeholder="질문을 입력하세요 (Ko/En)"
-            className="w-full rounded-md border border-border-subtle bg-bg-card p-2 text-sm focus:outline-none focus:border-accent-cool"
-            aria-label="recall query"
-            aria-autocomplete="list"
-            aria-expanded={suggestionsOpen}
-            aria-controls="recall-entity-suggestions"
-            autoComplete="off"
-          />
-          {suggestionsOpen && suggestions.length > 0 && (
-            <ul
-              id="recall-entity-suggestions"
-              role="listbox"
-              data-testid="recall-entity-suggestions"
-              className="absolute z-30 mt-1 w-full max-h-72 overflow-y-auto rounded-md border border-border-subtle bg-bg-elevated shadow-lg"
+          >
+            <span
+              className="font-mono"
+              style={{
+                fontSize: 11,
+                letterSpacing: '0.16em',
+                color: COLORS.tealMint,
+              }}
             >
-              {suggestions.map((s, idx) => {
-                const active = idx === activeSuggestionIdx;
-                return (
-                  <li
-                    key={s.entity_id}
-                    role="option"
-                    aria-selected={active}
-                    data-testid={`recall-entity-suggestion-${s.entity_id}`}
-                    data-active={active ? 'true' : 'false'}
-                    onMouseDown={(e) => {
-                      // mousedown (not click) so the input's onBlur doesn't
-                      // close the dropdown before the pick fires.
-                      e.preventDefault();
-                      void onPickSuggestion(s);
+              RECALL
+            </span>
+            <span style={{ fontSize: 11, color: COLORS.textFaint }}>
+              · 검증된 것만 답합니다
+            </span>
+          </div>
+
+          {/* 질문 입력. */}
+          <div style={{ position: 'relative', marginBottom: 8 }}>
+            <input
+              data-testid="recall-input"
+              value={queryDraft}
+              onChange={(e) => setQueryDraft(e.target.value)}
+              placeholder="무엇이든 물어보세요"
+              style={{
+                width: '100%',
+                height: 48,
+                borderRadius: 12,
+                background: COLORS.bgInput,
+                border: `1px solid ${COLORS.borderInput}`,
+                padding: '0 44px 0 14px',
+                fontSize: 14,
+                color: '#e6eef0',
+                fontFamily: 'inherit',
+                outline: 'none',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor =
+                  'rgba(45,212,191,0.55)';
+                e.currentTarget.style.boxShadow =
+                  '0 0 0 3px rgba(45,212,191,0.1)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = COLORS.borderInput;
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            />
+            <button
+              type="button"
+              data-testid="recall-submit"
+              aria-label="질문 보내기"
+              style={{
+                position: 'absolute',
+                right: 7,
+                top: 7,
+                width: 34,
+                height: 34,
+                borderRadius: 9,
+                border: 'none',
+                cursor: 'pointer',
+                background: COLORS.teal,
+                color: COLORS.textInk,
+                fontSize: 15,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              →
+            </button>
+          </div>
+
+          {/* ★ 안심 문구 = brief.totals 실데이터 (PO 결정 1). */}
+          <div
+            data-testid="recall-scope-line"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              fontSize: 11.5,
+              color: COLORS.textFaint,
+              marginBottom: 22,
+              paddingLeft: 2,
+            }}
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: COLORS.teal,
+                boxShadow: `0 0 7px ${COLORS.teal}`,
+              }}
+            />
+            <span>
+              <span data-testid="recall-scope-facts">{factsCount}</span> 사실 ·{' '}
+              <span data-testid="recall-scope-entities">{entitiesCount}</span> 엔티티 ·{' '}
+              <span data-testid="recall-scope-sources">{sourcesCount}</span> 출처 안에서 찾습니다
+            </span>
+          </div>
+
+          {/* 최근 recall. */}
+          <div
+            style={{
+              fontSize: 11,
+              letterSpacing: '0.04em',
+              color: '#5e7074',
+              fontWeight: 600,
+              marginBottom: 9,
+            }}
+          >
+            최근 recall
+          </div>
+          <div
+            data-testid="recall-recent-list"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              marginBottom: 24,
+            }}
+          >
+            {EXAMPLE_RECENT_RECALL.map((rec) => {
+              const isActiveRec = rec.qid === activeQid;
+              const meta = `${rec.factsLabel} · ${rec.when}`;
+              return (
+                <button
+                  key={rec.qid}
+                  type="button"
+                  data-testid={`recall-recent-${rec.qid}`}
+                  data-active={isActiveRec ? 'true' : 'false'}
+                  onClick={() => pickRecent(rec.qid)}
+                  style={{
+                    position: 'relative',
+                    textAlign: 'left',
+                    background: isActiveRec
+                      ? 'rgba(45,212,191,0.07)'
+                      : 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '9px 12px 9px 13px',
+                    borderRadius: 9,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 3,
+                    overflow: 'hidden',
+                    fontFamily: 'inherit',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActiveRec) {
+                      e.currentTarget.style.background = '#0e1619';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActiveRec) {
+                      e.currentTarget.style.background = 'transparent';
+                    }
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 6,
+                      bottom: 6,
+                      width: 2.5,
+                      borderRadius: 2,
+                      background: isActiveRec ? COLORS.teal : 'transparent',
                     }}
-                    onMouseEnter={() => setActiveSuggestionIdx(idx)}
-                    className={[
-                      'flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer',
-                      active
-                        ? 'bg-accent-cool/15 text-accent-cool'
-                        : 'hover:bg-bg-card/60 text-text-primary',
-                    ].join(' ')}
+                  />
+                  <span
+                    style={{
+                      position: 'relative',
+                      fontSize: 13,
+                      color: COLORS.textBody,
+                      lineHeight: 1.35,
+                    }}
                   >
-                    <span className="truncate" lang={s.primary_lang || undefined}>
-                      {s.primary_label}
-                    </span>
-                    <span className="font-mono text-xxs text-text-muted opacity-70 shrink-0">
-                      {s.primary_lang || '?'}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+                    {rec.q}
+                  </span>
+                  <span
+                    className="font-mono"
+                    style={{
+                      position: 'relative',
+                      fontSize: 10.5,
+                      color: rec.metaColor,
+                    }}
+                  >
+                    {meta}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 그래프 렌즈 헤더. */}
+          <div
+            style={{
+              fontSize: 11,
+              letterSpacing: '0.04em',
+              color: '#5e7074',
+              fontWeight: 600,
+              marginBottom: 11,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <span>그래프 렌즈</span>
+            <span
+              className="font-mono"
+              style={{ fontSize: 9, color: '#3c4d51' }}
+            >
+              LENS
+            </span>
+          </div>
+
+          {/* 대상 칩. */}
+          <div
+            style={{
+              fontSize: 11.5,
+              color: '#6a7c80',
+              margin: '0 0 8px',
+            }}
+          >
+            대상
+          </div>
+          <div
+            data-testid="recall-facet-entities"
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+              marginBottom: 18,
+            }}
+          >
+            {EXAMPLE_ENTITIES.map((e) => (
+              <span
+                key={e.name}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  color: '#bccacd',
+                  background: '#0e1619',
+                  border: '1px solid #18262a',
+                  borderRadius: 8,
+                  padding: '5px 9px',
+                  cursor: 'pointer',
+                }}
+              >
+                {e.name}
+                <span
+                  className="font-mono"
+                  style={{ fontSize: 10, color: '#5a8f86' }}
+                >
+                  {e.count}
+                </span>
+              </span>
+            ))}
+          </div>
+
+          {/* 관계 칩. */}
+          <div
+            style={{
+              fontSize: 11.5,
+              color: '#6a7c80',
+              margin: '0 0 8px',
+            }}
+          >
+            관계
+          </div>
+          <div
+            data-testid="recall-facet-predicates"
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+              marginBottom: 20,
+            }}
+          >
+            {EXAMPLE_PREDICATES.map((p) => (
+              <span
+                key={p.name}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  color: '#9fb0b3',
+                  background: 'transparent',
+                  border: '1px solid #18262a',
+                  borderRadius: 20,
+                  padding: '4px 11px',
+                  cursor: 'pointer',
+                }}
+              >
+                {p.name}
+                <span
+                  className="font-mono"
+                  style={{ fontSize: 10, color: COLORS.textDim }}
+                >
+                  {p.count}
+                </span>
+              </span>
+            ))}
+          </div>
+
+          {/* 고급 토글. */}
+          <button
+            type="button"
+            data-testid="recall-advanced-toggle"
+            onClick={() => setAdvanced((v) => !v)}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'none',
+              border: 'none',
+              borderTop: '1px solid #131e21',
+              cursor: 'pointer',
+              padding: '14px 2px 10px',
+              color: COLORS.textSecondary,
+              fontSize: 12,
+              fontFamily: 'inherit',
+            }}
+          >
+            <span>고급 — 정확도 · 기간</span>
+            <span style={{ fontSize: 11, color: COLORS.textFaint }}>
+              {advanced ? '닫기 ▲' : '열기 ▼'}
+            </span>
+          </button>
+          {advanced && (
+            <div
+              data-testid="recall-advanced-panel"
+              style={{ padding: '6px 2px 0' }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 12,
+                  color: '#9fb0b3',
+                  marginBottom: 9,
+                }}
+              >
+                <span>정확도</span>
+                <span
+                  className="font-mono"
+                  style={{ fontSize: 11, color: COLORS.tealMint }}
+                >
+                  균형
+                </span>
+              </div>
+              <div
+                style={{
+                  position: 'relative',
+                  height: 5,
+                  borderRadius: 3,
+                  background: '#16242a',
+                  marginBottom: 6,
+                }}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: '62%',
+                    borderRadius: 3,
+                    background:
+                      'linear-gradient(90deg,#1d8a7c,#2DD4BF)',
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '62%',
+                    top: '50%',
+                    width: 13,
+                    height: 13,
+                    borderRadius: '50%',
+                    background: COLORS.teal,
+                    transform: 'translate(-50%,-50%)',
+                    boxShadow: '0 0 10px rgba(45,212,191,0.5)',
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: 10.5,
+                  color: COLORS.textFaint,
+                  marginBottom: 18,
+                }}
+              >
+                <span>넓게</span>
+                <span>엄격하게</span>
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: '#9fb0b3',
+                  marginBottom: 8,
+                }}
+              >
+                검증 기간
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 6,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: COLORS.textInk,
+                    background: COLORS.teal,
+                    borderRadius: 8,
+                    padding: '6px 11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  전체
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: '#9fb0b3',
+                    background: '#0e1619',
+                    border: '1px solid #18262a',
+                    borderRadius: 8,
+                    padding: '6px 11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  최근 7일
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: '#9fb0b3',
+                    background: '#0e1619',
+                    border: '1px solid #18262a',
+                    borderRadius: 8,
+                    padding: '6px 11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  이번 달
+                </span>
+              </div>
+            </div>
           )}
-        </div>
-        <ActionButton type="submit" variant="primary" disabled={busy || !query.trim()}>
-          {busy ? '검색 중…' : '검색'}
-        </ActionButton>
-      </form>
+        </aside>
 
-      {mode === 'simple' ? (
-        <RecallSimpleBody
-          result={result}
-          visibleFacts={visibleFacts}
-          pagedFacts={pagedFacts}
-          error={error}
-          factTypeFilter={factTypeFilter}
-          onToggleFactType={onToggleFactType}
-          onLoadMore={onLoadMore}
-          query={submittedQuery}
-          onOpenDetail={onOpenDetail}
-          briefing={briefing}
-          briefingBusy={briefingBusy}
-          briefingError={briefingError}
-          onRequestBriefing={onRequestBriefing}
-        />
-      ) : (
-        <RecallPowerBody
-          result={result}
-          sortedFacts={sortedFacts}
-          visibleFacts={visibleFacts}
-          pagedFacts={pagedFacts}
-          error={error}
-          controls={controls}
-          onControlsChange={onControlsChange}
-          activeFilterDetails={activeFilterDetails}
-          activeEntities={activeEntities}
-          onToggleEntity={onToggleEntity}
-          onRemoveChip={onRemoveChip}
-          onClearAll={onClearAll}
-          factTypeFilter={factTypeFilter}
-          onToggleFactType={onToggleFactType}
-          onLoadMore={onLoadMore}
-          query={submittedQuery}
-          onOpenDetail={onOpenDetail}
-          briefing={briefing}
-          briefingBusy={briefingBusy}
-          briefingError={briefingError}
-          onRequestBriefing={onRequestBriefing}
-        />
-      )}
-
-      {detail && (
-        <FactDetailModal
-          detail={detail}
-          onClose={onCloseDetail}
-          onDetachSource={onDetailDetachSource}
-          onRetract={onDetailRetract}
-          onRestore={onDetailRestore}
-          onModify={onDetailModify}
-          busy={detailBusy}
-        />
-      )}
+        {/* RIGHT — 답변 / 不知. */}
+        <main
+          data-testid="recall-main"
+          style={{
+            padding: '30px 34px 60px',
+            minHeight: 'calc(100vh - 60px)',
+          }}
+        >
+          {isKnown && active && (
+            <RecallKnownPanel
+              query={active as RecallExampleAnswerQuery}
+              showStatus={showStatus}
+              onCloseBanner={() => setShowStatus(false)}
+            />
+          )}
+          {isUnknown && active && (
+            <RecallUnknownState
+              queryText={active.q}
+              factsCount={factsCount}
+              entitiesCount={entitiesCount}
+              onCapture={() => {
+                /* ★ v1 = 자리만 (★ 후속 = /pending 또는 캡처 모달). */
+              }}
+              onAskAgain={() => {
+                setQueryDraft('');
+              }}
+            />
+          )}
+        </main>
+      </div>
     </div>
   );
 }
+
+interface KnownPanelProps {
+  query: RecallExampleAnswerQuery;
+  showStatus: boolean;
+  onCloseBanner: () => void;
+}
+
+function RecallKnownPanel({
+  query,
+  showStatus,
+  onCloseBanner,
+}: KnownPanelProps) {
+  return (
+    <div data-testid="recall-known-panel">
+      {/* 질의 에코. */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 12,
+          marginBottom: 6,
+        }}
+      >
+        <span
+          style={{
+            marginTop: 4,
+            width: 9,
+            height: 9,
+            borderRadius: '50%',
+            flex: 'none',
+            background: COLORS.teal,
+            boxShadow: `0 0 9px ${COLORS.teal}`,
+          }}
+        />
+        <h1
+          data-testid="recall-query-echo"
+          style={{
+            margin: 0,
+            fontSize: 27,
+            fontWeight: 600,
+            letterSpacing: '-0.02em',
+            color: COLORS.textPrimary,
+            lineHeight: 1.3,
+          }}
+        >
+          {query.q}
+        </h1>
+      </div>
+      <div
+        className="font-mono"
+        data-testid="recall-trust-meta"
+        style={{
+          fontSize: 11,
+          letterSpacing: '0.04em',
+          color: COLORS.textDim,
+          margin: '0 0 14px',
+          paddingLeft: 21,
+        }}
+      >
+        검증된 사실 {query.conf.facts}건 · 출처 {query.conf.sources}곳 근거 ·{' '}
+        {query.when}
+      </div>
+
+      <RecallExampleBanner show={showStatus} onToggle={onCloseBanner} />
+
+      <RecallAnswerCard
+        answerText={query.answer}
+        chips={query.chips}
+        confFacts={query.conf.facts}
+      />
+
+      {/* 하단 2 열 그리드: 근거 사실 + 근거 그래프. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 18,
+          alignItems: 'start',
+        }}
+      >
+        {/* 근거 사실. */}
+        <section data-testid="recall-evidence-list">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 11,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: COLORS.textBody,
+              }}
+            >
+              근거 사실
+            </span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+              }}
+            >
+              <span style={{ fontSize: 10.5, color: '#5e7074' }}>
+                대상 클릭 → 상세뷰
+              </span>
+              <span
+                className="font-mono"
+                style={{
+                  fontSize: 8.5,
+                  letterSpacing: '0.06em',
+                  color: COLORS.textDim,
+                  border: '1px solid #1f2e2c',
+                  borderRadius: 4,
+                  padding: '1px 5px',
+                }}
+              >
+                후속
+              </span>
+            </span>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            {query.facts.map((f, i) => (
+              <RecallEvidenceCard
+                key={`${f.s}-${f.p}-${i}`}
+                fact={f}
+                onSubjectClick={() => {
+                  /* ★ v1 = 자리만 (entity 상세뷰 = REQ-004 후속). */
+                }}
+              />
+            ))}
+          </div>
+        </section>
+
+        {/* 근거 그래프. */}
+        <section data-testid="recall-evidence-graph">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 11,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: COLORS.textBody,
+              }}
+            >
+              근거 그래프
+            </span>
+            <span
+              title="STELLAR 안정(REQ-004) 후 연결"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 11,
+                color: '#5e7074',
+                cursor: 'default',
+              }}
+            >
+              Stellar에서 펼쳐보기 →
+              <span
+                className="font-mono"
+                style={{
+                  fontSize: 8.5,
+                  letterSpacing: '0.06em',
+                  color: COLORS.textDim,
+                  border: '1px solid #1f2e2c',
+                  borderRadius: 4,
+                  padding: '1px 5px',
+                }}
+              >
+                후속
+              </span>
+            </span>
+          </div>
+          <RecallMiniGraph
+            center={query.graph.center}
+            nodes={query.graph.nodes}
+          />
+          {/* 경계 노트. */}
+          <div
+            data-testid="recall-boundary-note"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              marginTop: 13,
+              background: 'rgba(20,15,11,0.5)',
+              border: '1px solid #2a2018',
+              borderRadius: 12,
+              padding: '13px 15px',
+            }}
+          >
+            <span
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 8,
+                flex: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(185,138,106,0.12)',
+                color: '#c79976',
+                fontSize: 14,
+              }}
+            >
+              ?
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, color: '#d3c4b4' }}>
+                경계 —{' '}
+                <b style={{ color: '#e6d3bf' }}>{query.boundary}</b>는 아직
+                그래프 밖입니다
+              </div>
+              <div
+                style={{
+                  fontSize: 11.5,
+                  color: '#7a6a58',
+                  marginTop: 2,
+                }}
+              >
+                모르는 것을 아는 척하지 않습니다
+              </div>
+            </div>
+            <button
+              type="button"
+              data-testid="recall-boundary-capture"
+              style={{
+                flex: 'none',
+                fontSize: 12.5,
+                color: COLORS.textInk,
+                background: '#c79976',
+                fontWeight: 600,
+                border: 'none',
+                borderRadius: 9,
+                padding: '8px 13px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              캡처 →
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// Re-export for tests that previously imported via the bare module path.
+export default RecallView;

@@ -87,7 +87,10 @@ test('★ i18n /ledger H1 = "기록" + 영문 "Ledger" 잔재 0', async ({
   await captureEvidence(page, 'i18n-ko-empty-states', '02-ledger-h1');
 });
 
-test('★ i18n /recall H1 = "검색" + 검색 버튼 한국어', async ({
+// ★ REQ-011-v1 (PO 2026-06-30) — /recall 은 분석형 리디자인. 옛 H1 "검색"
+// 과 검색 버튼이 없어짐. 새 화면의 query echo 와 RECALL 라벨은 동일한
+// i18n 원칙을 따른다 — req011-recall-redesign-v1.spec.ts 가 cover.
+test.skip('★ i18n /recall H1 = "검색" + 검색 버튼 한국어', async ({
   authenticatedPage: page,
 }) => {
   await seedSpaceCookie(page);
