@@ -46,7 +46,14 @@
  *     - 예시 배너 default ON — 다만 ★ 실데이터 path 동작 시 자동 OFF.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 import {
   EXAMPLE_ENTITIES,
@@ -213,6 +220,12 @@ export function RecallView({ spaceId }: Props) {
   //   부는 결과만 받으면 자동으로 안전.
   const [suggestions, setSuggestions] = useState<EntitySuggestion[]>([]);
   const [showSuggest, setShowSuggest] = useState(false);
+  // ★ recall-v2-autocomplete-arrow-restore (PO 2026-07-01) — 옛 SearchBar
+  //   키보드 조작 복원. 아래 화살표로 dropdown 내려가지 않는다는 PO dogfood
+  //   피드백. -1 = 미선택 (Enter → onSubmit), 0..len-1 = 활성 suggestion
+  //   (Enter → 그 label 로 검색). suggestions 변경 시 -1 로 리셋해 stale
+  //   index 방지.
+  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState<number>(-1);
   const suggestSeqRef = useRef(0);
 
   // ★ REQ-011-v2 — 실 검색 상태.
@@ -250,6 +263,7 @@ export function RecallView({ spaceId }: Props) {
     const trimmed = queryDraft.trim();
     if (!spaceId || !trimmed || !isMeaningfulLabel(trimmed)) {
       setSuggestions([]);
+      setActiveSuggestionIdx(-1);
       return;
     }
     const seq = ++suggestSeqRef.current;
@@ -263,10 +277,13 @@ export function RecallView({ spaceId }: Props) {
           setSuggestions(
             items.filter((it) => isMeaningfulLabel(it.primary_label)),
           );
+          // ★ 새 결과 도착 = 이전 index 무효 → -1 리셋.
+          setActiveSuggestionIdx(-1);
         })
         .catch(() => {
           if (suggestSeqRef.current !== seq) return;
           setSuggestions([]);
+          setActiveSuggestionIdx(-1);
         });
     }, 200);
     return () => window.clearTimeout(timer);
@@ -323,8 +340,82 @@ export function RecallView({ spaceId }: Props) {
     const q = queryDraft.trim();
     if (!q) return;
     setShowSuggest(false);
+    setActiveSuggestionIdx(-1);
     void runSearch(q);
   }, [queryDraft, runSearch]);
+
+  // ★ recall-v2-autocomplete-arrow-restore (PO 2026-07-01) — suggestion 픽.
+  //   v1 (옛 SearchBar) 은 label 로 setQuery 후 자동 검색. v2 도 동일:
+  //   사용자 의도 = "그 라벨로 실제 검색". entity 필터 mode 는 REQ-004 후
+  //   `stellar` 진입 자리로 미룸.
+  const onPickSuggestion = useCallback(
+    (s: EntitySuggestion) => {
+      setQueryDraft(s.primary_label);
+      setSuggestions([]);
+      setShowSuggest(false);
+      setActiveSuggestionIdx(-1);
+      void runSearch(s.primary_label);
+    },
+    [runSearch],
+  );
+
+  // ★ recall-v2-autocomplete-arrow-restore (PO 2026-07-01) — 화살표 키 복원.
+  //   옛 RecallView (v1 pre-redesign) 는 SearchBar 에 keyboard handler 있었
+  //   음: ArrowDown/Up 으로 dropdown 이동, Enter 로 활성 항목 픽, Escape
+  //   으로 닫기. REQ-011-v1 재작성 시 미보존 → PO dogfood "화살표 아래 눌러
+  //   도 내려가질 않는다". 본 handler 로 복원.
+  //
+  //   설계:
+  //     - dropdown 닫혀 있거나 항목 0 → Enter = onSubmit (기존 동작 보존).
+  //     - dropdown 열려 있으면:
+  //       ArrowDown  → activeIdx = min(idx + 1, len - 1)
+  //       ArrowUp    → activeIdx = max(idx - 1, 0)
+  //       Enter (idx >= 0) → onPickSuggestion(suggestions[idx])
+  //       Enter (idx = -1) → onSubmit (raw query 검색)
+  //       Escape     → 닫고 idx = -1
+  const onSearchKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLInputElement>) => {
+      const dropdownOpen = showSuggest && suggestions.length > 0;
+      if (!dropdownOpen) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onSubmit();
+        }
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActiveSuggestionIdx((i) =>
+          Math.min(i + 1, suggestions.length - 1),
+        );
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActiveSuggestionIdx((i) => Math.max(i - 1, 0));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (
+          activeSuggestionIdx >= 0 &&
+          activeSuggestionIdx < suggestions.length
+        ) {
+          const picked = suggestions[activeSuggestionIdx]!;
+          onPickSuggestion(picked);
+        } else {
+          onSubmit();
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSuggest(false);
+        setActiveSuggestionIdx(-1);
+      }
+    },
+    [
+      showSuggest,
+      suggestions,
+      activeSuggestionIdx,
+      onPickSuggestion,
+      onSubmit,
+    ],
+  );
 
   // ★ v2 — isKnown / isUnknown 자동 결정.
   //   recallResult 가 있으면 실데이터 mode (의뢰서 STEP 1.2):
@@ -439,12 +530,7 @@ export function RecallView({ spaceId }: Props) {
                 setQueryDraft(e.target.value);
                 setShowSuggest(true);
               }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  onSubmit();
-                }
-              }}
+              onKeyDown={onSearchKeyDown}
               placeholder="무엇이든 물어보세요"
               style={{
                 width: '100%',
@@ -505,6 +591,8 @@ export function RecallView({ spaceId }: Props) {
             {showSuggest && suggestions.length > 0 ? (
               <ul
                 data-testid="recall-suggest-dropdown"
+                role="listbox"
+                aria-label="자동완성 후보"
                 style={{
                   position: 'absolute',
                   top: 52,
@@ -522,28 +610,38 @@ export function RecallView({ spaceId }: Props) {
                   zIndex: 20,
                 }}
               >
-                {suggestions.map((s) => (
-                  <li
-                    key={s.entity_id}
-                    data-testid="recall-suggest-item"
-                    data-primary-label={s.primary_label}
-                    onMouseDown={(e) => {
-                      // ★ onMouseDown (not onClick) so the selection commits
-                      //   BEFORE input.onBlur fires.
-                      e.preventDefault();
-                      setQueryDraft(s.primary_label);
-                      setShowSuggest(false);
-                    }}
-                    style={{
-                      padding: '7px 12px',
-                      fontSize: 13,
-                      color: COLORS.textBody,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {s.primary_label}
-                  </li>
-                ))}
+                {suggestions.map((s, i) => {
+                  const isActive = i === activeSuggestionIdx;
+                  return (
+                    <li
+                      key={s.entity_id}
+                      data-testid="recall-suggest-item"
+                      data-primary-label={s.primary_label}
+                      data-suggest-idx={i}
+                      data-active={isActive ? 'true' : 'false'}
+                      role="option"
+                      aria-selected={isActive}
+                      onMouseEnter={() => setActiveSuggestionIdx(i)}
+                      onMouseDown={(e) => {
+                        // ★ onMouseDown (not onClick) so the selection commits
+                        //   BEFORE input.onBlur fires.
+                        e.preventDefault();
+                        onPickSuggestion(s);
+                      }}
+                      style={{
+                        padding: '7px 12px',
+                        fontSize: 13,
+                        color: isActive ? COLORS.textPrimary : COLORS.textBody,
+                        background: isActive
+                          ? 'rgba(45,212,191,0.12)'
+                          : 'transparent',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {s.primary_label}
+                    </li>
+                  );
+                })}
               </ul>
             ) : null}
           </div>
