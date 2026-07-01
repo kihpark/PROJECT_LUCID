@@ -4,10 +4,24 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FactCard } from '@/components/FactCard';
 import type { FactSummary, ObjectSummary } from '@/lib/types';
 
-// Mock api module
+// Mock api module. ★ REQ-014-B — FactTypeForms 가 ENTITY_TYPE_OPTIONS
+//   (10종 entity_type closed set) 를 참조하므로 mock 에 실제 배열을
+//   포함시킨다. searchEntitySuggestions / listPredicates 는 vi.fn 로 유지.
 vi.mock('@/lib/api', () => ({
   searchEntitySuggestions: vi.fn(async () => []),
   listPredicates: vi.fn(async () => []),
+  ENTITY_TYPE_OPTIONS: [
+    { value: 'person', label: '사람' },
+    { value: 'organization', label: '조직' },
+    { value: 'group', label: '그룹' },
+    { value: 'knowledge', label: '지식' },
+    { value: 'resource', label: '자원' },
+    { value: 'task', label: '행위' },
+    { value: 'concept', label: '개념' },
+    { value: 'event', label: '사건' },
+    { value: 'metric', label: '지표' },
+    { value: 'location', label: '장소' },
+  ],
 }));
 
 import * as api from '@/lib/api';

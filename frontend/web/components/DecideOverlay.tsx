@@ -27,8 +27,23 @@ interface FactDecisionDraft {
   // `edited_metadata` so the backend's `_coerce_fact_to_factnode`
   // overrides only the touched fields.
   editedSubjectUid?: string;
+  editedSubjectLabel?: string;
   editedPredicate?: string;
   editedObjectValue?: string;
+  editedObjectLabel?: string;
+  // ★ REQ-014-B B1 — fact_type 별 편집 필드.
+  //   ACTION 은 위 subject/predicate/object 로 커버되고, 아래는 MEASUREMENT
+  //   / CLAIM 폼이 emit 하는 v0.2 필드다. backend _coerce_fact_to_factnode
+  //   는 canonical_kwargs loop 로 이 필드들을 이미 흘려 넣고 있어 별도
+  //   endpoint 확장 없이 통과한다.
+  editedMetric?: string;
+  editedMeasurementValue?: number | null;
+  editedMeasurementUnit?: string;
+  editedAsOf?: string;
+  editedSpeakerUid?: string;
+  editedSpeakerLabel?: string;
+  editedSpeechAct?: string;
+  editedContentClaim?: string;
 }
 
 interface ObjectDecisionDraft {
@@ -134,8 +149,18 @@ export function DecideOverlay({
       action: FactAction;
       editedClaim?: string;
       editedSubjectUid?: string;
+      editedSubjectLabel?: string;
       editedPredicate?: string;
       editedObjectValue?: string;
+      editedObjectLabel?: string;
+      editedMetric?: string;
+      editedMeasurementValue?: number | null;
+      editedMeasurementUnit?: string;
+      editedAsOf?: string;
+      editedSpeakerUid?: string;
+      editedSpeakerLabel?: string;
+      editedSpeechAct?: string;
+      editedContentClaim?: string;
     },
   ) => {
     setFactDecisions((prev) => ({ ...prev, [uid]: next }));
@@ -179,11 +204,48 @@ export function DecideOverlay({
             if (d.editedSubjectUid !== undefined) {
               edited_metadata.subject_uid = d.editedSubjectUid;
             }
+            // ★ REQ-014-B B4 — subject 이름 반영. backend
+            //   _coerce_fact_to_factnode 의 meta.update() 지점에서
+            //   fact_summary 위에 덮여 lucid_facts.subject_label 문서
+            //   surface 로 저장된다. entity 대표명 rename 은 여전히
+            //   EntityNameEdit path (REQ-012-v2) 담당.
+            if (d.editedSubjectLabel !== undefined) {
+              edited_metadata.subject_label = d.editedSubjectLabel;
+            }
             if (d.editedPredicate !== undefined) {
               edited_metadata.predicate = d.editedPredicate;
             }
             if (d.editedObjectValue !== undefined) {
               edited_metadata.object_value = d.editedObjectValue;
+            }
+            if (d.editedObjectLabel !== undefined) {
+              edited_metadata.object_label = d.editedObjectLabel;
+            }
+            // MEASUREMENT layer (v0.2 step 2)
+            if (d.editedMetric !== undefined) {
+              edited_metadata.metric = d.editedMetric;
+            }
+            if (d.editedMeasurementValue !== undefined) {
+              edited_metadata.measurement_value = d.editedMeasurementValue;
+            }
+            if (d.editedMeasurementUnit !== undefined) {
+              edited_metadata.measurement_unit = d.editedMeasurementUnit;
+            }
+            if (d.editedAsOf !== undefined) {
+              edited_metadata.as_of = d.editedAsOf;
+            }
+            // CLAIM layer (v0.2 step 1)
+            if (d.editedSpeakerUid !== undefined) {
+              edited_metadata.speaker_uid = d.editedSpeakerUid;
+            }
+            if (d.editedSpeakerLabel !== undefined) {
+              edited_metadata.speaker_label = d.editedSpeakerLabel;
+            }
+            if (d.editedSpeechAct !== undefined) {
+              edited_metadata.speech_act = d.editedSpeechAct;
+            }
+            if (d.editedContentClaim !== undefined) {
+              edited_metadata.content_claim = d.editedContentClaim;
             }
           }
           return {
@@ -402,8 +464,18 @@ export function DecideOverlay({
                     action={decision.action}
                     editedClaim={decision.editedClaim}
                     editedSubjectUid={decision.editedSubjectUid}
+                    editedSubjectLabel={decision.editedSubjectLabel}
                     editedPredicate={decision.editedPredicate}
                     editedObjectValue={decision.editedObjectValue}
+                    editedObjectLabel={decision.editedObjectLabel}
+                    editedMetric={decision.editedMetric}
+                    editedMeasurementValue={decision.editedMeasurementValue}
+                    editedMeasurementUnit={decision.editedMeasurementUnit}
+                    editedAsOf={decision.editedAsOf}
+                    editedSpeakerUid={decision.editedSpeakerUid}
+                    editedSpeakerLabel={decision.editedSpeakerLabel}
+                    editedSpeechAct={decision.editedSpeechAct}
+                    editedContentClaim={decision.editedContentClaim}
                     onChange={(next) => onFactChange(uid, next)}
                     reviewMode={reviewMode}
                     spaceId={spaceId}
