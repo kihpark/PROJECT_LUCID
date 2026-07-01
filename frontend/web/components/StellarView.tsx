@@ -940,6 +940,11 @@ export function StellarView(props: StellarViewProps = {}) {
   // REQ-012-v1 — entity 종류 변경 / 병합 / 분리 후 그래프 갱신.
   // realLoadedRef 를 reset 하면 다음 effect tick 이 다시 loadRealStellarGraph
   // 를 부른다 (★ 새 색/형태/topology 가 즉시 반영).
+  //
+  // ★ REQ-012 UI 완성도 fix (PO 2026-07-01) — 저장 후 focused entity card 가
+  //   stale entity_type 을 계속 보여주는 문제 수정: refetch 완료 시점에
+  //   `focused` 상태를 fresh 그래프의 동일 id 노드로 재바인딩. 노드가 사라졌으면
+  //   (병합으로 흡수 등) focus 를 clear.
   const activeSpaceId = getCurrentSpace();
   const handleEntityChanged = () => {
     realLoadedRef.current = false;
@@ -947,7 +952,21 @@ export function StellarView(props: StellarViewProps = {}) {
       setRealLoading(true);
       const loader = props.realLoader ?? loadRealStellarGraph;
       loader()
-        .then((d) => setRealData(d))
+        .then((d) => {
+          setRealData(d);
+          // ★ Rebind focused node from fresh data so EntityCard reflects
+          //  the new entity_type / label / measurements immediately.
+          setFocused((prev) => {
+            if (!prev) return prev;
+            const fresh = d.nodes.find((n) => n.id === prev.id);
+            return fresh ?? null;
+          });
+          setSelected((prev) => {
+            if (!prev) return prev;
+            const fresh = d.nodes.find((n) => n.id === prev.id);
+            return fresh ?? null;
+          });
+        })
         .catch(() => setRealData(emptyStellarGraph()))
         .finally(() => setRealLoading(false));
     }
