@@ -251,7 +251,15 @@ describe('v2 entity-node branch (★ fix/stellar-cards-entity-node-compat)', () 
       '강재호',
     );
     const meta = screen.getByTestId('stellar-hover-card-entity-meta').textContent ?? '';
-    expect(meta).toContain('person');
+    // ★ REQ-014-C C1 (PO 2026-07-02) — entity_type 한국어 표시.
+    //   옛: raw "person" 노출. 신: entityTypeLabelKo("person") → "사람".
+    //   원본 토큰은 data-raw-entity-type 로 여전히 노출 (regression guard).
+    expect(meta).toContain('사람');
+    expect(meta).not.toContain('person');
+    const rawSpan = screen
+      .getByTestId('stellar-hover-card-entity-meta')
+      .querySelector('[data-raw-entity-type]');
+    expect(rawSpan?.getAttribute('data-raw-entity-type')).toBe('person');
     expect(meta).toContain('연결 3');
     // ★ regression guard — v2 entity 카드에 '(주체 없음)' 잔재가 없어야 한다.
     expect(container.textContent ?? '').not.toContain('(주체 없음)');

@@ -35,6 +35,11 @@
 
 import type { StellarNode } from '@/lib/syntheticGraph';
 import { predicateLabel } from '@/lib/predicateLabels';
+// ★ REQ-014-C C1 (PO 2026-07-02) — 호버 카드의 entity_type 을 한국어 표시.
+//   PO 리포트: "마우스 오버 정보 (예: organization) 를 한국어로".
+//   기존 EntityBody 는 raw token 을 그대로 노출 — displayNames 유틸을 통해
+//   "조직" 등 한국어 라벨로 표시한다. 라벨은 REQ-002 기준 소스와 동일.
+import { entityTypeLabelKo } from '@/lib/displayNames';
 
 const ACCENT = '#5EEAD4';
 const WHO_COLOR = '#5EEAD4';
@@ -322,7 +327,10 @@ function EntityBody({ fact }: { fact: StellarNode }) {
         data-testid="stellar-hover-card-entity-meta"
         style={{ color: TEXT_BODY, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}
       >
-        {entityType ? <span>{entityType}</span> : null}
+        {/* ★ REQ-014-C C1 (PO 2026-07-02) — 한국어 표시.
+         *   옛: raw entity_type 토큰 (예: "organization")
+         *   신: entityTypeLabelKo("organization") → "조직" */}
+        {entityType ? <span data-raw-entity-type={entityType}>{entityTypeLabelKo(entityType)}</span> : null}
         {factCounts ? (
           <>
             {entityType && degree !== null ? <br /> : null}

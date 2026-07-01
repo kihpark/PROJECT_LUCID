@@ -656,12 +656,28 @@ function SearchBar({
       // "...", whitespace, pure punctuation). Mirrors api.ts::isMeaningfulLabel
       // so RecallView 와 STELLAR SearchBar 가 같은 의미-없는 라벨 가드를
       //공유한다. 원칙 단위 — 특정 케이스 ("." / "라온프렌즈") 하드코딩 X.
-      // The check also covers subject + object so a node whose label is
-      // valid but whose only matchable surface text is meaningless does
-      // not surface either.
-      const primary = node.label ?? node.subject ?? node.object ?? '';
-      if (!isMeaningfulLabel(primary)) continue;
-      const hay = `${node.label} ${node.subject} ${node.object}`.toLowerCase();
+      //
+      // ★ REQ-014-C C3 (PO 2026-07-02) — 회귀 재발 근본 fix.
+      //   옛 primary = label ?? subject ?? object (첫 defined) → label 이
+      //   의미있어도 subject 가 "." 이면 화면에는 "." 만 보이는 케이스가
+      //   있었다 (V4 는 primary 만 검증 → 나머지 surface 는 통과).
+      //   신 정책: label / subject / object 각각을 개별 검증.
+      //     - 셋 다 부재 (undefined/null) 이거나 셋 다 무의미 → skip.
+      //     - 검색 haystack 은 의미있는 부분만 합쳐 substring 매치.
+      //     - 표시용 fallback (subject / object 대신 label) 도 SearchResult
+      //       버튼에서 별도 처리.
+      const label = node.label;
+      const subject = node.subject;
+      const object = node.object;
+      const labelOk = isMeaningfulLabel(label);
+      const subjectOk = isMeaningfulLabel(subject);
+      const objectOk = isMeaningfulLabel(object);
+      if (!labelOk && !subjectOk && !objectOk) continue;
+      const hayParts: string[] = [];
+      if (labelOk) hayParts.push(label!);
+      if (subjectOk) hayParts.push(subject!);
+      if (objectOk) hayParts.push(object!);
+      const hay = hayParts.join(' ').toLowerCase();
       if (!hay.includes(q)) continue;
       if (seen.has(node.id)) continue;
       seen.add(node.id);
@@ -756,11 +772,44 @@ function SearchBar({
                   e.currentTarget.style.borderColor = 'transparent';
                 }}
               >
-                <span style={{ color: ACCENT, fontWeight: 600 }}>
-                  {node.subject}
-                </span>
-                <span style={{ color: TEXT_DIM, margin: '0 4px' }}>·</span>
-                <span>{node.object}</span>
+                {/* ★ REQ-014-C C3 (PO 2026-07-02) — 표시 문자열도
+                 *  meaningful 필터. 옛 코드는 node.subject / node.object 를
+                 *  raw 로 노출 → v2 entity/claim 노드 (subject/object
+                 *  undefined) 는 "undefined · undefined" 로 표시되거나,
+                 *  legacy 노드에서 subject 값이 "." 일 때 dropdown 에
+                 *  "." 만 남았다. 이제 label / subject / object 중 의미
+                 *  있는 것 을 primary + secondary 로 재구성. */}
+                {(() => {
+                  const label = node.label;
+                  const subject = node.subject;
+                  const object = node.object;
+                  const primaryText = isMeaningfulLabel(label)
+                    ? label!
+                    : isMeaningfulLabel(subject)
+                    ? subject!
+                    : isMeaningfulLabel(object)
+                    ? object!
+                    : '';
+                  const secondaryText =
+                    isMeaningfulLabel(subject) && subject !== primaryText
+                      ? subject!
+                      : isMeaningfulLabel(object) && object !== primaryText
+                      ? object!
+                      : '';
+                  return (
+                    <>
+                      <span style={{ color: ACCENT, fontWeight: 600 }}>
+                        {primaryText}
+                      </span>
+                      {secondaryText ? (
+                        <>
+                          <span style={{ color: TEXT_DIM, margin: '0 4px' }}>·</span>
+                          <span>{secondaryText}</span>
+                        </>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </button>
             </li>
           ))}
@@ -965,16 +1014,28 @@ export function StellarView(props: StellarViewProps = {}) {
           setRealData(d);
           // ★ Rebind focused node from fresh data so EntityCard reflects
           //  the new entity_type / label / measurements immediately.
+          //
+          // ★ REQ-014-C C2 (PO 2026-07-02) — rebind 재발 방어 강화.
+          //   옛 로직은 fresh 노드 찾은 뒤 return fresh ?? null 로 setState
+          //   하지만, fresh 가 옛 focused 와 shallow-equal 인 경우 (같은
+          //   uid, 같은 entity_type 값이 우연히 재전송) React 는 참조
+          //   변경만 판정한다. 실제로는 항상 새 객체이므로 문제가 없어야
+          //   하지만, PO 리포트에서 반복 재발. 방어 목적:
+          //     (1) 명시적으로 { ...fresh } spread → 새 refs 강제.
+          //     (2) selected 도 동일 처리.
           setFocused((prev) => {
             if (!prev) return prev;
             const fresh = d.nodes.find((n) => n.id === prev.id);
-            if (!fresh) setFocusedPosition(null);
-            return fresh ?? null;
+            if (!fresh) {
+              setFocusedPosition(null);
+              return null;
+            }
+            return { ...fresh };
           });
           setSelected((prev) => {
             if (!prev) return prev;
             const fresh = d.nodes.find((n) => n.id === prev.id);
-            return fresh ?? null;
+            return fresh ? { ...fresh } : null;
           });
         })
         .catch(() => setRealData(emptyStellarGraph()))
@@ -1348,7 +1409,14 @@ export function StellarView(props: StellarViewProps = {}) {
       style={{
         position: 'relative',
         width: '100%',
-        height: 'calc(100vh - 64px)', // subtract AppShell header
+        // ★ REQ-014-C C0 (PO 2026-07-02) — AppShell 은 header 64px + main
+        //   + footer 를 100vh 안에 담아야 하지만 옛 코드는 header 만 뺐다.
+        //   → 총 shell 이 (100vh - 64) + 64 + ~40 = 100vh + 40 로 body 우측
+        //     스크롤바 발생.
+        //   REQ-014-C 는 footer 도 함께 뺀다. 정확 픽셀 (40px) 은 padding
+        //   14+14 + font 11 line + border 1 로 산출. footer 재디자인 시
+        //   AppShell 상수와 함께 갱신.
+        height: 'calc(100vh - 64px - 40px)',
         background: '#000',
         color: TEXT_PRIMARY,
         overflow: 'hidden',
