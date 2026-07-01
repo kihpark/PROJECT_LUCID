@@ -2,6 +2,11 @@
  * ★ L1 (STELLAR legend/shape/hover, PO 2026-06-29) — STELLAR LEGEND.
  * ★ fix/stellar-v1-v2-v4-legend-class (PO 2026-06-29) — V1 / V1+ / V1++ / V2
  *   동기화 fix.
+ * ★ 2026-07-01 (PO 재수정 verbatim: "박스 태그 제거 (어수선). WHAT 6 소분류
+ *   = 색(명도) + 형태(6종) + 라벨. 명도 차이는 눈에 약함 → 형태를 주 구분자로.
+ *   색은 보조. amber 계열이어도 형태로 한눈에 갈리게") — 옛 subBucketLabelKo
+ *   배지 render 폐기. 6 형태 (cube/sphere/diamond/octahedron/roundedSquare/
+ *   cone) 가 주 채널, amber 6 명도 는 보조 채널, 한국어 라벨 6.
  *
  * 위반 클래스 (★ PO verbatim):
  *   V1.  WHO/사람 vs unknown 시각 동일 → 양쪽 모두 sphere/teal 이라 분포
@@ -12,6 +17,8 @@
  *         즉시 파악할 수 없다.
  *   V2.  LEGEND 안내와 ForceGraph3D 의 노드 표시가 따로 살아 있음 →
  *        "WHERE = 빨간 구 + 핀셋" 인데 실제는 "회색 원형뿔" — UX 신뢰 깨짐.
+ *   ★ V3 (2026-07-01). 배지 (자원/개념/행위/지식/사건/지표) render 어수선 →
+ *        PO 재수정: 배지 폐기, 형태를 주 구분자, 색은 보조.
  *
  * Fix 원칙:
  *   • LEGEND_SPECS 단일 source (stellarLegendShapes.ts). 이 컴포넌트 와
@@ -19,6 +26,7 @@
  *     을 호출하므로 V2 의 안내 vs 실제 불일치가 구조적으로 발생할 수 없다.
  *   • props.nodes 로 현재 visible 노드를 받아 V1++ 카운트 계산.
  *   • unknown = 별도 row (작은 점 + 회색). person 과 시각 충돌 0.
+ *   • ★ 2026-07-01 — 배지 render 0. 형태 6종 = 주 구분자. 색·라벨 = 보조.
  */
 'use client';
 
@@ -278,31 +286,11 @@ export function StellarLegend(props: StellarLegendProps = {}): React.ReactElemen
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {spec.label}
                 </span>
-                {/* ★ M-Dogfood-C (PO 2026-07-01) — WHAT 묶음의 cube/sphere/
-                 *  diamond 형태가 WHO 묶음과 겹치는 문제 보강. WHAT 의 sub-
-                 *  bucket (자원/개념/행위) 을 한국어 한 글자 배지로 LEGEND
-                 *  옆에 노출 → 사용자가 "같은 cube 라도 amber + 자원 배지면
-                 *  자원, cyan 이면 조직" 으로 두 채널 (색·배지) 로 확실히
-                 *  구분할 수 있다. WHO/WHERE/EVENT/CLAIM/unknown 은 미노출. */}
-                {spec.subBucketLabelKo ? (
-                  <span
-                    data-testid={`stellar-legend-subbucket-${spec.key}`}
-                    data-sub-bucket-ko={spec.subBucketLabelKo}
-                    style={{
-                      flexShrink: 0,
-                      fontSize: 9,
-                      letterSpacing: '0.04em',
-                      color: spec.color,
-                      border: `1px solid ${spec.color}`,
-                      borderRadius: 3,
-                      padding: '1px 4px',
-                      marginRight: 2,
-                      opacity: 0.82,
-                    }}
-                  >
-                    {spec.subBucketLabelKo}
-                  </span>
-                ) : null}
+                {/* ★ 2026-07-01 (PO 재수정 verbatim: "박스 태그 제거 (어수선)").
+                 *  이전 M-Dogfood-C 결정 (subBucketLabelKo 배지 노출) 폐기.
+                 *  구분 채널 = 형태 6종 (주) + amber 6 명도 (보조) + 라벨 6.
+                 *  배지 render 0. spec.subBucketLabelKo 는 데이터 유지 하지만
+                 *  DOM 노출 X — 회귀 시 재활성화 대비 (data 는 lib 에 그대로). */}
                 {/* ★ V1++ — per-category count. Always rendered (even when 0)
                  *  so the dashboard "지금 분포 = 0" 도 명시적으로 보인다.
                  *  data-testid 는 카운트 만 추출 가능하게 분리. */}

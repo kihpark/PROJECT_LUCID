@@ -58,7 +58,11 @@ export interface LegendSpec {
    *  ★ 2026-07-01 확장: PO "자원/개념/행위/지식/사건/지표 전부 구분되게. 일부
    *  만 태그 X" — WHAT 6 소분류 모두 subBucketLabelKo 배지 노출 (자원/개념/
    *  행위/지식/사건/지표). WHO / WHERE / CLAIM / unknown 은 undefined
-   *  (배지 미노출). */
+   *  (배지 미노출).
+   *  ★ 2026-07-01 (PO 재수정 verbatim: "박스 태그 제거 (어수선). 형태를 주
+   *  구분자로") — data 필드 유지 하지만 StellarLegend 에서 render X. 회귀 시
+   *  다시 노출하고 싶을 때를 위한 data 는 lib 에 그대로 둔다 (a11y screen
+   *  reader 등 향후 재활용 여지). */
   subBucketLabelKo?: string;
   /** Korean label shown in the legend row. */
   label: string;

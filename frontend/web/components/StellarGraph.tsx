@@ -1354,33 +1354,42 @@ export function StellarGraph(props: StellarGraphProps) {
         opacity: 0.92,
       });
       let geometry: THREE.BufferGeometry;
+      // ★ 2026-07-01 (PO 재수정 verbatim: "박스 태그 제거 + 형태 주 구분자.
+      //   명도 차이는 눈에 약함 → 형태를 주 구분자로. amber 계열이어도 형태로
+      //   한눈에 갈리게") — 6 shape 시각 분리를 크게 강화.
+      //   특히 diamond vs octahedron 은 옛 subdivision 미세 차이 → 시각 명확
+      //   차이 (aspect ratio + subdivision + orientation) 로 변경.
+      let elongateY = 1.0; // shape-specific vertical stretch (see diamond).
       switch (shape) {
         case 'cube':
+          // ★ 자원 — 정육면체. 여섯 면 명확 각도.
           geometry = new THREE.BoxGeometry(radius * 1.6, radius * 1.6, radius * 1.6);
           break;
         case 'diamond': {
-          // ★ diamond = octahedron subdivision 1 (마름모의 3D 형태, 뾰족한 축).
-          //   knowledge 의 octahedron 과 시각 구분되도록 subdivision 0 유지
-          //   (더 각진 마름모).
-          geometry = new THREE.OctahedronGeometry(radius * 1.1, 0);
+          // ★ 행위 (task) — 세로로 늘어난 얇은 마름모 (octahedron subdivision 0
+          //   + Y 축 elongate 1.7). octahedron 과 형태 이름은 같은 계열이지만
+          //   aspect ratio 로 완전히 다른 실루엣 (얇고 세로로 긴 다이아).
+          geometry = new THREE.OctahedronGeometry(radius * 1.05, 0);
+          elongateY = 1.7;
           break;
         }
         case 'octahedron': {
-          // ★ 2026-07-01 (PO WHAT 6 분리) — 지식 (knowledge). diamond 와 시각
-          //   차이를 크게 두려고 subdivision 1 (구에 더 가까운 다면체) + 살짝
-          //   더 큰 반경. WHAT/task 의 diamond 와 형태·명도 모두 다르다.
-          geometry = new THREE.OctahedronGeometry(radius * 1.25, 1);
+          // ★ 지식 (knowledge) — 팔면체 (subdivision 1, 구에 가까운 다면체).
+          //   가로세로 균등, 살짝 더 큰 반경. diamond 의 얇고 세로 긴 실루엣
+          //   과 시각 정반대 — 구에 가까운 균등 다면체.
+          geometry = new THREE.OctahedronGeometry(radius * 1.35, 1);
           break;
         }
         case 'roundedSquare': {
-          // Tetrahedron — distinct from sphere/cube/diamond, evokes "사건".
-          geometry = new THREE.TetrahedronGeometry(radius * 1.2, 0);
+          // ★ 사건 (event) — 사면체 (Tetrahedron). 삼각뿔 실루엣 — cube 의
+          //   6면·diamond 의 얇음·sphere 의 곡면 어느 것과도 명확 다름.
+          geometry = new THREE.TetrahedronGeometry(radius * 1.4, 0);
           break;
         }
         case 'cone': {
-          // ★ 2026-07-01 (PO WHAT 6 분리) — 지표 (metric). pin 과 다른 orientation
-          //   (tip up = 상승 축 metaphor). pin 은 rotation.z = π 로 tip down.
-          geometry = new THREE.ConeGeometry(radius * 0.85, radius * 2.0, 16);
+          // ★ 지표 (metric) — 뾰족한 원뿔 (tip up, 상승 축 metaphor).
+          //   pin 과 orientation 이 반대 (pin 은 tip down).
+          geometry = new THREE.ConeGeometry(radius * 0.95, radius * 2.4, 24);
           break;
         }
         case 'pin': {
@@ -1398,19 +1407,31 @@ export function StellarGraph(props: StellarGraphProps) {
         case 'sphere':
         case 'circle':
         default:
-          geometry = new THREE.SphereGeometry(radius, 16, 16);
+          // ★ 개념 (concept) — 완전한 구. 다른 5 형태 와 곡면 채널로 즉시 구분.
+          geometry = new THREE.SphereGeometry(radius, 20, 20);
           break;
       }
       const mesh = new THREE.Mesh(geometry, material);
+      // ★ 2026-07-01 — diamond 는 Y 축 세로로 늘려 얇고 긴 마름모 실루엣.
+      //   octahedron 은 균등 (elongateY = 1.0). scale 채널로 aspect ratio
+      //   차이를 명확히 준다.
+      if (elongateY !== 1.0) mesh.scale.set(1.0, elongateY, 1.0);
       // diamond / roundedSquare 가 random orientation 보다 정직한 표지가
       // 되도록 살짝 회전 — 동일 entity_type 끼리는 같은 방향을 유지하므로
       // 사용자가 형태를 학습하기 쉽다.
       if (shape === 'diamond') mesh.rotation.y = Math.PI / 4;
       // ★ 2026-07-01 WHAT-6 — 지식 octahedron 은 diamond 와 다른 축으로 회전
-      //   시켜 시각 구분을 강조 (subdivision 차이 + orientation 차이).
+      //   시켜 시각 구분을 강조 (aspect ratio 차이 + subdivision 차이 +
+      //   orientation 차이 = 3 채널 분리).
       if (shape === 'octahedron') {
         mesh.rotation.x = Math.PI / 6;
         mesh.rotation.z = Math.PI / 6;
+      }
+      // ★ 2026-07-01 — roundedSquare (사건, Tetrahedron) orientation 고정으로
+      //   sphere/cube/diamond 어느 것과도 실루엣이 겹치지 않게 회전.
+      if (shape === 'roundedSquare') {
+        mesh.rotation.x = Math.PI / 8;
+        mesh.rotation.y = Math.PI / 4;
       }
       if (shape === 'pin') mesh.rotation.z = Math.PI; // cone tip down
       // ★ 2026-07-01 WHAT-6 — 지표 cone 은 tip-up 기본 orientation 유지 (수치·
