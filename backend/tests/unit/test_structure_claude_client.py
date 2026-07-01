@@ -9,7 +9,9 @@ import pytest
 from api.structure.claude_client import (
     _drop_facts_without_subject,
     _parse_json_safely,
+    _repair_truncated_json,
     _strip_json_fences,
+    _validate_with_partial_recovery,
     decompose_via_claude,
 )
 
@@ -257,3 +259,358 @@ def test_decompose_naver_mnews_payload_with_null_subjects_recovers_facts(monkeyp
     assert len(result.facts) == 2
     surviving_uids = {f.uid for f in result.facts}
     assert surviving_uids == {"fn-1", "fn-3"}
+
+
+# ---------------------------------------------------------------------------
+# empty-extract-parsing-robust (PO 2026-07-02):
+#   Fix A: legacy link_type ('located_in' etc.) normalization
+#   Fix B: truncated JSON envelope recovery (braces=95/93 symptom)
+#   Fix C: partial recovery — one bad item drops just that item
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_link_type_located_in_normalized_to_describes_state():
+    """PO log verbatim: LLM emitted link_type='located_in' which isn't in
+    the 5-enum vocabulary. Pre-fix, the whole StructureResult envelope
+    was rejected via pydantic literal_error and the capture ended with
+    facts=0. Post-fix, we remap the legacy alias to 'describes_state'
+    and the envelope validates cleanly."""
+    from api.structure.models import StructureFactObjectLink
+
+    link = StructureFactObjectLink.model_validate({
+        "fact_uid": "fn-1",
+        "object_uid": "obj-1",
+        "link_type": "located_in",   # legacy alias — PO 2026-07-02 root cause
+        "properties": {},
+    })
+    assert link.link_type == "describes_state"
+
+
+def test_legacy_link_type_part_of_normalized_to_involves():
+    from api.structure.models import StructureFactObjectLink
+
+    link = StructureFactObjectLink.model_validate({
+        "fact_uid": "fn-1",
+        "object_uid": "obj-1",
+        "link_type": "part_of",
+        "properties": {},
+    })
+    assert link.link_type == "involves"
+
+
+def test_legacy_ff_link_type_refutes_normalized_to_contradicts():
+    from api.structure.models import StructureFactFactLink
+
+    link = StructureFactFactLink.model_validate({
+        "from_uid": "fn-1",
+        "to_uid": "fn-2",
+        "link_type": "refutes",
+    })
+    assert link.link_type == "contradicts"
+
+
+def test_unknown_link_type_still_fails():
+    """Non-mappable link_type still raises — partial recovery drops
+    just that link but keeps the surrounding facts."""
+    from pydantic import ValidationError
+
+    from api.structure.models import StructureFactObjectLink
+
+    with pytest.raises(ValidationError):
+        StructureFactObjectLink.model_validate({
+            "fact_uid": "fn-1",
+            "object_uid": "obj-1",
+            "link_type": "not_a_real_link_type_xyz",
+            "properties": {},
+        })
+
+
+# --- Fix B: truncated JSON recovery ---
+
+
+def test_repair_truncated_json_recovers_partial_envelope():
+    """PO log verbatim: braces=95/93 (unbalanced — LLM ran out of tokens
+    mid-response). Pre-fix, `_extract_outer_json` returned None because
+    the outer '{' never closed → whole envelope lost. Post-fix, we walk
+    to the last complete top-level value and close the envelope."""
+    # Simulate LLM truncated after emitting objects + first fact,
+    # while writing the second fact's `claim` field.
+    truncated = (
+        '```json\n'
+        '{\n'
+        '  "objects": [\n'
+        '    {"uid": "obj-1", "class": "person", "name": "Alice"}\n'
+        '  ],\n'
+        '  "facts": [\n'
+        '    {"uid": "fn-1", "type": "proposition", "claim": "c1",\n'
+        '     "subject_uid": "obj-1", "predicate": "p",\n'
+        '     "object_value": "obj-1", "fact_type": "claim"}\n'
+        '  ],\n'
+        '  "fact_object_links": [\n'
+        '    {"fact_uid": "fn-1", "object_uid": "obj-1", "link_type"'
+        # ← truncated here mid-string
+    )
+
+    parsed = _parse_json_safely(truncated)
+    assert parsed is not None, "truncation repair should salvage the envelope"
+    assert isinstance(parsed, dict)
+    # objects + facts survive because the snapshot at their closing ']'
+    # is the last complete top-level value.
+    assert "objects" in parsed
+    assert "facts" in parsed
+    assert len(parsed["objects"]) == 1
+    assert len(parsed["facts"]) == 1
+
+
+def test_repair_truncated_json_direct_helper():
+    """`_repair_truncated_json` invoked directly — verify it snapshots
+    at the closing ']' of `facts` and returns a partial dict."""
+    truncated = (
+        '{"objects": [{"uid": "o1"}], "facts": [{"uid": "f1"}], '
+        '"fact_object_links": [{"fact_uid": "f1"'   # truncated mid-list
+    )
+    parsed = _repair_truncated_json(truncated)
+    assert parsed is not None
+    assert parsed.get("objects") == [{"uid": "o1"}]
+    assert parsed.get("facts") == [{"uid": "f1"}]
+
+
+def test_repair_truncated_json_returns_none_when_nothing_recoverable():
+    """No top-level value ever closed: nothing to recover."""
+    # Only the opening brace, no closers reach depth 1.
+    unrecoverable = '{"facts": [{"uid": "f1"'
+    assert _repair_truncated_json(unrecoverable) is None
+
+
+def test_repair_truncated_json_handles_leading_code_fence():
+    """LLM wrapped the truncated JSON in ```json ... — the repair
+    should skip the fence header (it finds first '{')."""
+    with_fence = (
+        '```json\n'
+        '{"objects": [{"uid": "o1"}], "facts": []}'   # complete, no truncation
+    )
+    # Even though this fence isn't truncated, `_parse_json_safely`
+    # should extract via _extract_outer_json first; test that the
+    # repair path *also* works in isolation.
+    parsed = _repair_truncated_json(with_fence)
+    assert parsed is not None
+    assert parsed["objects"] == [{"uid": "o1"}]
+
+
+# --- Fix C: partial recovery ---
+
+
+def test_partial_recovery_bad_link_type_drops_only_the_link():
+    """★ THE CENTRAL FIX ★ — PO log root cause 1 in miniature:
+    envelope has 3 valid facts + 1 link with invalid `link_type`.
+    Pre-fix: whole envelope rejected → 0 facts.
+    Post-fix: bad link dropped, 3 facts survive."""
+    envelope = {
+        "objects": [
+            {"uid": "obj-1", "class": "person", "name": "Alice"},
+        ],
+        "facts": [
+            {"uid": "fn-1", "type": "proposition", "claim": "c1",
+             "subject_uid": "obj-1", "predicate": "p",
+             "object_value": "obj-1", "fact_type": "claim"},
+            {"uid": "fn-2", "type": "proposition", "claim": "c2",
+             "subject_uid": "obj-1", "predicate": "p",
+             "object_value": "obj-1", "fact_type": "claim"},
+            {"uid": "fn-3", "type": "proposition", "claim": "c3",
+             "subject_uid": "obj-1", "predicate": "p",
+             "object_value": "obj-1", "fact_type": "claim"},
+        ],
+        "fact_object_links": [
+            {"fact_uid": "fn-1", "object_uid": "obj-1",
+             "link_type": "involves", "properties": {}},
+            # This link's type is a legitimate-looking word the LLM invented
+            # that doesn't map to any legacy alias — should be DROPPED,
+            # not fail the envelope.
+            {"fact_uid": "fn-2", "object_uid": "obj-1",
+             "link_type": "totally_bogus_link_type_xyz", "properties": {}},
+            {"fact_uid": "fn-3", "object_uid": "obj-1",
+             "link_type": "involves", "properties": {}},
+        ],
+        "fact_fact_links": [],
+        "disambiguation_candidates": [],
+        "extraction_status": "success",
+        "failure_reason": None,
+    }
+    result = _validate_with_partial_recovery(envelope)
+    assert result.extraction_status == "success"
+    assert len(result.facts) == 3
+    # Only the good links survive; the bogus one is dropped.
+    assert len(result.fact_object_links) == 2
+
+
+def test_partial_recovery_bad_fact_shape_drops_only_the_fact():
+    """A single malformed fact (missing required 'claim') dropped;
+    the other facts survive."""
+    envelope = {
+        "objects": [{"uid": "obj-1", "class": "person", "name": "Alice"}],
+        "facts": [
+            {"uid": "fn-1", "type": "proposition", "claim": "c1",
+             "subject_uid": "obj-1", "predicate": "p",
+             "object_value": "obj-1", "fact_type": "claim"},
+            # Missing 'claim' — required.
+            {"uid": "fn-bad", "type": "proposition",
+             "subject_uid": "obj-1", "predicate": "p",
+             "object_value": "obj-1", "fact_type": "claim"},
+            {"uid": "fn-2", "type": "proposition", "claim": "c2",
+             "subject_uid": "obj-1", "predicate": "p",
+             "object_value": "obj-1", "fact_type": "claim"},
+        ],
+        "fact_object_links": [],
+        "fact_fact_links": [],
+        "disambiguation_candidates": [],
+        "extraction_status": "success",
+        "failure_reason": None,
+    }
+    result = _validate_with_partial_recovery(envelope)
+    assert result.extraction_status == "success"
+    assert len(result.facts) == 2
+    surviving = {f.uid for f in result.facts}
+    assert surviving == {"fn-1", "fn-2"}
+
+
+def test_partial_recovery_normalized_legacy_link_type_end_to_end():
+    """Fix A + Fix C together: envelope with `located_in` link now
+    validates (Fix A remaps it) and appears in the result."""
+    envelope = {
+        "objects": [{"uid": "obj-1", "class": "location", "name": "Seoul"}],
+        "facts": [
+            {"uid": "fn-1", "type": "proposition", "claim": "c1",
+             "subject_uid": "obj-1", "predicate": "p",
+             "object_value": "obj-1", "fact_type": "claim"},
+        ],
+        "fact_object_links": [
+            {"fact_uid": "fn-1", "object_uid": "obj-1",
+             "link_type": "located_in", "properties": {}},
+        ],
+        "fact_fact_links": [],
+        "disambiguation_candidates": [],
+        "extraction_status": "success",
+        "failure_reason": None,
+    }
+    result = _validate_with_partial_recovery(envelope)
+    assert result.extraction_status == "success"
+    assert len(result.facts) == 1
+    assert len(result.fact_object_links) == 1
+    # Remapped to 'describes_state'.
+    assert result.fact_object_links[0].link_type == "describes_state"
+
+
+def test_partial_recovery_missing_extraction_status_infers_success_when_facts_present():
+    """LLM omits `extraction_status` but emits facts — we infer success."""
+    envelope = {
+        "objects": [{"uid": "obj-1", "class": "person", "name": "Alice"}],
+        "facts": [
+            {"uid": "fn-1", "type": "proposition", "claim": "c1",
+             "subject_uid": "obj-1", "predicate": "p",
+             "object_value": "obj-1", "fact_type": "claim"},
+        ],
+        "fact_object_links": [],
+        "fact_fact_links": [],
+        "disambiguation_candidates": [],
+        # extraction_status omitted!
+    }
+    result = _validate_with_partial_recovery(envelope)
+    assert result.extraction_status == "success"
+    assert len(result.facts) == 1
+
+
+def test_partial_recovery_end_to_end_via_decompose(monkeypatch):
+    """The full PO reproduction: LLM response wrapped in ```json fence,
+    contains one link with `located_in`, and one fact missing `claim`.
+    Pre-fix: facts=0. Post-fix: valid facts + valid links survive."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+
+    fake_payload = {
+        "objects": [
+            {"uid": "obj-1", "class": "person", "name": "Alice"},
+            {"uid": "obj-2", "class": "location", "name": "Seoul"},
+        ],
+        "facts": [
+            {"uid": "fn-1", "type": "proposition", "claim": "Alice is in Seoul.",
+             "subject_uid": "obj-1", "predicate": "is_in",
+             "object_value": "obj-2", "fact_type": "claim"},
+            # Malformed — missing claim.
+            {"uid": "fn-bad", "type": "proposition",
+             "subject_uid": "obj-1", "predicate": "x",
+             "object_value": "obj-2", "fact_type": "claim"},
+            {"uid": "fn-2", "type": "proposition", "claim": "Alice founded Acme.",
+             "subject_uid": "obj-1", "predicate": "founded",
+             "object_value": "obj-2", "fact_type": "claim"},
+        ],
+        "fact_object_links": [
+            {"fact_uid": "fn-1", "object_uid": "obj-2",
+             # PO's log verbatim: LLM emitted 'located_in'.
+             "link_type": "located_in", "properties": {}},
+            {"fact_uid": "fn-2", "object_uid": "obj-2",
+             "link_type": "involves", "properties": {}},
+        ],
+        "fact_fact_links": [],
+        "disambiguation_candidates": [],
+        "extraction_status": "success",
+        "failure_reason": None,
+    }
+    # Wrap in a ```json fence as the LLM did.
+    fenced = f"```json\n{json.dumps(fake_payload, ensure_ascii=False)}\n```"
+
+    fake_resp = MagicMock()
+    fake_resp.content = [MagicMock(type="text", text=fenced)]
+    fake_resp.model = "claude-sonnet-4-5"
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = fake_resp
+
+    with patch("anthropic.Anthropic", return_value=fake_client):
+        result = decompose_via_claude("Alice is in Seoul. Alice founded Acme.")
+
+    assert result.extraction_status == "success"
+    # 2 valid facts survive (fn-bad dropped).
+    assert len(result.facts) == 2
+    surviving = {f.uid for f in result.facts}
+    assert surviving == {"fn-1", "fn-2"}
+    # Both links survive: located_in was remapped, involves is native.
+    assert len(result.fact_object_links) == 2
+    link_types = {l.link_type for l in result.fact_object_links}
+    assert link_types == {"describes_state", "involves"}
+
+
+def test_partial_recovery_truncated_response_end_to_end(monkeypatch):
+    """LLM ran out of tokens mid-response. Pre-fix: `braces=95/93`
+    logged, malformed_llm_output returned, facts=0. Post-fix: repair
+    walks to last complete top-level value and salvages facts."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+
+    # Truncated payload: fence + valid objects + valid facts, then
+    # cut off mid-fact_object_links.
+    truncated = (
+        '```json\n'
+        '{\n'
+        '  "objects": [\n'
+        '    {"uid": "obj-1", "class": "person", "name": "Alice"}\n'
+        '  ],\n'
+        '  "facts": [\n'
+        '    {"uid": "fn-1", "type": "proposition", "claim": "c1",\n'
+        '     "subject_uid": "obj-1", "predicate": "p",\n'
+        '     "object_value": "obj-1", "fact_type": "claim"}\n'
+        '  ],\n'
+        '  "fact_object_links": [\n'
+        '    {"fact_uid": "fn-1", "object_uid": "obj-1", "link_type'
+        # ← truncated
+    )
+
+    fake_resp = MagicMock()
+    fake_resp.content = [MagicMock(type="text", text=truncated)]
+    fake_resp.model = "claude-sonnet-4-5"
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = fake_resp
+
+    with patch("anthropic.Anthropic", return_value=fake_client):
+        result = decompose_via_claude("some text")
+
+    # Post-fix: facts survive even though the tail was truncated.
+    assert result.extraction_status == "success"
+    assert len(result.facts) == 1
+    assert result.facts[0].uid == "fn-1"

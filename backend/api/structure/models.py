@@ -23,7 +23,7 @@ import logging
 import re
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from api.models.base import UID, LucidBaseModel
 from api.models.facts import FactType
@@ -82,6 +82,47 @@ def _is_entity_id_shape(value: str | None) -> bool:
     if _UUID_LIKE_RE_MODELS.match(bare):
         return True
     return False
+
+# empty-extract-parsing-robust (PO 2026-07-02): legacy link_type aliases.
+# Kept at module level (not class body) because Pydantic v2 treats
+# underscore-prefixed class attributes as ModelPrivateAttr descriptors,
+# which shadow plain dicts and break `cls._LEGACY_..._MAP.get(...)`.
+# Rationale: LLM occasionally emits alternative link_type words that
+# aren't in our 5- / 7-item enums; the maps collapse them into the
+# closest supported value BEFORE Pydantic's Literal validation runs.
+# Non-mappable values still fail so partial recovery in claude_client
+# can drop just that link (not the surrounding facts).
+_LEGACY_FACT_OBJECT_LINK_MAP: dict[str, str] = {
+    "located_in": "describes_state",     # spatial state
+    "part_of": "involves",
+    "member_of": "involves",
+    "contains": "involves",
+    "has_part": "involves",
+    "references": "addresses",
+    "mentions": "addresses",
+    "about": "addresses",
+    "describes": "describes_state",
+    "has_property": "asserts_property",
+    "uses_tool": "uses",
+}
+
+_LEGACY_FACT_FACT_LINK_MAP: dict[str, str] = {
+    "refutes": "contradicts",
+    "opposes": "contradicts",
+    "elaborates": "interprets",
+    "explains": "interprets",
+    "quotes": "derived_from",
+    "cites": "derived_from",
+    "references": "derived_from",
+    "instance_of": "example_of",
+    "example": "example_of",
+    "replaces": "supersedes",
+    "supercedes": "supersedes",   # common spelling variant
+    "supports_claim": "supports",
+    "negation": "negates",
+    "denies": "negates",
+}
+
 
 ExtractionStatus = Literal["success", "no_facts_found"]
 FailureReason = Literal[
@@ -286,6 +327,30 @@ class StructureFactObjectLink(LucidBaseModel):
     ]
     properties: dict[str, Any] = Field(default_factory=dict)
 
+    # empty-extract-parsing-robust (PO 2026-07-02): normalize legacy
+    # link_type aliases (see `_LEGACY_FACT_OBJECT_LINK_MAP` at module
+    # level for the mapping table + rationale). The LLM occasionally
+    # emits alternative names like `located_in` / `part_of` / `references`
+    # that aren't in the 5-enum vocabulary; pre-fix, one such link
+    # tanked the ENTIRE StructureResult envelope and the capture ended
+    # with facts=0 ("빈 추출"). Non-mappable values still fail so
+    # partial recovery in claude_client drops just that link.
+    @field_validator("link_type", mode="before")
+    @classmethod
+    def _normalize_legacy_link_type(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        bare = value.strip().lower()
+        mapped = _LEGACY_FACT_OBJECT_LINK_MAP.get(bare)
+        if mapped is not None:
+            _log.info(
+                "Structure link_type '%s' remapped to '%s' (legacy alias — "
+                "LLM did not use the 5-enum vocabulary; partial recovery)",
+                value, mapped,
+            )
+            return mapped
+        return value
+
 
 class StructureFactFactLink(LucidBaseModel):
     """One Fact -> Fact edge (7 link types incl. NEGATES from DCR-001).
@@ -314,6 +379,24 @@ class StructureFactFactLink(LucidBaseModel):
         "supersedes",
         "negates",
     ]
+
+    # empty-extract-parsing-robust (PO 2026-07-02): same rationale as
+    # StructureFactObjectLink — normalize fact -> fact legacy aliases
+    # (see `_LEGACY_FACT_FACT_LINK_MAP` at module level).
+    @field_validator("link_type", mode="before")
+    @classmethod
+    def _normalize_legacy_ff_link_type(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        bare = value.strip().lower()
+        mapped = _LEGACY_FACT_FACT_LINK_MAP.get(bare)
+        if mapped is not None:
+            _log.info(
+                "Structure fact-fact link_type '%s' remapped to '%s' "
+                "(legacy alias)", value, mapped,
+            )
+            return mapped
+        return value
 
 
 class StructureDisambiguation(LucidBaseModel):
