@@ -30,7 +30,8 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHomeBrief } from '@/lib/useHomeBrief';
 import { useAuthMe } from '@/lib/useAuthMe';
-import { LUCID_VERSION } from '@/lib/version';
+// REQ-014-A (PO 2026-07-02): LUCID_VERSION removed — home-version-footer
+// deleted; the AppShell footer is now the single source of the version chip.
 import type { HomeBrief } from '@/lib/types';
 import type { MeResponse } from '@/lib/api';
 import {
@@ -152,8 +153,12 @@ function GreetingH1({ name }: { name: string }) {
 }
 
 /** feat/hearth-oracle-merge — "BE LUCID." brand line. Lives ABOVE the
- * greeting; intentionally small so the greeting reads as the visual
- * subject. Constant — never time-of-day branched. */
+ * greeting. Constant — never time-of-day branched.
+ *
+ * ★ REQ-014-A (PO 2026-07-02): 폰트 크기 12 → 24 로 키워 존재감 확보. mono +
+ * uppercase 는 유지. 이전 크기는 "존재감이 없다" 는 피드백. 24 는 greeting
+ * H1 (44) 보다는 작아 subject 관계는 유지된다.
+ */
 function BrandLine() {
   return (
     <p
@@ -162,7 +167,8 @@ function BrandLine() {
         margin: 0,
         marginBottom: 12,
         fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        fontSize: 12,
+        fontSize: 24,
+        textTransform: 'uppercase',
         letterSpacing: '0.18em',
         color: `color-mix(in oklab, ${ACCENT} 75%, #6b7d82)`,
         textAlign: 'center',
@@ -803,12 +809,27 @@ function ColdEmptyLine() {
         textAlign: 'center',
       }}
     >
-      당신의 그래프는 아직 비어 있습니다. 첫 사실을 캡처하면 여기서 살아납니다.
+      {/* ★ REQ-014-A (PO 2026-07-02): 이전 "당신의 그래프는 아직 비어 있습니다.
+       *   첫 사실을 캡처하면 여기서 살아납니다." → 옵션 A (확장 설치 + 첫
+       *   문장) 로 교체. 온보딩 3단계와의 어조를 맞추고 CTA 로 자연스럽게
+       *   유도한다. */}
+      확장을 설치하고 첫 문장을 담아보세요.
     </p>
   );
 }
 
+/**
+ * ★ REQ-014-A (PO 2026-07-02) — ColdCTA 재설계.
+ *
+ * 이전: "첫 사실 캡처하기 →" 텍스트 + href="#" (죽은 링크). PO 는 "눌러도
+ * 목적 불명" 이라고 지적.
+ *
+ * 신규: "확장 설치하기 →" — Chrome Web Store 링크 (아직 상장 안 됐으므로)
+ * 로컬 설치 안내 modal 을 열어 unpacked extension 로드 방법을 3단계로
+ * 안내한다. Chrome Web Store 준비되면 modal 내부의 링크만 교체하면 된다.
+ */
 function ColdCTA() {
+  const [modalOpen, setModalOpen] = useState(false);
   return (
     <div
       style={{
@@ -818,9 +839,10 @@ function ColdCTA() {
         marginTop: 30,
       }}
     >
-      <a
+      <button
+        type="button"
         data-testid="home-empty-cta"
-        href="#"
+        onClick={() => setModalOpen(true)}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -832,11 +854,13 @@ function ColdCTA() {
           borderRadius: 13,
           padding: '15px 24px',
           boxShadow: `0 0 32px color-mix(in oklab, ${ACCENT} 26%, transparent)`,
-          textDecoration: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
         }}
       >
-        첫 사실 캡처하기 →
-      </a>
+        확장 설치하기 →
+      </button>
       <p
         style={{
           marginTop: 12,
@@ -848,10 +872,136 @@ function ColdCTA() {
       >
         브라우저 확장을 설치하면 웹·뉴스·이미지에서 바로 캡처할 수 있습니다.
       </p>
+      {modalOpen ? (
+        <ExtensionInstallModal onClose={() => setModalOpen(false)} />
+      ) : null}
     </div>
   );
 }
 
+/**
+ * ★ REQ-014-A (PO 2026-07-02) — 로컬 확장 설치 안내 modal.
+ *
+ * Chrome Web Store 상장 전까지의 임시 안내. 상장 완료 후에는 아래의 3-step
+ * 로컬 안내를 store 링크 하나로 교체하면 된다 (data-testid 는 유지 권장).
+ */
+function ExtensionInstallModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      data-testid="home-extension-install-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="확장 설치 안내"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(2, 6, 8, 0.72)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#0b1215',
+          border: `1px solid ${CARD_BORDER}`,
+          borderRadius: 18,
+          padding: 28,
+          maxWidth: 480,
+          width: '100%',
+          color: TEXT_BODY,
+          boxShadow: `0 20px 60px rgba(0,0,0,0.5)`,
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 18,
+            fontWeight: 600,
+            color: TEXT_H1,
+          }}
+        >
+          Lucid 확장 설치
+        </h2>
+        <p
+          style={{
+            marginTop: 8,
+            marginBottom: 20,
+            fontSize: 13,
+            color: TEXT_DIM,
+            lineHeight: 1.6,
+          }}
+        >
+          Chrome Web Store 상장 전 임시 안내입니다. 아래 3단계로 unpacked 확장을
+          로드해 주세요.
+        </p>
+        <ol
+          data-testid="home-extension-install-steps"
+          style={{
+            margin: 0,
+            paddingLeft: 22,
+            fontSize: 14,
+            lineHeight: 1.75,
+            color: TEXT_BODY,
+          }}
+        >
+          <li>
+            브라우저 주소창에{' '}
+            <code
+              style={{
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                fontSize: 12,
+                background: '#0e1a1c',
+                padding: '1px 6px',
+                borderRadius: 4,
+              }}
+            >
+              chrome://extensions
+            </code>{' '}
+            를 열고 우측 상단 "개발자 모드" 를 켭니다.
+          </li>
+          <li>"압축해제된 확장 프로그램 로드" 를 눌러 저장소의 <code style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 12, background: '#0e1a1c', padding: '1px 6px', borderRadius: 4 }}>extension/</code> 폴더를 선택합니다.</li>
+          <li>확장 아이콘을 툴바에 고정하고, 웹에서 아무 문장이나 선택 후 클릭해 첫 사실을 담아보세요.</li>
+        </ol>
+        <button
+          type="button"
+          data-testid="home-extension-install-modal-close"
+          onClick={onClose}
+          style={{
+            marginTop: 24,
+            width: '100%',
+            background: ACCENT,
+            color: '#06201c',
+            fontWeight: 600,
+            fontSize: 14,
+            border: 'none',
+            borderRadius: 12,
+            padding: '12px 16px',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          알겠습니다
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ★ REQ-014-A (PO 2026-07-02) — 비활성 검색 바 감쇠.
+ *
+ * 이전: placeholder + `cursor: not-allowed` + dashed 테두리로 "금지 사인" 이
+ * 3중 강조되어 과했다. PO 는 opacity 0.5 + 기본 disabled 만으로 충분하다고
+ * 판단.
+ *
+ * 신규: cursor: not-allowed 제거 (그냥 disabled 만), dashed → solid,
+ * wrapper 에 opacity 0.5. placeholder 자체는 유지 (온보딩 컨텍스트로).
+ */
 function DisabledRecallInput() {
   return (
     <div
@@ -861,6 +1011,7 @@ function DisabledRecallInput() {
         width: '100%',
         maxWidth: 620,
         margin: '32px auto 0',
+        opacity: 0.5,
       }}
     >
       <span
@@ -886,11 +1037,10 @@ function DisabledRecallInput() {
           height: 56,
           borderRadius: 16,
           background: 'rgba(13,20,23,0.35)',
-          border: `1px dashed #1b2629`,
+          border: `1px solid ${INPUT_BORDER}`,
           padding: '0 24px 0 46px',
           fontSize: 16,
           color: '#6b7d82',
-          cursor: 'not-allowed',
           outline: 'none',
           boxSizing: 'border-box',
         }}
@@ -899,16 +1049,28 @@ function DisabledRecallInput() {
   );
 }
 
+/**
+ * ★ REQ-014-A (PO 2026-07-02) — 온보딩 카드 문구 verbatim 교체.
+ *
+ * A6: "여기서 시작합니다" / "시작하기" 헤더 텍스트 제거. 목적 불명한
+ *   중복 라벨이었음. 카드 자체가 3-step 구조라 헤더 없이도 의도 명확.
+ *
+ * A7: PO 제안 verbatim 3단계로 교체.
+ *   1) 확장 설치 — 웹 어디서든 클릭 한 번으로 정보를 담습니다
+ *   2) AI가 정리 — 문장에서 검증할 사실을 뽑아냅니다
+ *   3) 당신이 승인 — 당신이 확인한 사실만 지식이 됩니다
+ *
+ * 문구는 e2e 에서 verbatim 검증되므로 수정 시 spec 도 함께 갱신 필요.
+ */
 function GettingStartedCard() {
   const steps: Array<[string, string]> = [
-    ['브라우저 확장 설치', '웹 어디서든 캡처 버튼이 생깁니다'],
-    ['정보를 캡처', 'AI가 주어·서술어·목적어 사실 후보로 분해합니다'],
-    ['당신이 검증', '승인한 사실만 그래프에 저장되어 여기서 살아납니다'],
+    ['확장 설치', '웹 어디서든 클릭 한 번으로 정보를 담습니다'],
+    ['AI가 정리', '문장에서 검증할 사실을 뽑아냅니다'],
+    ['당신이 승인', '당신이 확인한 사실만 지식이 됩니다'],
   ];
   return (
     <section
       data-testid="home-empty-guide"
-      aria-label="여기서 시작합니다"
       style={{
         width: '100%',
         maxWidth: 560,
@@ -920,28 +1082,6 @@ function GettingStartedCard() {
         padding: 8,
       }}
     >
-      <header
-        style={{
-          padding: '14px 16px 12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <span style={{ fontSize: 15, fontWeight: 600, color: '#e6eef0' }}>
-          여기서 시작합니다
-        </span>
-        <span
-          style={{
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            fontSize: 10,
-            letterSpacing: '0.14em',
-            color: TEXT_TINY,
-          }}
-        >
-          시작하기
-        </span>
-      </header>
       {steps.map(([title, desc], idx) => (
         <div
           key={title}
@@ -951,7 +1091,9 @@ function GettingStartedCard() {
             alignItems: 'center',
             gap: 14,
             padding: '15px 16px',
-            borderTop: `1px solid ${ROW_BORDER}`,
+            // REQ-014-A: 헤더 제거로 첫 스텝은 위쪽 divider 불필요 (카드
+            // 자체 border 로 충분). 두 번째부터만 divider 표시.
+            borderTop: idx === 0 ? 'none' : `1px solid ${ROW_BORDER}`,
           }}
         >
           <span
@@ -1091,18 +1233,13 @@ function HomeShellCommon({
         <BrandLine />
         <GreetingH1 name={userName} />
         {children}
-        <footer
-          data-testid="home-version-footer"
-          style={{
-            marginTop: 48,
-            fontSize: 11,
-            color: TEXT_DIMMEST,
-            textAlign: 'center',
-            letterSpacing: '0.04em',
-          }}
-        >
-          Lucid v{LUCID_VERSION}
-        </footer>
+        {/*
+         * ★ REQ-014-A (PO 2026-07-02) — home-version-footer 제거.
+         *   • 이전에는 HomePage 본문 하단 + AppShell 글로벌 푸터에 "Lucid v0.x.x"
+         *     가 이중 노출 → PO 정리 원함. (REQ-007-v2 후속으로 명시된 잔존 아이템.)
+         *   • 진짜 소스 = AppShell 의 app-shell-version-footer (모든 라우트 글로벌
+         *     chrome). home 페이지의 본문 내 decorative footer 는 삭제.
+         */}
       </div>
     </main>
   );
