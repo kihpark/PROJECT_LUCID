@@ -12,6 +12,19 @@
  *     투명 → 페이지 radial gradient 와 사실상 한 화면으로 합쳐짐.
  *   • teal 코어 brightness +30%, 하이라이트 입자 비율 +50%.
  *
+ * ★ v3 (2026-07-01, PO 3 dogfood 이슈):
+ *   1. 사각 경계 여전히 보임 → canvas 를 뷰포트 전체 (position: fixed inset 0)
+ *      로 확장. 코어는 여전히 화면 중앙 렌더링, 헤일로 gradient 는 뷰포트
+ *      가장자리까지 자연 fade-out. 배경 fillRect 제거 이미 되어 있음
+ *      (v2). 캔버스 자체 배경 명시 transparent.
+ *   2. hover 좁은 사각형 → pointer event 를 window 에 listen (canvas 는
+ *      pointer-events: none — 아래 UI 클릭 통과). 뷰포트 어디를 hover
+ *      하든 코어가 반응.
+ *   3. speaking 과도한 정신사나움 → TARGET_PARAMS.speaking 만 진정:
+ *      breathe 0.15 → 0.08 (음성 파형 진폭 절반)
+ *      bright  1.22 → 1.10 (안광 온화)
+ *      spin/pull/wave 유지 (★ 존재감 유지).
+ *
  * ★ 4 상태 모델 (변경 0) — "극적 차이" 의 비결은 상태별 파라미터 세트를
  * 매 프레임 부드럽게 lerp 보간하는 것. 단순 if 분기 X.
  *
@@ -22,7 +35,7 @@
  *   - idle      대기  : 미세 호흡 + 저속 회전
  *   - listening 경청  : 마우스 끌림 (pull 1.0) + 수축 (contract)
  *   - thinking  사고  : ★ 가장 역동적 — 고속 회전 + 강한 난류
- *   - speaking  응답  : 음성 파형 맥동 (wave 1.0 + breathe 0.15)
+ *   - speaking  응답  : 음성 파형 맥동 (v3: 절반 진폭 — 진정)
  *
  * ★ 살아있음 (auto-drift 항상 가산 — 마우스 없어도 안 죽음):
  *   auto.x = sin(t * 0.00042) * 0.18
@@ -47,16 +60,18 @@ export type HearthSphereState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 interface HearthSphereProps {
   state: HearthSphereState;
-  /** Canvas size (square) in CSS px. ★ v2: 미지정 시 부모 너비 기반 자동
-   *  계산 (60% cap 720). 명시 시 그 값을 그대로 사용 (테스트 / 고정
-   *  레이아웃 호환). */
+  /** Canvas core size (square) in CSS px. ★ v2: 미지정 시 부모 너비 기반
+   *  자동 계산 (60% cap 720). 명시 시 그 값을 그대로 사용 (테스트 / 고정
+   *  레이아웃 호환). v3: 이 값은 이제 코어 시각 크기 (R 산정 기준) 이며,
+   *  실제 canvas element 는 뷰포트 전체로 확장된다. */
   size?: number;
   /** Opt-out for `prefers-reduced-motion` and test harnesses. Renders a
    * single static frame instead of starting rAF. */
   reducedMotion?: boolean;
 }
 
-/** ★ 상태별 타깃 파라미터 — 핸드오프 verbatim. v2 contract 동일. */
+/** ★ 상태별 타깃 파라미터 — 핸드오프 verbatim. v2 contract 동일.
+ *  v3: speaking 만 tune (breathe/bright 하향, spin/pull/wave 유지). */
 interface StateParams {
   spin: number;
   breathe: number;
@@ -71,7 +86,10 @@ export const HEARTH_TARGET_PARAMS: Record<HearthSphereState, StateParams> = {
   idle:      { spin: 0.18, breathe: 0.05, turb: 0.05, pull: 0.14, wave: 0,   contract: 0.0,   bright: 0.85 },
   listening: { spin: 0.12, breathe: 0.03, turb: 0.03, pull: 1.0,  wave: 0,   contract: 0.22,  bright: 1.0  },
   thinking:  { spin: 1.35, breathe: 0.04, turb: 1.0,  pull: 0.28, wave: 0,   contract: -0.05, bright: 1.18 },
-  speaking:  { spin: 0.38, breathe: 0.15, turb: 0.13, pull: 0.26, wave: 1.0, contract: 0.0,   bright: 1.22 },
+  // ★ v3 speaking 진정: breathe 0.15 → 0.08, bright 1.22 → 1.10.
+  //   spin/pull/wave 그대로 (존재감 유지). breathe 는 voicePulse 진폭을
+  //   결정 (voicePulse = 1 + breathe * voice * 1.1) — 0.08 = 절반 진폭.
+  speaking:  { spin: 0.38, breathe: 0.08, turb: 0.13, pull: 0.26, wave: 1.0, contract: 0.0,   bright: 1.10 },
 };
 
 interface Particle {
@@ -91,7 +109,9 @@ interface Particle {
 
 /** ★ v2 — container fill 기본 크기 계산. PO "화면의 40-60%" 의뢰.
  *   - 부모 너비 × 0.6 (cap 720, floor 320)
- *   - SSR / 부모 측정 실패 → 480 (v1 230 보다 큰 안전 기본). */
+ *   - SSR / 부모 측정 실패 → 480 (v1 230 보다 큰 안전 기본).
+ *  v3: 이 값은 코어 시각 크기 (R 산정 기준). canvas element 는 별도로
+ *  뷰포트 전체를 덮는다. */
 function computeAutoSize(parentWidth: number | null): number {
   if (!parentWidth || parentWidth <= 0) return 480;
   const target = parentWidth * 0.6;
@@ -128,6 +148,12 @@ function createParticles(count: number): Particle[] {
   return arr;
 }
 
+/** ★ v3 — 뷰포트 크기 (SSR-safe). resize 감지용. */
+function getViewportSize(): { w: number; h: number } {
+  if (typeof window === 'undefined') return { w: 1280, h: 720 };
+  return { w: window.innerWidth, h: window.innerHeight };
+}
+
 export function HearthSphere({
   state,
   size,
@@ -138,7 +164,7 @@ export function HearthSphere({
   const rafRef = useRef<number | null>(null);
   const stateRef = useRef<HearthSphereState>(state);
 
-  // ★ v2 — container fill: 부모 너비를 측정 → autoSize 계산.
+  // ★ v2 — container fill: 부모 너비를 측정 → autoSize 계산 (코어 시각 크기).
   // size prop 가 명시되면 그 값을 그대로 사용 (테스트 / 고정 레이아웃 호환).
   const [autoSize, setAutoSize] = useState<number>(() => computeAutoSize(null));
   useLayoutEffect(() => {
@@ -162,6 +188,18 @@ export function HearthSphere({
 
   const effectiveSize = size ?? autoSize;
 
+  // ★ v3 — 뷰포트 크기 (canvas element 실 크기). resize 시 재계산.
+  const [viewport, setViewport] = useState<{ w: number; h: number }>(() =>
+    getViewportSize(),
+  );
+  useLayoutEffect(() => {
+    const update = () => setViewport(getViewportSize());
+    update();
+    if (typeof window === 'undefined') return;
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
   // ★ state 변경 시 ref 만 갱신 — rAF 재시작 0 (시각 끊김 0).
   useEffect(() => {
     stateRef.current = state;
@@ -175,13 +213,17 @@ export function HearthSphere({
 
     const prefersReduced = reducedMotion ?? userPrefersReducedMotion();
 
+    // ★ v3 — 캔버스는 뷰포트 전체. 코어 크기는 effectiveSize 로 산정.
+    const vw = viewport.w;
+    const vh = viewport.h;
+
     // ★ DPR 캡 1.5 — v2 큰 캔버스에서 픽셀 부하 통제.
     const dpr = Math.min(
       typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
       1.5,
     );
-    canvas.width = Math.round(effectiveSize * dpr);
-    canvas.height = Math.round(effectiveSize * dpr);
+    canvas.width = Math.round(vw * dpr);
+    canvas.height = Math.round(vh * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // ★ v2 입자 밀도: 1800 (low-power 800). v1 920/460 보다 +95% / +74%.
@@ -202,18 +244,41 @@ export function HearthSphere({
     let voice = 0;
     let last: number | null = null;
 
-    // 마우스 추적 — 정규화 + pointerleave 시 0 복귀.
+    // ★ v3 — 코어 시각 중앙 위치. wrapper (flow spacer) 의 화면 좌표를 매
+    //  프레임 참조 → 코어는 wrapper 중앙에 그려짐 (기존 레이아웃 위치 유지).
+    //  wrapper 미존재 (SSR fallback) 시 뷰포트 상단 1/3 지점.
+    function coreCenter(): { cx: number; cy: number } {
+      const el = wrapperRef.current;
+      if (el) {
+        const r = el.getBoundingClientRect();
+        return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+      }
+      return { cx: vw / 2, cy: vh / 3 };
+    }
+
+    // ★ v3 — pointer event 를 window 에 attach (canvas 는 pointer-events:
+    //  none). 뷰포트 어디를 hover 하든 코어가 반응. 아래 UI 는 그대로
+    //  클릭 통과.
     const onPointerMove = (e: PointerEvent) => {
-      const r = canvas.getBoundingClientRect();
-      ptr.tx = ((e.clientX - r.left) / r.width) * 2 - 1;
-      ptr.ty = ((e.clientY - r.top) / r.height) * 2 - 1;
+      const c = coreCenter();
+      // 코어 반경 (R) 을 반정규화 스케일로 사용 → 코어에서 멀어질수록 1 접근.
+      const R = Math.min(effectiveSize, effectiveSize) * 0.32;
+      const scale = Math.max(R * 2.5, 200); // 정규화 스케일 (min 200px).
+      ptr.tx = Math.max(-1.5, Math.min(1.5, (e.clientX - c.cx) / scale));
+      ptr.ty = Math.max(-1.5, Math.min(1.5, (e.clientY - c.cy) / scale));
     };
     const onPointerLeave = () => {
       ptr.tx = 0;
       ptr.ty = 0;
     };
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerleave', onPointerLeave);
+    // ★ window.pointermove — 뷰포트 어디든 tracking.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pointermove', onPointerMove);
+      // 브라우저 창 벗어남 → 중앙 복귀.
+      window.addEventListener('pointerout', (e) => {
+        if (!e.relatedTarget) onPointerLeave();
+      });
+    }
 
     /** ★ v2 — 배경 fill 제거 (검은 사각형 → 페이지 bg 와 단절 원인).
      *   대신 transparent clear → 페이지 radial gradient backdrop 가
@@ -225,11 +290,13 @@ export function HearthSphere({
 
     function drawFrame(now: number) {
       if (!ctx) return;
-      const w = effectiveSize;
-      const h = effectiveSize;
-      const cx = w / 2;
-      const cy = h * 0.5;  // v2: 중앙 정렬 (v1 0.46 → 약간 위쪽 비대칭 제거)
-      const R = Math.min(w, h) * 0.32;  // v2: 0.30 → 0.32 (코어 약간 확대)
+      const w = vw;
+      const h = vh;
+      // ★ v3 — 코어 중앙 = wrapper 중앙 (flow 위치 유지).
+      const c = coreCenter();
+      const cx = c.cx;
+      const cy = c.cy;
+      const R = effectiveSize * 0.32;  // v2: 0.30 → 0.32 (코어 약간 확대)
 
       clearTransparent(w, h);
 
@@ -256,14 +323,16 @@ export function HearthSphere({
 
       ctx.globalCompositeOperation = 'lighter';
 
-      // ★★★ v2 LAYER 1 — Outer Halo (★ 가장 큰 변화: 캔버스 가장자리까지
-      //  발광 → 배경에 융화). 매우 넓은 falloff, 낮은 alpha.
+      // ★★★ v2 LAYER 1 — Outer Halo (★ 가장 큰 변화: 뷰포트 가장자리까지
+      //  발광 → 배경에 융화). v3: gradient 반지름을 뷰포트 대각선 기반으로
+      //  확대 → 어느 뷰포트 크기에서도 캔버스 경계 사각형 안 보임.
+      const diag = Math.hypot(w, h);
       const halo = ctx.createRadialGradient(
         cx, cy, R * 0.6,
-        cx, cy, Math.min(w, h) * 0.55,
+        cx, cy, diag * 0.55,
       );
       halo.addColorStop(0,    `rgba(45,212,191,${0.18 * e.bright})`);
-      halo.addColorStop(0.45, `rgba(35,180,170,${0.07 * e.bright})`);
+      halo.addColorStop(0.25, `rgba(35,180,170,${0.07 * e.bright})`);
       halo.addColorStop(1,    'rgba(8,40,38,0)');
       ctx.fillStyle = halo;
       ctx.fillRect(0, 0, w, h);
@@ -392,8 +461,9 @@ export function HearthSphere({
       // 단일 정적 프레임 — 레이아웃 유지, 모션 0.
       drawFrame(0);
       return () => {
-        canvas.removeEventListener('pointermove', onPointerMove);
-        canvas.removeEventListener('pointerleave', onPointerLeave);
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('pointermove', onPointerMove);
+        }
       };
     }
 
@@ -426,14 +496,15 @@ export function HearthSphere({
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
-      canvas.removeEventListener('pointermove', onPointerMove);
-      canvas.removeEventListener('pointerleave', onPointerLeave);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('pointermove', onPointerMove);
+      }
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', onVisibilityChange);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveSize, reducedMotion]);
+  }, [effectiveSize, reducedMotion, viewport.w, viewport.h]);
 
   return (
     <div
@@ -443,8 +514,12 @@ export function HearthSphere({
       data-testid="home-sphere"
       data-sphere-state={state}
       data-hearth-sphere="particle-core"
-      data-hearth-version="v2"
+      data-hearth-version="v3"
+      // ★ v3 e2e pin — pointer 전화면 hover 여부 검증.
+      data-hearth-hover-scope="viewport"
       style={{
+        // ★ v3 — flow 위치 유지 (BrandLine 아래 배치). wrapper 는 코어 크기
+        //  만큼 자리를 차지하는 spacer. 실제 canvas 는 fixed 로 뷰포트 전체.
         position: 'relative',
         width: effectiveSize,
         height: effectiveSize,
@@ -453,6 +528,8 @@ export function HearthSphere({
         justifyContent: 'center',
         // v2: 큰 캔버스 ↔ 다음 요소 (BrandLine) 간격 축소 (시각 응집).
         marginBottom: 16,
+        // ★ 아래 UI 가 canvas 위에 있으므로 wrapper 자체는 hover 무영향.
+        pointerEvents: 'none',
       }}
     >
       <canvas
@@ -462,11 +539,23 @@ export function HearthSphere({
         data-state={state}
         aria-hidden="true"
         style={{
-          width: effectiveSize,
-          height: effectiveSize,
+          // ★★★ v3 — canvas 를 뷰포트 전체로 확장 (position: fixed inset 0).
+          //  1. 사각 경계 제거: halo gradient 가 뷰포트 대각선 55% 까지 fade
+          //     → 사각형 경계 사라짐.
+          //  2. hover 전화면: 아래 window pointermove listener 로 커버 (canvas
+          //     자체는 pointer-events: none — 아래 UI 클릭 통과).
+          //  3. background transparent (명시) — 페이지 bg 와 융화.
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
           display: 'block',
-          // ★ "살아있음" 체감 — 커서 위에서 코어가 반응.
-          cursor: 'crosshair',
+          background: 'transparent',
+          // ★ 아래 UI (입력 / 버튼) 그대로 클릭 통과. hover 는 window level.
+          pointerEvents: 'none',
+          // ★ 배경 layer — 텍스트 뒤로.
+          zIndex: 0,
         }}
       />
     </div>
