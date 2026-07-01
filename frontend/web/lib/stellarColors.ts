@@ -7,11 +7,14 @@
  * 구분 = "행위 vs 발언" 성격 → 색·스타일로만.
  *
  * Mapping table (entity type → display color):
- *   WHO    — person / organization / group               → teal/cyan
- *   WHAT   — product / resource / concept / knowledge    → amber/gold
- *   EVENT  — event                                       → violet
+ *   WHO    — person / organization / group               → teal/cyan/lime
+ *   WHAT   — resource / concept / task / knowledge / event / metric
+ *                                                        → amber family (6 명도)
  *   WHERE  — place                                       → slate/blue-gray
- *   CLAIM  — claim node (작게, 단 또렷)                  → same teal, opacity 1
+ *   CLAIM  — claim node (작게, 단 또렷)                  → neutral grey, opacity 1
+ *
+ * ★ 2026-07-01: WHAT 6 소분류 (PO verbatim: "자원/개념/행위/지식/사건/지표
+ *   전부 구분") — 옛 EVENT 별개 violet bucket 폐기, amber family 로 통합.
  *
  * ★ CLAIM 노드는 크기로만 보조 표시 (작은 점), 색·opacity 는 또렷 유지.
  *   PO 정정 spec: link_status / 미검증 / 흐림 / 점선 시각 강약 폐기.
@@ -29,11 +32,23 @@ export const ENTITY_COLORS = {
   person: '#5EEAD4',        // WHO · person
   organization: '#22D3EE',  // WHO · organization (★ L2 — cyan 톤 분리)
   group: '#A3E635',         // WHO · group        (★ L2 — lime 톤 분리)
-  product: '#F5C36B',       // WHAT
-  resource: '#F5C36B',      // WHAT
-  concept: '#F5C36B',       // WHAT
-  knowledge: '#F5C36B',     // WHAT
-  event: '#A78BFA',         // WHAT-EVENT
+  // ★ WHAT 6 소분류 (PO 2026-07-01 verbatim: "자원/개념/행위/지식/사건/지표 전부
+  //   구분되게. 형태·명도·라벨 전부 구분되게. 색 = amber family 유지").
+  //   같은 amber 계열 안에서 명도 (brightness) 를 6 단계로 분리 →
+  //   amber-300 (가장 밝음) → amber-800 (가장 어두움). 정상 시각 사용자에게
+  //   도 amber tone 안에서 즉시 구분되도록 6 stop 을 인식 편차가 큰 luminance
+  //   간격으로 배치.
+  resource: '#F5C36B',      // WHAT · 자원 (amber-300, base — CLAIM_EDGE_COLOR 와 동일)
+  product: '#F5C36B',       // WHAT · 자원 alias (product = resource 계열)
+  concept: '#E5A94B',       // WHAT · 개념 (amber-400)
+  task: '#D69235',          // WHAT · 행위 (amber-500)
+  procedure: '#D69235',     // WHAT · 행위 alias
+  service: '#D69235',       // WHAT · 행위 alias
+  problem: '#D69235',       // WHAT · 행위 alias
+  knowledge: '#C77B1F',     // WHAT · 지식 (amber-600)
+  event: '#B86408',         // WHAT · 사건 (amber-700) — ★ 옛 violet 폐기, amber family 통합
+  artifact: '#B86408',      // WHAT · 사건 alias
+  metric: '#A94D00',        // WHAT · 지표 (amber-800)
   place: '#7A8CA3',         // WHERE
 } as const;
 
