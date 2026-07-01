@@ -6,59 +6,60 @@
  *
  * 구분 = "행위 vs 발언" 성격 → 색·스타일로만.
  *
- * Mapping table (entity type → display color):
- *   WHO    — person / organization / group               → teal/cyan/lime
- *   WHAT   — resource / concept / task / knowledge / event / metric
- *                                                        → amber family (6 명도)
- *   WHERE  — place                                       → slate/blue-gray
- *   CLAIM  — claim node (작게, 단 또렷)                  → neutral grey, opacity 1
+ * ★ REQ-013 (PO 2026-07-02) — 색상 재설계 (recurring issue).
+ *   옛 amber family (WHAT 6 소분류) 는 명도만으로는 시각 구분이 약해
+ *   resource / knowledge / task 가 사용자에게 혼동됨. WHERE 도 slate/blue-
+ *   gray 라 background 대비 낮았음. 10 entity_type + claim + unknown 조합이
+ *   전부 한눈에 갈리도록 상보 색상 (complementary/distinct hues) 로 재배정.
  *
- * ★ 2026-07-01: WHAT 6 소분류 (PO verbatim: "자원/개념/행위/지식/사건/지표
- *   전부 구분") — 옛 EVENT 별개 violet bucket 폐기, amber family 로 통합.
- *
- * ★ CLAIM 노드는 크기로만 보조 표시 (작은 점), 색·opacity 는 또렷 유지.
- *   PO 정정 spec: link_status / 미검증 / 흐림 / 점선 시각 강약 폐기.
+ *   Mapping (REQ-013):
+ *     person       → teal      '#5EEAD4'  (WHO — 유지)
+ *     organization → cyan      '#22D3EE'  (WHO — 유지)
+ *     group        → lime      '#A3E635'  (WHO — 유지)
+ *     resource     → orange    '#F97316'  (WHAT — 옛 amber-300 → 밝은 오렌지)
+ *     concept      → purple    '#A855F7'  (WHAT — 옛 amber-400 → 보라)
+ *     task         → rose      '#F43F5E'  (WHAT — 옛 amber-500 → 로즈)
+ *     knowledge    → cyan-blue '#06B6D4'  (WHAT — 옛 amber-600 → 시안블루)
+ *     event        → violet    '#8B5CF6'  (WHAT — 옛 amber-700 → 바이올렛)
+ *     metric       → emerald   '#10B981'  (WHAT — 옛 amber-800 → 에메랄드)
+ *     place        → red       '#EF4444'  (WHERE — 옛 slate → 빨강)
+ *     CLAIM        → gray      '#6B7280'  (모든 entity 와 시각 구분)
+ *     UNKNOWN      → stone     '#78716C'  (CLAIM 과 구분 — see stellarLegendShapes)
  */
 
 /** Entity-type-keyed color palette. Unknown types fall back to STELLAR_ACCENT.
- *  ★ L2 (PO 2026-06-29): WHO 묶음 안에서 person / organization / group 의
- *  hue 를 미세하게 분리 — color-blind safe channel 은 stellarShapes 가 담당
- *  하지만, 정상 시각 사용자에게도 색의 미세 차이를 더해 인지 부담을 더 줄인다.
- *    person       → teal       '#5EEAD4'  (선명 teal — 가장 친숙한 톤)
- *    organization → cyan       '#22D3EE'  (약간 청록 쪽, "조직 = 차가운")
- *    group        → teal-lime  '#A3E635'  (lime, "묶음")
- *  세 톤 모두 luminance 비슷하게 유지해 bloom threshold 효과는 동일. */
+ *  ★ REQ-013 (PO 2026-07-02): amber/slate 폐기, 10 hue 상보 재배정.
+ *  같은 luminance 대에서 hue 를 서로 다른 지대로 배치 → color-blind safe
+ *  channel 은 stellarShapes 형태 6종 가 별도 담당. */
 export const ENTITY_COLORS = {
-  person: '#5EEAD4',        // WHO · person
-  organization: '#22D3EE',  // WHO · organization (★ L2 — cyan 톤 분리)
-  group: '#A3E635',         // WHO · group        (★ L2 — lime 톤 분리)
-  // ★ WHAT 6 소분류 (PO 2026-07-01 verbatim: "자원/개념/행위/지식/사건/지표 전부
-  //   구분되게. 형태·명도·라벨 전부 구분되게. 색 = amber family 유지").
-  //   같은 amber 계열 안에서 명도 (brightness) 를 6 단계로 분리 →
-  //   amber-300 (가장 밝음) → amber-800 (가장 어두움). 정상 시각 사용자에게
-  //   도 amber tone 안에서 즉시 구분되도록 6 stop 을 인식 편차가 큰 luminance
-  //   간격으로 배치.
-  resource: '#F5C36B',      // WHAT · 자원 (amber-300, base — CLAIM_EDGE_COLOR 와 동일)
-  product: '#F5C36B',       // WHAT · 자원 alias (product = resource 계열)
-  concept: '#E5A94B',       // WHAT · 개념 (amber-400)
-  task: '#D69235',          // WHAT · 행위 (amber-500)
-  procedure: '#D69235',     // WHAT · 행위 alias
-  service: '#D69235',       // WHAT · 행위 alias
-  problem: '#D69235',       // WHAT · 행위 alias
-  knowledge: '#C77B1F',     // WHAT · 지식 (amber-600)
-  event: '#B86408',         // WHAT · 사건 (amber-700) — ★ 옛 violet 폐기, amber family 통합
-  artifact: '#B86408',      // WHAT · 사건 alias
-  metric: '#A94D00',        // WHAT · 지표 (amber-800)
-  place: '#7A8CA3',         // WHERE
+  person: '#5EEAD4',        // WHO · person       (teal)
+  organization: '#22D3EE',  // WHO · organization (cyan)
+  group: '#A3E635',         // WHO · group        (lime)
+  // WHAT — 6 소분류, 각기 다른 hue 로 재배정 (REQ-013 PO 2026-07-02).
+  resource: '#F97316',      // WHAT · 자원 (orange, 옛 amber-300)
+  product: '#F97316',       // WHAT · 자원 alias
+  concept: '#A855F7',       // WHAT · 개념 (purple, 옛 amber-400)
+  task: '#F43F5E',          // WHAT · 행위 (rose, 옛 amber-500)
+  procedure: '#F43F5E',     // WHAT · 행위 alias
+  service: '#F43F5E',       // WHAT · 행위 alias
+  problem: '#F43F5E',       // WHAT · 행위 alias
+  knowledge: '#06B6D4',     // WHAT · 지식 (cyan-blue, 옛 amber-600)
+  event: '#8B5CF6',         // WHAT · 사건 (violet, 옛 amber-700)
+  artifact: '#8B5CF6',      // WHAT · 사건 alias
+  metric: '#10B981',        // WHAT · 지표 (emerald, 옛 amber-800)
+  place: '#EF4444',         // WHERE      (red, 옛 slate)
+  location: '#EF4444',      // WHERE alias
+  region: '#EF4444',        // WHERE alias
+  venue: '#EF4444',         // WHERE alias
 } as const;
 
 export type EntityColorKey = keyof typeof ENTITY_COLORS;
 
 /** CLAIM 노드 전용 색. ★ PO 정정: opacity 1 (흐림 금지).
- *  ★ 2026-06-29 PO: entity 노드 와 시각 구분 필요 — 옛 #5EEAD4 (teal) =
- *  WHO entity 색과 충돌. neutral cool grey 로 분리 (★ "발언" = 채도 0,
- *  entity = colorful hue). */
-export const CLAIM_NODE_COLOR = '#CBD5E1';
+ *  ★ REQ-013 (PO 2026-07-02): 옛 '#CBD5E1' 은 밝은 회색이라 lime/teal 과 luminance
+ *  가 비슷해 시각 충돌. neutral mid-gray '#6B7280' 로 조정 → 모든 entity hue
+ *  와 명확히 구분되면서 unknown '#78716C' (stone) 과도 갈린다. */
+export const CLAIM_NODE_COLOR = '#6B7280';
 
 /** CLAIM 노드 opacity. ★ 무조건 1. */
 export const CLAIM_NODE_OPACITY = 1;

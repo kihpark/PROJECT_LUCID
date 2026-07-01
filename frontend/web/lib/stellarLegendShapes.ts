@@ -39,7 +39,10 @@ import { ENTITY_COLORS, CLAIM_NODE_COLOR } from './stellarColors';
  *  "이 entity_type 매핑이 없다" 가 아니라 의미적으로 "분류 실패" — LEGEND 에서
  *  도 같은 라벨로 안내해야 한다. */
 export const UNKNOWN_SHAPE: StellarShape = 'dot';
-export const UNKNOWN_COLOR = '#9CA3AF';
+// ★ REQ-013 (PO 2026-07-02) — CLAIM 색 '#6B7280' (gray) 와 시각 구분되도록
+//   stone tone 으로 조정. 옛 '#9CA3AF' 는 CLAIM 회색과 luminance 가 비슷해
+//   사용자가 두 종류를 헷갈렸다.
+export const UNKNOWN_COLOR = '#78716C';
 
 /** ★ 2026-07-01 (PO): EVENT 별개 top-level bucket 폐기 — 사건 은 WHAT 6 소분류
  *  중 하나. amber family 6 명도 안에서 표시 (색 별개 bucket 유지 X). type

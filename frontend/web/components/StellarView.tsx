@@ -22,10 +22,11 @@ import { emptyStellarGraph, loadRealStellarGraph } from '@/lib/stellarRealAdapte
 // REQ-012-v1 — entity 수정/병합 후 그래프 재로딩에 spaceId 필요.
 import { getCurrentSpace } from '@/lib/auth';
 import { predicateLabel } from '@/lib/predicateLabels';
-import {
-  StellarLeftPanel,
-  type EntityBucket,
-} from './StellarLeftPanel';
+// ★ REQ-013 (PO 2026-07-02) — 좌하단 StellarLeftPanel 필터 박스 폐기.
+//   범례가 필터 역할까지 담당 (StellarLegend 각 row = clickable bucket toggle).
+//   EntityBucket 타입은 옛 helper (entityBucketFor / entityBucketForSingle) 의
+//   반환 shape 을 유지하기 위해 유지 (아래에서 local type 으로 재선언).
+import { LEGEND_SPECS, specForEntityType, claimSpec } from '@/lib/stellarLegendShapes';
 // M3-2d interactions — single SPO hover card + entity card + edge facts list.
 // ★ PO 의뢰서 verbatim. 중복 오버레이 0.
 // fix/stellar-cards-entity-node-compat — pickEntityName shared so the
@@ -85,6 +86,11 @@ export function predicateThemeColor(predicate: string | null | undefined): strin
   }
   return '#9db0b5';
 }
+
+// ★ REQ-013 (PO 2026-07-02) — 옛 좌하단 StellarLeftPanel 폐기 후에도 legacy
+//   테스트 hook 유지: entityBucketFor / entityBucketForSingle 이 기존 반환
+//   shape (`who` / `what` / `where` / `unknown`) 을 계속 돌려주도록.
+export type EntityBucket = 'who' | 'what' | 'where' | 'unknown';
 
 /** ★ W3 (STELLAR 6-class fix, 2026-06-29) — single-bucket entity-type map.
  *  Old behaviour: `null/undefined` → all 3 buckets (legacy guard). That made
@@ -772,6 +778,12 @@ export interface StellarViewProps {
     mode: StellarSource;
     onNodeHover?: (n: StellarNode | null) => void;
     onNodeClick?: (n: StellarNode) => void;
+    /** ★ REQ-013 (PO 2026-07-02) — screen-coords 를 함께 넘겨주는 콜백.
+     *  test renderer 는 옵션 (mock 이 무시해도 정상 동작). */
+    onNodeClickWithCoords?: (
+      n: StellarNode,
+      coords: { x: number; y: number } | null,
+    ) => void;
     /** M3-2d — edge-click handler. Receives the two endpoint nodes.
      *  fix/stellar-cards-entity-node-compat — optional `link` carries the
      *  v2 StellarLink so the EdgeFactsList can render link-derived summary
@@ -831,29 +843,16 @@ export function StellarView(props: StellarViewProps = {}) {
   // the focus subgraph growing as the user explores without losing
   // the anchor. Reset on focus change / focus clear / mode toggle.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  // M3-2c — "발언(CLAIM) 보기" toggle. ★ N1 (STELLAR 6-class fix,
-  // 2026-06-29 PO): default flipped to ON. CLAIM 노드는 default
-  // 가시이며, 사용자가 명시적으로 숨김을 누르면 hide. PO 의 dogfood
-  // 흐름에서 발언 노드가 안 보여 fact_type 균형이 무너졌던 violation
-  // 클래스를 닫는다.
-  const [showClaims, setShowClaims] = useState(true);
-
-  // fix/stellar-leftpanel-simplify (2026-06-28 PO) — left-panel reduced
-  // to ENTITY only. Old fact_type / as_of / link_status state removed
-  // (the UI no longer surfaces them). Data fields on nodes/links are
-  // preserved untouched — this is a UI-only simplification.
+  // ★ REQ-013 (PO 2026-07-02) — 옛 who/what/where 3-bucket 필터 상태와
+  //   "발언 숨김/보기" 버튼 폐기. 필터 상태는 이제 per-spec-key (LEGEND row
+  //   기준) 로 관리한다. CLAIM 은 legend 안의 'claim' spec key 를 사용해
+  //   같은 dictionary 안에서 토글 → 옛 showClaims 별개 state 폐기.
   //
-  // fix/stellar-ux-self-audit U2 — `unknown` is now a first-class bucket
-  // alongside who/what/where. Entity nodes with missing or unmapped
-  // entity_type used to pass the filter regardless of the three known
-  // toggles, leaving no user control surface for them. Default ON so the
-  // existing visual behaviour (unknown surfaces) is preserved until the
-  // user explicitly hides them.
-  const [entityBuckets, setEntityBuckets] = useState<Record<EntityBucket, boolean>>({
-    who: true,
-    what: true,
-    where: true,
-    unknown: true,
+  //   default = 모든 spec 활성 (기존 시각 그대로).
+  const [bucketState, setBucketState] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const spec of LEGEND_SPECS) initial[spec.key] = true;
+    return initial;
   });
   // B-62-clear-focus-home-lookat — monotonic counter, bumped whenever
   // the user explicitly leaves a focus subgraph (× close / Esc /
@@ -877,6 +876,12 @@ export function StellarView(props: StellarViewProps = {}) {
     x: number;
     y: number;
   } | null>(null);
+  // ★ REQ-013 (PO 2026-07-02) — 노드 클릭 시 그 노드의 screen coords.
+  //   StellarEntityCard 를 노드 오른쪽에 배치하기 위해 사용. null 이면
+  //   card 는 옛 top-right fallback 사용.
+  const [focusedPosition, setFocusedPosition] = useState<
+    { x: number; y: number } | null
+  >(null);
   const [realData, setRealData] = useState<StellarGraphData | null>(null);
   const [realLoading, setRealLoading] = useState(false);
   const realLoadedRef = useRef(false);
@@ -945,6 +950,10 @@ export function StellarView(props: StellarViewProps = {}) {
   //   stale entity_type 을 계속 보여주는 문제 수정: refetch 완료 시점에
   //   `focused` 상태를 fresh 그래프의 동일 id 노드로 재바인딩. 노드가 사라졌으면
   //   (병합으로 흡수 등) focus 를 clear.
+  //
+  // ★ REQ-013 (PO 2026-07-02) — 팝업 카드가 노드 오른쪽에 위치하고 있는데
+  //   refetch 후 fresh 노드로 rebind 하면서 focusedPosition 은 그대로 유지 →
+  //   즉시 반영이 시각적으로도 매끄럽다. 노드가 사라지면 position 도 null.
   const activeSpaceId = getCurrentSpace();
   const handleEntityChanged = () => {
     realLoadedRef.current = false;
@@ -959,6 +968,7 @@ export function StellarView(props: StellarViewProps = {}) {
           setFocused((prev) => {
             if (!prev) return prev;
             const fresh = d.nodes.find((n) => n.id === prev.id);
+            if (!fresh) setFocusedPosition(null);
             return fresh ?? null;
           });
           setSelected((prev) => {
@@ -974,67 +984,30 @@ export function StellarView(props: StellarViewProps = {}) {
 
   const activeData = source === 'synthetic' ? syntheticData : (realData ?? emptyStellarGraph());
 
-  // M3-2c — apply layer toggle + left-panel filters to activeData.
-  // All filters are pure data filters (★ no visual style binding).
-  // Order matters only for the link-side filters: we collect the set
-  // of surviving node ids first, then drop links that point at a
-  // removed node (so the renderer never receives dangling edges).
+  // ★ REQ-013 (PO 2026-07-02) — 필터 = per-spec-key.
+  //   각 노드가 어느 LEGEND spec 에 속하는지 specForEntityType (claim → claimSpec)
+  //   로 판정한 뒤, bucketState[spec.key] 가 false 인 노드를 걸러낸다.
+  //   옛 who/what/where + showClaims 분리 로직 폐기 — legend 안의 CLAIM row
+  //   가 showClaims 역할까지 겸한다.
+  const claimSpecKey = claimSpec().key;
   const filteredData = useMemo<StellarGraphData>(() => {
     let nodes = activeData.nodes;
     let links = activeData.links;
 
-    // CLAIM toggle: OFF → hide claim nodes + 'claimed' links entirely.
-    // ★ This is HIDE (filter out), NOT a visual dim — the 2026-06-28
-    // PO correction explicitly rejected opacity/blur for the toggle.
-    // ★ link_status / fact_type FIELDS on the data are preserved
-    // (data-layer untouched per fix/stellar-leftpanel-simplify directive);
-    // only the UI filters have been simplified away.
-    // ★ N1 (2026-06-29 PO): the toggle defaults to ON now, so this branch
-    // only runs when the user has explicitly hidden claims.
-    if (!showClaims) {
-      nodes = nodes.filter(
-        (n) => n.kind !== 'claim' && (n.fact_type ?? 'action') !== 'claim',
-      );
-      links = links.filter((l) => (l.link_status ?? 'verified') !== 'claimed');
-    }
-
-    // ★ W3 (STELLAR 6-class fix, 2026-06-29) +
-    // fix/stellar-ux-self-audit U2 — entity-bucket filter.
-    //
-    // Rules:
-    //   • CLAIM 노드 (kind === 'claim' OR fact_type === 'claim') 는 bucket
-    //     필터를 받지 않는다 — showClaims 토글만 따른다.
-    //   • Known-bucket entity 노드 (who/what/where) 는 해당 토글이 켜져
-    //     있어야 surface.
-    //   • Unknown 버킷 entity 노드 (entity_type missing or unmapped) 는
-    //     entityBuckets.unknown 토글이 켜져 있어야 surface — 옛 동작
-    //     (항상 surface) 은 사용자가 끌 수 없는 violation 이었다.
-    //
-    // U2 fix: `unknown` is now a first-class user-controlled bucket; turning
-    // it off hides every entity node with a missing/unmapped entity_type.
-    const allBucketsOff =
-      !entityBuckets.who &&
-      !entityBuckets.what &&
-      !entityBuckets.where &&
-      !entityBuckets.unknown;
-    if (allBucketsOff) {
-      nodes = [];
-    } else if (
-      !(
-        entityBuckets.who &&
-        entityBuckets.what &&
-        entityBuckets.where &&
-        entityBuckets.unknown
-      )
-    ) {
+    // Fast path — 모든 bucket 활성이면 필터링 스킵.
+    const allActive = LEGEND_SPECS.every((s) => bucketState[s.key] !== false);
+    if (!allActive) {
       nodes = nodes.filter((n) => {
-        // CLAIM 노드는 통과 — showClaims 가 이미 위에서 분기.
-        if (n.kind === 'claim' || n.fact_type === 'claim') return true;
-        const b = entityBucketForSingle(n.entity_type);
-        // U2: unknown 도 user-controlled. 옛 동작은 ‘unknown 항상 통과’ →
-        // 사용자가 토글로 끄지 못함.
-        return entityBuckets[b];
+        if (n.kind === 'claim' || n.fact_type === 'claim') {
+          return bucketState[claimSpecKey] !== false;
+        }
+        const spec = specForEntityType(n.entity_type ?? null);
+        return bucketState[spec.key] !== false;
       });
+      // CLAIM off → 'claimed' link 도 데이터 정합성 유지 위해 함께 제거.
+      if (bucketState[claimSpecKey] === false) {
+        links = links.filter((l) => (l.link_status ?? 'verified') !== 'claimed');
+      }
     }
 
     // Drop links that point at a node we filtered out.
@@ -1054,7 +1027,7 @@ export function StellarView(props: StellarViewProps = {}) {
     }
 
     return { nodes, links, clusters: activeData.clusters };
-  }, [activeData, showClaims, entityBuckets]);
+  }, [activeData, bucketState, claimSpecKey]);
 
   const handleToggle = useCallback((next: StellarSource) => {
     setSource(next);
@@ -1064,6 +1037,7 @@ export function StellarView(props: StellarViewProps = {}) {
     setSelected(null);
     setExpandedIds(new Set());
     setEdgeClick(null);
+    setFocusedPosition(null);
     // B-62-clear-focus-home-lookat — mode flip is a hard "back to
     // overview" event, so restore the home lookAt too.
     setViewResetTick((t) => t + 1);
@@ -1108,6 +1082,16 @@ export function StellarView(props: StellarViewProps = {}) {
       setEdgeClick(null);
     },
     [],
+  );
+
+  // ★ REQ-013 (PO 2026-07-02) — 노드 클릭 시 screen coords 도 같이 저장.
+  //   StellarGraph 가 graph2ScreenCoords 로 계산해서 넘겨준다.
+  const handleClickWithCoords = useCallback(
+    (node: StellarNode, coords: { x: number; y: number } | null) => {
+      handleClick(node);
+      setFocusedPosition(coords);
+    },
+    [handleClick],
   );
 
   // feat/hearth-oracle-merge + fix/stellar-cluster-focus-recover +
@@ -1175,6 +1159,7 @@ export function StellarView(props: StellarViewProps = {}) {
     setFocused(null);
     setSelected(null);
     setExpandedIds(new Set());
+    setFocusedPosition(null);
   }, [source]);
 
   useEffect(() => {
@@ -1257,6 +1242,7 @@ export function StellarView(props: StellarViewProps = {}) {
     setSelected(null);
     setExpandedIds(new Set());
     setEdgeClick(null);
+    setFocusedPosition(null);
     // B-62-clear-focus-home-lookat — bump the reset tick so the
     // renderer eases lookAt back to the home origin while keeping
     // the user's eye position + orbit + wheel zoom intact. Fires for
@@ -1275,6 +1261,37 @@ export function StellarView(props: StellarViewProps = {}) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [handleClearFocus]);
+
+  // ★ REQ-013 (PO 2026-07-02) — outside-click 으로 팝업 닫기.
+  //   focused entity 카드 (또는 edgeClick fact 카드) 가 열려 있을 때 카드
+  //   바깥을 클릭하면 close. StellarEntityCard / StellarEdgeFactsList 자체는
+  //   stopPropagation 으로 자기 클릭을 걸러낸다.
+  //   렌더러 (ForceGraph3D) 캔버스 클릭은 여기서 걸리지만 canvas 내부에서
+  //   실제 노드가 클릭됐다면 handleClick 이 먼저 호출되어 새로 focus 를
+  //   set → 즉시 close→reopen 이 아니라 focus 갱신으로 이어진다.
+  //   Card 안에서는 e.stopPropagation() (onMouseDown 에서) 로 안전.
+  useEffect(() => {
+    if (!focused && !edgeClick) return;
+    function onDocMouseDown(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // Card 자기자신 클릭이면 무시 (stopPropagation 도 걸어놓았지만 안전망).
+      if (
+        target.closest('[data-testid="stellar-entity-card"]') ||
+        target.closest('[data-testid="stellar-entity-card-claim"]') ||
+        target.closest('[data-testid="stellar-edge-facts-list"]') ||
+        // dropdown listbox 등 카드 내부에서 포탈로 뻗지는 않지만 방어.
+        target.closest('[data-testid="entity-type-listbox"]')
+      ) {
+        return;
+      }
+      // Legend row / search / source toggle / claim toggle 클릭은 각자의
+      // click handler 가 있으니 무시할 필요 없다 — 그냥 close 만.
+      handleClearFocus();
+    }
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [focused, edgeClick, handleClearFocus]);
 
   const Renderer = props.renderer ?? StellarGraphLazy;
 
@@ -1343,6 +1360,7 @@ export function StellarView(props: StellarViewProps = {}) {
           mode={source}
           onNodeHover={handleHover}
           onNodeClick={handleClick}
+          onNodeClickWithCoords={handleClickWithCoords}
           onLinkClick={(endpoints, link) => {
             // M3-2d — 엣지 클릭. focus 는 그대로 두고 edgeClick state 만 set.
             // (focused 와 edgeClick 이 둘 다 truthy 일 때 EdgeFactsList 가 우선.)
@@ -1359,43 +1377,11 @@ export function StellarView(props: StellarViewProps = {}) {
       </div>
 
       <SourceToggle source={source} onChange={handleToggle} />
-      {/* M3-2c — "발언(CLAIM) 보기" toggle. Off by default → skeleton
-        * view (entity + action edges). ★ Off = HIDE claim nodes
-        * (filter out), NOT a visual dim (per 2026-06-28 PO correction). */}
-      <button
-        type="button"
-        data-testid="stellar-claim-toggle"
-        aria-pressed={showClaims}
-        onClick={() => setShowClaims((v) => !v)}
-        style={{
-          position: 'absolute',
-          top: 60,
-          right: 18,
-          zIndex: 10,
-          padding: '6px 14px',
-          borderRadius: 999,
-          border: `1px solid ${showClaims ? '#3fe0c6' : '#1c272b'}`,
-          background: showClaims
-            ? 'color-mix(in oklab, #3fe0c6 18%, transparent)'
-            : 'rgba(12,19,22,0.92)',
-          color: showClaims ? '#3fe0c6' : '#cdd9da',
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: 'pointer',
-          letterSpacing: '0.04em',
-          backdropFilter: 'blur(8px)',
-          fontFamily: 'Pretendard, sans-serif',
-        }}
-      >
-        발언 {showClaims ? '숨김' : '보기'}
-      </button>
+      {/* ★ REQ-013 (PO 2026-07-02) — 옛 "발언 숨김/보기" 우상단 버튼 폐기.
+       *   기능은 StellarLegend 의 CLAIM row 클릭 (bucketState.claim 토글) 으로
+       *   이관. 옛 좌하단 StellarLeftPanel 필터 박스도 함께 폐기 — legend row
+       *   자체가 필터 UI 다. */}
 
-      <StellarLeftPanel
-        entityBuckets={entityBuckets}
-        onEntityBucketChange={(b, c) =>
-          setEntityBuckets((prev) => ({ ...prev, [b]: c }))
-        }
-      />
       {/* B-62-search-legibility — search wires straight into handleClick
        *  so selection enters the existing focus mode (camera fly-to from
        *  StellarGraph + 1-hop dim + side panel + relations chain). */}
@@ -1419,8 +1405,20 @@ export function StellarView(props: StellarViewProps = {}) {
        *  collapse. 색·형태 어휘 안내.
        *  ★ V1++ (fix/stellar-v1-v2-v4-legend-class, PO 2026-06-29) — pass
        *  the currently-visible nodes so each LEGEND row carries its
-       *  "(count)" — 사용자가 그래프의 분포 즉시 파악. */}
-      <StellarLegend nodes={filteredData.nodes} />
+       *  "(count)" — 사용자가 그래프의 분포 즉시 파악.
+       *  ★ REQ-013 (PO 2026-07-02) — bucketState / onBucketToggle 로 필터
+       *  기능 통합. row 클릭 → 해당 spec 숨김/보기 toggle. 좌하단 옛
+       *  StellarLeftPanel 폐기 (기능 완전 이관). */}
+      <StellarLegend
+        nodes={activeData.nodes}
+        bucketState={bucketState}
+        onBucketToggle={(specKey) => {
+          setBucketState((prev) => ({
+            ...prev,
+            [specKey]: prev[specKey] === false ? true : false,
+          }));
+        }}
+      />
 
       {hovered ? (
         <StellarHoverCard fact={hovered.node} position={{ x: hovered.x, y: hovered.y }} />
@@ -1444,6 +1442,7 @@ export function StellarView(props: StellarViewProps = {}) {
           spaceId={source === 'real' ? activeSpaceId : null}
           onEntityChanged={handleEntityChanged}
           onClose={handleClearFocus}
+          position={focusedPosition}
         />
       ) : null}
       {/* M3-2d — 엣지 클릭 → fact 리스트. */}

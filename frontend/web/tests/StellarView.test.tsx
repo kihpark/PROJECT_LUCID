@@ -1139,7 +1139,11 @@ describe('StellarView', () => {
     });
   });
 
-  describe('M3-2c layer toggle + filters', () => {
+  // ★ REQ-013 (PO 2026-07-02) — 옛 우상단 stellar-claim-toggle 버튼 폐기 +
+  //   좌하단 StellarLeftPanel (stellar-filter-entity-*) 폐기. 두 기능은
+  //   StellarLegend row 클릭으로 통합. 이 describe 블록의 회귀 잠금은
+  //   대응 UI 가 사라졌으므로 skip. legend row 토글 검증은 새 스펙에서 담당.
+  describe.skip('M3-2c layer toggle + filters', () => {
     function mixedBuilder(): StellarGraphData {
       return {
         nodes: [
@@ -1375,7 +1379,9 @@ describe('M3-2e regression guard - interactions', () => {
     expect(screen.queryByTestId('stellar-focus-panel')).not.toBeInTheDocument();
   });
 
-  it('M3-2b visual vocab + M3-2c toggle + M3-2d card all work together', () => {
+  // ★ REQ-013 (PO 2026-07-02) — stellar-claim-toggle + stellar-filter-entity-*
+  //   폐기. StellarLegend row 로 통합. skip.
+  it.skip('M3-2b visual vocab + M3-2c toggle + M3-2d card all work together', () => {
     function builder(): StellarGraphData {
       return {
         nodes: [
@@ -1410,7 +1416,8 @@ describe('M3-2e regression guard - interactions', () => {
     expect(screen.queryByTestId('stellar-entity-card')).not.toBeInTheDocument();
   });
 
-  it('dashed/dim/grey regression guard (PO 2026-06-28 correction)', () => {
+  // ★ REQ-013 (PO 2026-07-02) — stellar-claim-toggle 폐기. skip.
+  it.skip('dashed/dim/grey regression guard (PO 2026-06-28 correction)', () => {
     function builder(): StellarGraphData {
       return {
         nodes: [
@@ -1559,9 +1566,14 @@ describe('M3-2e regression guard - interactions', () => {
     const typeEl = await screen.findByTestId('stellar-entity-card-type');
     expect(typeEl.getAttribute('data-entity-type')).toBe('organization');
 
-    // 2) 드롭박스에서 location 선택 + 저장.
-    const select = screen.getByTestId('entity-type-select') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'location' } });
+    // 2) ★ REQ-013 (PO 2026-07-02) — native <select> 폐기 → custom dropdown.
+    //   trigger 열고 option 클릭.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('entity-type-select'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('entity-type-option-location'));
+    });
     await act(async () => {
       fireEvent.click(screen.getByTestId('entity-type-save'));
     });

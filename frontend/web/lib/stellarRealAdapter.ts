@@ -39,7 +39,7 @@
  * ----------------------------------------------------------------------------
  */
 
-import { getHomeBrief, listSpaceFacts, recall } from './api';
+import { getHomeBrief, isMeaningfulLabel, listSpaceFacts, recall } from './api';
 import { getCurrentSpace } from './auth';
 import type { HomeBrief, RecallFact, RecallResponse } from './types';
 import { attachGraphMetrics } from './syntheticGraph';
@@ -90,10 +90,17 @@ function ensureEntity(
   label: string | null | undefined,
   entityType: string | null | undefined,
 ): StellarNode {
+  // ★ REQ-013 (PO 2026-07-02) — "." bug 2차 방어선.
+  //   Backend suggest_entities 가 이미 punctuation-only labels 를 걸러내지만
+  //   listSpaceFacts / recall 응답에는 subject_label 이 여전히 "." 로 올 수
+  //   있다 (다른 API path). 여기서 label meaningful 아니면 UNRESOLVED 로
+  //   교체 → STELLAR 노드 label 에 "." 이 들어가면 SearchBar 자동완성 에
+  //   surface 될 여지가 원천 차단.
+  const safeLabel = isMeaningfulLabel(label) ? label : null;
   const existing = acc.entities.get(uid);
   if (existing) {
     if (!existing.label || existing.label === UNRESOLVED_ENTITY_LABEL) {
-      if (label) existing.label = label;
+      if (safeLabel) existing.label = safeLabel;
     }
     if (!existing.entity_type && entityType) {
       existing.entity_type = entityType;
@@ -104,7 +111,7 @@ function ensureEntity(
   }
   const node: StellarNode = {
     id: uid,
-    label: label || UNRESOLVED_ENTITY_LABEL,
+    label: safeLabel || UNRESOLVED_ENTITY_LABEL,
     kind: 'entity',
     cluster: 0,
     weight: 1,
