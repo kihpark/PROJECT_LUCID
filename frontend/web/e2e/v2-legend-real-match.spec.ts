@@ -120,7 +120,8 @@ test('V2: LEGEND swatch matches the rendered node mesh for WHERE and EVENT', asy
   expect(legendPlaceColor).toBeTruthy();
 
   // ── EVENT row ─────────────────────────────────────────────────────────
-  const eventSwatch = page.getByTestId('stellar-legend-swatch-event');
+  // ★ 2026-07-01 — event 는 WHAT 6 소분류 중 하나 (what-event) 로 이동.
+  const eventSwatch = page.getByTestId('stellar-legend-swatch-what-event');
   await expect(eventSwatch).toBeVisible();
   const legendEventShape = await eventSwatch.getAttribute('data-shape');
   const legendEventColor = await eventSwatch.getAttribute('data-color');

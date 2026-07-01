@@ -37,14 +37,18 @@ test('V1++: LEGEND rows display per-category node counts', async ({
   await expect(legend).toBeVisible();
 
   // Every row must carry a data-count attribute that parses as a number ≥ 0.
+  // ★ 2026-07-01 — WHAT 6 소분류 전부 별도 row. event top-level 폐기 →
+  //   what-event 로 흡수.
   const rowKeys = [
     'person',
     'organization',
     'group',
     'what-resource',
-    'what-knowledge',
+    'what-concept',
     'what-task',
-    'event',
+    'what-knowledge',
+    'what-event',
+    'what-metric',
     'place',
     'claim',
     'unknown',
