@@ -114,15 +114,36 @@ function uniqueSourceCount(resp: RecallResponse | null): number {
 }
 
 /** ★ REQ-011-v2 — RecallFact hits[] → mini graph data.
- *  의뢰서 STEP 1.5 verbatim:
- *    "subject_uid + object_uid 만 추출 (★ literal skip)."
+ *
+ *  ── ★ fix/recall-v2-mini-graph (PO 2026-07-01) — Option C. ──────────────
+ *    옛 로직 = `fact.object_uid` 존재 여부로 entity-entity edge 판정.
+ *    문제: backend `_hit_to_fact` (backend/api/routes/recall.py:317-377) 가
+ *    `object_uid` 필드를 채우지 않는다 — RecallFact pydantic 모델 (backend/
+ *    api/models/recall.py) 에도 없음. 실 recall 응답의 `object_value` 는
+ *    entity ref 일 때 UUID4, literal 일 때 자연어 문자열.
+ *    → 옛 조건은 항상 false 로 트리핑 → 미니 그래프 empty state.
+ *
+ *    STELLAR real adapter (frontend/web/lib/stellarRealAdapter.ts:56-58) 는
+ *    `isEntityRef(object_value)` — UUID4 정규식 — 로 판정한다. 같은 삼성전자
+ *    검색이 STELLAR 에서는 5 엣지 그리는 이유. PO 명령 "STELLAR 와 동일 경로":
+ *    미니 그래프도 동일 판정 로직 재 사용.
+ *
+ *    fallback 순서 (기존 e2e mock 호환):
+ *      1) fact.object_uid 명시 (mock/legacy) → 그대로 사용.
+ *      2) isEntityRef(fact.object_value) 참 → object_value 를 uid 로 사용.
+ *      3) 둘 다 아님 → literal, skip.
  *
  *  center = 첫 fact 의 subject_label (가장 자주 등장하는 subject 로 잡지 않고
  *  단순히 첫 번째 — 시안의 "질의 대상이 중앙" 직관과 일치, v3 에서 frequency
  *  기반으로 교체).
- *  nodes = (label, edge=predicate) 의 중복 제거 list. literal-only objects
- *  (object_uid 없음) 는 시안 verbatim 의 "subject_uid + object_uid 만 추출"
- *  지시에 따라 skip — 미니 그래프는 entity-entity 만. */
+ *  nodes = (label, edge=predicate) 의 중복 제거 list. */
+const UUID4_RE_MINI_GRAPH =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isEntityRefValue(v: string | null | undefined): boolean {
+  return typeof v === 'string' && UUID4_RE_MINI_GRAPH.test(v);
+}
+
 function deriveGraphFromFacts(resp: RecallResponse | null): {
   center: string;
   nodes: { label: string; edge: string }[];
@@ -137,11 +158,22 @@ function deriveGraphFromFacts(resp: RecallResponse | null): {
   const seen = new Set<string>();
   const nodes: { label: string; edge: string }[] = [];
   for (const fact of resp.facts) {
-    // entity-entity 만 — literal object skip.
-    if (!fact.subject_uid || !fact.object_uid) continue;
-    const label = fact.object_label && fact.object_label.trim()
-      ? fact.object_label
-      : fact.object_value;
+    if (!fact.subject_uid) continue;
+    // ★ STELLAR adapter 동일 로직: object_uid 명시(mock/legacy) 또는
+    //   isEntityRef(object_value) 면 entity-entity edge. 둘 다 아니면 literal → skip.
+    const objectIsEntity =
+      Boolean(fact.object_uid) || isEntityRefValue(fact.object_value);
+    if (!objectIsEntity) continue;
+    // label 우선순위: object_label (backend resolve) > object_value literal.
+    //   실 backend 응답에서 object_value 가 UUID 인 경우 object_label 이 이미
+    //   entity name 으로 채워져 있음 (_enrich_with_labels). label 이 없는데
+    //   UUID 로 fallback 하면 화면에 UUID 가 노출되므로 skip.
+    const label =
+      fact.object_label && fact.object_label.trim()
+        ? fact.object_label
+        : isEntityRefValue(fact.object_value)
+          ? null
+          : fact.object_value;
     if (!label) continue;
     const edge = fact.predicate_label && fact.predicate_label.trim()
       ? fact.predicate_label
