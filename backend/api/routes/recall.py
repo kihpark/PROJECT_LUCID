@@ -648,6 +648,63 @@ def _facts_for_entity(
         return []
 
 
+def _facts_strictly_referencing_entity(
+    entity_uids: list[str],
+    knowledge_space_id: str,
+    *,
+    max_hits: int = 200,
+    include_retracted: bool = False,
+) -> list[dict[str, Any]]:
+    """★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01).
+
+    Return every manual fact in this KS where ANY of `entity_uids`
+    appears in ANY of the entity-carrying slots on the ES doc:
+      - subject_uid
+      - object_value  (v3 canonical uid; may be a literal for non-entity objs)
+      - speaker_uid   (v0.2 claim-layer speaker)
+      - related_entity_uids  (m3-2a STELLAR v2 — claim-body referenced entities)
+
+    This is the "entity 정확 매칭" fetch. HEARTH previously synthesized
+    "A 는 B 와 함께 X" from an embedding hit that referenced B (not A),
+    which is a cross-entity hallucination. The strict fetch is the
+    guard: if the query resolves to A, only facts where A actually
+    appears on one of the entity-carrying slots are returned. Cross-
+    entity relations (co-mentions in claim bodies) come via
+    `related_entity_uids`, which the extractor writes when an entity
+    is *mentioned* inside a claim; the LLM can then answer about A
+    without inventing relations that weren't stored.
+    """
+    if not entity_uids:
+        return []
+    filters: list[dict[str, Any]] = [
+        {"term": {"knowledge_space_id": knowledge_space_id}},
+        {"term": {"validation_method": "manual"}},
+        {"bool": {
+            "should": [
+                {"terms": {"subject_uid": entity_uids}},
+                {"terms": {"object_value": entity_uids}},
+                {"terms": {"speaker_uid": entity_uids}},
+                {"terms": {"related_entity_uids": entity_uids}},
+            ],
+            "minimum_should_match": 1,
+        }},
+    ]
+    retract = _retracted_clause(include_retracted)
+    if retract is not None:
+        filters.append(retract)
+    body: dict[str, Any] = {
+        "query": {"bool": {"filter": filters}},
+        "size": max_hits,
+    }
+    try:
+        client = get_client()
+        resp = client.search(index=LUCID_FACTS, body=body)
+        return list(resp["hits"]["hits"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("recall: strict-entity fact lookup failed: %s", exc)
+        return []
+
+
 def _build_entity_brief(
     q: str, knowledge_space_id: str,
 ) -> EntityBrief | None:
@@ -1087,14 +1144,26 @@ def recall(
         return _empty("no_query")
 
     facts: list[RecallFact] = []
+    # ★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01).
+    # When True we entered the strict entity-match path — either via an
+    # explicit `entity=` autocomplete pick, or via a confident entity-name
+    # resolution of `q`. In strict mode we return ONLY facts referencing
+    # the entity on entity-carrying slots (no kNN, no cross-entity graph
+    # expansion). If the strict path yields zero facts we fall back to
+    # similarity kNN and tag those `similarity_fallback` for the amber FE
+    # badge. See RecallFact.match_kind doc.
+    strict_entity_mode = False
+    strict_entity_yielded_zero = False
 
     if not q_norm and entity_uids_in:
-        # entity-only path — _facts_for_entity 는 subject_uid / object_value
-        # 둘 다 (★ v3: object_value 가 entity uid) 잡아 준다. match_kind 는
-        # "entity_link" 로 두어 FE 가 🔗 badge 를 렌더하도록.
+        # entity-only path — 명시적 autocomplete pick. 이 자체가 strict
+        # entity 매칭이다: kNN 없이 entity 참조 fact 만 반환.
+        strict_entity_mode = True
         try:
-            seed_hits = _facts_for_entity(
-                list(entity_uids_in), str(ks.id), max_hits=limit * 3,
+            seed_hits = _facts_strictly_referencing_entity(
+                list(entity_uids_in), str(ks.id),
+                max_hits=limit * 3,
+                include_retracted=include_retracted_bool,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("recall: entity-only fetch failed: %s", exc)
@@ -1103,33 +1172,112 @@ def recall(
             fact = _hit_to_fact(h)
             if fact is not None:
                 facts.append(
-                    fact.model_copy(update={"match_kind": "entity_link"})
+                    fact.model_copy(update={"match_kind": "entity_direct"})
                 )
+        if not facts:
+            strict_entity_yielded_zero = True
     else:
-        embedding = get_embedding(q_norm)
-        if embedding is None:
-            return _empty("embedding_unavailable")
-
+        # ★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01).
+        # Attempt entity 정확 매칭 BEFORE embedding kNN. If `q` names a
+        # known entity in this KS (confident bigram Jaccard >= 0.6, same
+        # gate as the existing name-fallback), the strict path returns
+        # ONLY facts referencing that entity_uid on entity-carrying slots.
+        # No kNN, no cross-entity expansion — that's the hallucination
+        # guard: HEARTH cannot synthesize "A 는 B 와 함께" from a fact
+        # that mentions B (not A). When strict yields zero we fall back
+        # to similarity kNN below and tag those `similarity_fallback`.
+        resolved_entity_uids: list[str] = []
         try:
-            hits = _knn_facts_validated_only(
-                list(embedding), str(ks.id), limit,
-                entity_filter_uids=list(entity_uids_in),
-                include_retracted=include_retracted_bool,
-                date_from=df,
-                date_to=dt,
-            )
-        except Exception as exc:  # noqa: BLE001 - degrade quietly
-            logger.warning("recall: ES kNN failed: %s", exc)
-            return _empty("es_unavailable")
+            _q_matches = _resolve_entities_by_name(q_norm, str(ks.id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall: entity resolve for strict path failed: %s", exc)
+            _q_matches = []
 
-        for hit in hits:
-            score = float(hit.get("_score") or 0.0)
-            if score < threshold:
-                # Hits are sorted by score desc; first below-floor → stop.
-                break
-            fact = _hit_to_fact(hit)
-            if fact is not None:
-                facts.append(fact)
+        def _resolve_is_confident(doc: dict[str, Any]) -> bool:
+            candidates: list[str] = []
+            for _k in ("name", "name_en"):
+                _v = doc.get(_k)
+                if isinstance(_v, str) and _v.strip():
+                    candidates.append(_v)
+            aliases = doc.get("aliases")
+            if isinstance(aliases, list):
+                candidates.extend(
+                    a for a in aliases if isinstance(a, str) and a.strip()
+                )
+            return any(
+                _entity_match_is_confident(q_norm, name) for name in candidates
+            )
+
+        confident_q_matches = [d for d in _q_matches if _resolve_is_confident(d)]
+        resolved_entity_uids = [
+            uid for uid in (
+                doc.get("object_uid") for doc in confident_q_matches
+            )
+            if isinstance(uid, str)
+        ]
+        if resolved_entity_uids:
+            strict_entity_mode = True
+            try:
+                strict_hits = _facts_strictly_referencing_entity(
+                    resolved_entity_uids, str(ks.id),
+                    max_hits=limit * 3,
+                    include_retracted=include_retracted_bool,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "recall: strict entity fetch failed: %s", exc,
+                )
+                strict_hits = []
+            for h in strict_hits:
+                fact = _hit_to_fact(h)
+                if fact is None:
+                    continue
+                # ★ AND-intersect with any explicit entity= filter (B-49).
+                if entity_uids_in:
+                    src = h.get("_source") or {}
+                    ok = all(
+                        (
+                            src.get("subject_uid") == uid
+                            or src.get("object_value") == uid
+                            or src.get("speaker_uid") == uid
+                            or uid in (src.get("related_entity_uids") or [])
+                        )
+                        for uid in entity_uids_in
+                    )
+                    if not ok:
+                        continue
+                facts.append(
+                    fact.model_copy(update={"match_kind": "entity_direct"})
+                )
+            if not facts:
+                strict_entity_yielded_zero = True
+
+        if not strict_entity_mode:
+            # 옛 embedding path — q 가 entity 로 해석되지 않을 때만.
+            embedding = get_embedding(q_norm)
+            if embedding is None:
+                return _empty("embedding_unavailable")
+
+            try:
+                hits = _knn_facts_validated_only(
+                    list(embedding), str(ks.id), limit,
+                    entity_filter_uids=list(entity_uids_in),
+                    include_retracted=include_retracted_bool,
+                    date_from=df,
+                    date_to=dt,
+                )
+            except Exception as exc:  # noqa: BLE001 - degrade quietly
+                logger.warning("recall: ES kNN failed: %s", exc)
+                return _empty("es_unavailable")
+
+            for hit in hits:
+                score = float(hit.get("_score") or 0.0)
+                if score < threshold:
+                    # Hits are sorted by score desc; first below-floor → stop.
+                    break
+                fact = _hit_to_fact(hit)
+                if fact is not None:
+                    facts.append(fact)
 
     # B-45-fix3: if no fact survives the kNN floor, try the entity
     # name path. Korean-text image facts often fail cross-lingual kNN
@@ -1140,8 +1288,14 @@ def recall(
     # of that entity's manual facts. The kNN match_kind label stays
     # "embedding" so the UI still shows a 🔍 badge; users see the
     # facts they searched for rather than an empty envelope.
+    #
+    # ★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01):
+    # skip this fallback when we're in strict-entity mode. In strict mode
+    # the entity resolved but yielded 0 facts — we want the similarity kNN
+    # fallback right below, NOT another entity-scoped fetch (which would
+    # loop back and return 0 again).
     entity_seed_uids: list[str] = []
-    if not facts:
+    if not facts and not strict_entity_mode:
         try:
             matched_entities = _resolve_entities_by_name(q, str(ks.id))
         except Exception as exc:  # noqa: BLE001
@@ -1198,6 +1352,46 @@ def recall(
                 if fact is not None:
                     facts.append(fact)
 
+    # ★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01):
+    # strict entity mode found the entity but 0 direct facts → fall back
+    # to similarity kNN so the user sees SOMETHING (with an amber "유사
+    # 참고" badge on every card). Skip when q was empty (entity-only pick
+    # with no facts: return the empty envelope — the user picked a real
+    # entity that just has no facts yet).
+    if (
+        not facts
+        and strict_entity_mode
+        and strict_entity_yielded_zero
+        and q_norm
+    ):
+        try:
+            fallback_embedding = get_embedding(q_norm)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall: fallback embedding failed: %s", exc)
+            fallback_embedding = None
+        if fallback_embedding is not None:
+            try:
+                fallback_hits = _knn_facts_validated_only(
+                    list(fallback_embedding), str(ks.id), limit,
+                    include_retracted=include_retracted_bool,
+                    date_from=df,
+                    date_to=dt,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("recall: fallback kNN failed: %s", exc)
+                fallback_hits = []
+            for hit in fallback_hits:
+                score = float(hit.get("_score") or 0.0)
+                if score < threshold:
+                    break
+                fact = _hit_to_fact(hit)
+                if fact is not None:
+                    facts.append(
+                        fact.model_copy(
+                            update={"match_kind": "similarity_fallback"},
+                        )
+                    )
+
     if not facts:
         return _empty("no_facts_above_floor")
 
@@ -1207,39 +1401,48 @@ def recall(
     # "SpaceX 검색 -> SpaceX 가 subject 든 object 든 등장하는 fact 전부".
     # B-50-fix: always runs — the client filters 🔗 rows on display
     # if the user wants to hide them.
+    #
+    # ★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01):
+    # SKIP the cross-entity graph expansion when we're in strict entity
+    # mode. The whole point of strict mode is to prevent HEARTH from
+    # synthesizing "A 는 B 와 함께" when the recall carried a B-referencing
+    # fact via graph-neighbour expansion. Only run the expansion for
+    # the legacy embedding path where the query did not resolve to
+    # an entity.
     expansion_count = 0
-    link_hits: list[dict[str, Any]] = []
-    entity_uids = _collect_entity_uids(facts)
-    already = {f.fact_uid for f in facts}
-    try:
-        link_hits = _entity_link_facts(
-            entity_uids, str(ks.id),
-            exclude_fact_uids=already,
-            max_hits=max(RECALL_MAX_K, limit * 5),
-            include_retracted=include_retracted_bool,
-            date_from=df,
-            date_to=dt,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("recall: entity-link expansion failed: %s", exc)
-        link_hits = []
-    for hit in link_hits:
-        fact = _hit_to_fact(hit)
-        if fact is None:
-            continue
-        # B-49: entity filter is AND. Drop expanded facts that don't
-        # reference every active filter uid.
-        if entity_uids_in:
-            src = hit.get("_source") or {}
-            ok = all(
-                src.get("subject_uid") == uid or src.get("object_value") == uid
-                for uid in entity_uids_in
+    if not strict_entity_mode:
+        link_hits: list[dict[str, Any]] = []
+        entity_uids = _collect_entity_uids(facts)
+        already = {f.fact_uid for f in facts}
+        try:
+            link_hits = _entity_link_facts(
+                entity_uids, str(ks.id),
+                exclude_fact_uids=already,
+                max_hits=max(RECALL_MAX_K, limit * 5),
+                include_retracted=include_retracted_bool,
+                date_from=df,
+                date_to=dt,
             )
-            if not ok:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall: entity-link expansion failed: %s", exc)
+            link_hits = []
+        for hit in link_hits:
+            fact = _hit_to_fact(hit)
+            if fact is None:
                 continue
-        fact = fact.model_copy(update={"match_kind": "entity_link"})
-        facts.append(fact)
-        expansion_count += 1
+            # B-49: entity filter is AND. Drop expanded facts that don't
+            # reference every active filter uid.
+            if entity_uids_in:
+                src = hit.get("_source") or {}
+                ok = all(
+                    src.get("subject_uid") == uid or src.get("object_value") == uid
+                    for uid in entity_uids_in
+                )
+                if not ok:
+                    continue
+            fact = fact.model_copy(update={"match_kind": "entity_link"})
+            facts.append(fact)
+            expansion_count += 1
 
     facts = _enrich_with_labels(facts, str(ks.id))
 

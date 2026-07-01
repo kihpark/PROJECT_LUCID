@@ -197,7 +197,20 @@ export interface RecallFact {
   negation_scope: 'full' | 'partial' | null;
   score: number;
   // B-25 stage 2 / B-35 wiring.
-  match_kind?: 'embedding' | 'entity_link';
+  // fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01):
+  // added `entity_direct` (teal "직접 언급") + `similarity_fallback`
+  // (amber "유사 참고"). Backend uses `entity_direct` when the query
+  // resolves to a known entity and only strictly-referencing facts
+  // are returned; `similarity_fallback` when the strict path yielded
+  // 0 and the similarity kNN filled in. Legacy `embedding` /
+  // `entity_link` remain for the non-entity-resolvable path and are
+  // rendered by the FE as amber "유사 참고" too (anything non-
+  // `entity_direct` reads as "유사 참고").
+  match_kind?:
+    | 'embedding'
+    | 'entity_link'
+    | 'entity_direct'
+    | 'similarity_fallback';
   // B-40 defect 1: server-resolved entity labels for subject/object.
   // Null when the uid isn't in lucid_objects or when object_value is a literal.
   subject_label?: string | null;

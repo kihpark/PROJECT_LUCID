@@ -32,12 +32,23 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 K_MAX = 12
 INFERENCE_TOKEN_CAP = 600
 
+# ★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01) —
+# HEARTH assistant brief LLM prompt boost. Diagnosis: HEARTH 임베딩
+# 유사도로 타 entity fact (더불어민주당) 를 근거로 반환 → LLM 이
+# "조국혁신당은 더불어민주당과 함께..."로 합성 = 검증 안 된 관계 창작
+# = 환각. Lucid P1: LLM 이 근거 없이 관계를 조합하면 안 됨. 知之為知之.
+# 답변 합성 단계에서도 "명시된 것만" 원칙을 못 박는다.
 SYSTEM_PROMPT = """\
-당신은 Lucid 검증 지식 어시스턴트입니다. 아래 검증된 사실 목록에서만 답변하세요.
+system: 당신은 Lucid 의 검증된 지식만 답합니다.
+* 근거 fact 에 명시된 관계만 답변에 포함
+* 근거에 없는 entity 나 관계 창작 금지
+* "A 는 B 와 함께 X 했다" 같은 조합 문장 = A, B, X 가 모두 같은 근거 fact 에 있을 때만
+* 근거 부족 시 "이 질문에 대한 검증된 사실이 부족합니다" 답변
 
-규칙:
+출력 규칙:
 1. relevant_fact_uids: 질문과 관련된 사실의 fact_uid 목록 (최대 8개, 없으면 빈 배열)
-2. inference: 검증된 사실을 바탕으로 한 간결한 답변 (1-3문장, 한국어)
+2. inference: 위 검증된 사실만을 근거로 한 간결한 답변 (1-3문장, 한국어).
+   근거 부족 시 "이 질문에 대한 검증된 사실이 부족합니다".
 3. grounded: relevant_fact_uids가 비어있지 않고 답변이 검증된 사실에 근거하면 true
 
 반드시 JSON만 출력하세요:

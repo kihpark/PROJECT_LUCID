@@ -38,7 +38,25 @@ class RecallFact(LucidBaseModel):
     negation_scope: Literal["full", "partial"] | None = None
     score: float
     # B-25 stage 2 / B-35 wiring: how this fact reached the response.
-    match_kind: Literal["embedding", "entity_link"] = "embedding"
+    # fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01):
+    # added `entity_direct` + `similarity_fallback` — when the query
+    # resolves to a known entity, the route now returns ONLY facts
+    # referencing that entity_uid on subject_uid / object_value /
+    # speaker_uid / related_entity_uids and tags them `entity_direct`
+    # (teal 직접 언급 badge). Zero direct hits falls back to similarity
+    # kNN with `similarity_fallback` tag (amber 유사 참고 badge). This
+    # is the hallucination guard: without the strict path HEARTH could
+    # synthesize "A 는 B 와 함께 X" from facts that never actually
+    # referenced A. Legacy `embedding` / `entity_link` remain in the
+    # union for the non-entity-resolvable query path — those keep the
+    # old semantics and the FE treats anything non-`entity_direct` as
+    # amber "유사 참고".
+    match_kind: Literal[
+        "embedding",
+        "entity_link",
+        "entity_direct",
+        "similarity_fallback",
+    ] = "embedding"
     # B-40 defect 1: server-resolved entity labels. The route looks each
     # subject_uid / entity-shape object_value up in lucid_objects and
     # serialises the human-readable name here so RecallView doesn't

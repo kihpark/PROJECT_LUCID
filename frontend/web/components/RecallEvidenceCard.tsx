@@ -69,6 +69,56 @@ function deriveRealDisplay(rf: RecallFact): {
   };
 }
 
+/**
+ * ★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01) —
+ * `match_kind` badge. Renders 직접 언급 (teal) when the fact was returned
+ * because the query *strictly* referenced this fact's entity, or 유사 참고
+ * (amber) when the fact reached the response via embedding similarity or
+ * cross-entity graph expansion. Anything non-`entity_direct` reads as
+ * 유사 참고 so the user always sees WHICH kind of match they're looking
+ * at. This is the visible half of the hallucination guard: users can
+ * tell at a glance whether HEARTH's answer is grounded in a direct
+ * mention or in a similarity neighbour.
+ */
+type MatchKind =
+  | 'embedding'
+  | 'entity_link'
+  | 'entity_direct'
+  | 'similarity_fallback'
+  | null
+  | undefined;
+
+function renderMatchKindBadge(kind: MatchKind) {
+  const isDirect = kind === 'entity_direct';
+  const label = isDirect ? '직접 언급' : '유사 참고';
+  const testKind = isDirect ? 'entity_direct' : 'similarity_fallback';
+  // Teal (직접 언급) — reuse the same teal token the subject / predicate
+  // pill already use (see #2DD4BF / rgba(45,212,191,*) below). Amber
+  // (유사 참고) — Tailwind amber-300/400 range (#FCD34D / #F59E0B),
+  // consistent with the moderation warning badges elsewhere in the FE.
+  const color = isDirect ? '#5fe6d3' : '#FBBF24';
+  const border = isDirect
+    ? 'rgba(45,212,191,0.35)'
+    : 'rgba(251,191,36,0.35)';
+  return (
+    <span
+      data-testid="recall-evidence-match-kind"
+      data-recall-match-kind={testKind}
+      className="font-mono"
+      style={{
+        fontSize: 10,
+        color,
+        border: `1px solid ${border}`,
+        borderRadius: 5,
+        padding: '1px 6px',
+        letterSpacing: '0.02em',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function RecallEvidenceCard(props: Props) {
   const isReal = 'realFact' in props && props.realFact !== undefined;
 
@@ -82,6 +132,12 @@ export function RecallEvidenceCard(props: Props) {
         date: props.fact!.date,
         by: props.fact!.by,
       };
+
+  // Only real facts carry a match_kind (v1 example mode has no such
+  // concept). Undefined here is treated as "유사 참고" in the badge
+  // renderer — safest default when the backend response predates the
+  // field.
+  const matchKind: MatchKind = isReal ? props.realFact!.match_kind : undefined;
 
   const handleSubjectClick = () => {
     if (isReal) {
@@ -178,6 +234,8 @@ export function RecallEvidenceCard(props: Props) {
         >
           {display.object}
         </span>
+        {/* ★ match_kind 배지 (real 모드 전용). */}
+        {isReal && renderMatchKindBadge(matchKind)}
       </div>
       {/* 메타 한 줄. */}
       <div
