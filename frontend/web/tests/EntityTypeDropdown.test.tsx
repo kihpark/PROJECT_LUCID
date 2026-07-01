@@ -14,23 +14,23 @@ describe('EntityTypeDropdown', () => {
     vi.restoreAllMocks();
   });
 
+  // ★ REQ-013 (PO 2026-07-02) — native <select> 폐기, custom <button>+<ul>.
+  //   같은 개수는 새 spec 이 data-testid=`entity-type-option-{value}` 로 담당.
   it('renders all 10 entity_type options (PO closed set)', () => {
-    render(
+    const { getByTestId } = render(
       <EntityTypeDropdown
         spaceId="space-1"
         entityUid="ent-1"
         currentType="organization"
       />,
     );
-    const select = screen.getByTestId('entity-type-select') as HTMLSelectElement;
-    // 10 options + 1 placeholder.
-    expect(select.options.length).toBe(11);
-    const values = Array.from(select.options).map((o) => o.value);
+    // Open the listbox.
+    fireEvent.click(getByTestId('entity-type-select'));
     for (const t of [
       'person', 'organization', 'group', 'knowledge', 'resource',
       'task', 'concept', 'event', 'metric', 'location',
     ]) {
-      expect(values).toContain(t);
+      expect(getByTestId(`entity-type-option-${t}`)).toBeTruthy();
     }
   });
 
@@ -79,8 +79,9 @@ describe('EntityTypeDropdown', () => {
         onChanged={onChanged}
       />,
     );
-    const select = screen.getByTestId('entity-type-select') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'location' } });
+    // ★ REQ-013 — 새 커스텀 dropdown: trigger click → option click.
+    fireEvent.click(screen.getByTestId('entity-type-select'));
+    fireEvent.click(screen.getByTestId('entity-type-option-location'));
     const button = screen.getByTestId('entity-type-save') as HTMLButtonElement;
     await act(async () => {
       fireEvent.click(button);
@@ -116,7 +117,10 @@ describe('EntityTypeDropdown', () => {
     expect(form.textContent).not.toMatch(/종류 변경/);
   });
 
-  it('select uses dark palette (dark theme regression lock)', () => {
+  // ★ REQ-013 (PO 2026-07-02) — native <select> 폐기, 커스텀 dropdown.
+  //   trigger button 이 dark 팔레트인지만 확인 (option 다크는 listbox <ul>
+  //   컴포넌트가 담당, DOM 은 open 시에만 존재).
+  it('trigger uses dark palette (dark theme regression lock)', () => {
     render(
       <EntityTypeDropdown
         spaceId="space-1"
@@ -124,14 +128,11 @@ describe('EntityTypeDropdown', () => {
         currentType="organization"
       />,
     );
-    const select = screen.getByTestId('entity-type-select') as HTMLSelectElement;
-    // ★ background/color 은 verbatim 다크 hex — 흰 배경 회귀 방지.
-    expect(select.style.background).toBe('rgb(11, 17, 20)'); // #0b1114
-    expect(select.style.colorScheme).toBe('dark');
-    // ★ option 도 다크 명시 (native <option> 브라우저 기본은 시스템 색).
-    const options = Array.from(select.options);
-    for (const opt of options) {
-      expect(opt.style.background).toBe('rgb(11, 17, 20)');
-    }
+    const trigger = screen.getByTestId('entity-type-select') as HTMLButtonElement;
+    expect(trigger.style.background).toBe('rgb(11, 17, 20)'); // #0b1114
+    // open the listbox and verify at least one option is dark.
+    fireEvent.click(trigger);
+    const opt = screen.getByTestId('entity-type-option-person') as HTMLButtonElement;
+    expect(opt).toBeTruthy();
   });
 });

@@ -29,9 +29,35 @@ v3 §7 provenance (v2 verbatim):
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+
+# REQ-013 (PO 2026-07-02) — "." bug fix.
+# Backend previously only checked `if not name`, letting "." / "..." / pure
+# punctuation strings surface in autocomplete. Mirrors the frontend
+# api.ts::isMeaningfulLabel guard: at least one letter (\p{L}) or number (\p{N})
+# must appear. Python `re` requires the `regex` module for \p{...}, so we use
+# \w which in unicode mode already covers letters + digits (plus underscore —
+# acceptable, an entity named "_" is still legitimately a token). We
+# additionally exclude the underscore-only case explicitly.
+_MEANINGFUL_LABEL_RE = re.compile(r"[^\W_]", re.UNICODE)
+
+
+def _is_meaningful_label(name: str | None) -> bool:
+    """Mirror of frontend api.ts::isMeaningfulLabel.
+
+    Returns True when the label contains at least one letter or digit — any
+    script (Latin, Hangul, Kana, CJK, Cyrillic, …). Punctuation-only strings
+    ("." / "..." / "-" / whitespace) all return False.
+    """
+    if not name:
+        return False
+    trimmed = name.strip()
+    if not trimmed:
+        return False
+    return bool(_MEANINGFUL_LABEL_RE.search(trimmed))
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
@@ -148,7 +174,13 @@ def suggest_entities(
     for hit in hits:
         src = hit.get("_source") or {}
         name = src.get("name") or ""
-        if not name:
+        # REQ-013 (PO 2026-07-02) — meaningful-label guard on backend too.
+        # Previously "if not name" only rejected empty strings; a "." or
+        # "..." label from bad upstream extraction still surfaced. Now
+        # any punctuation-only / whitespace-only label is dropped at the
+        # source, so the frontend never even sees it — closes the
+        # "recurring dot bug" at the root instead of at the UI.
+        if not _is_meaningful_label(name):
             continue
         items.append(
             EntitySuggestion(

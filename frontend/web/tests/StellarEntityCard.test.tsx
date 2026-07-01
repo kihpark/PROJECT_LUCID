@@ -81,7 +81,9 @@ describe('StellarEntityCard render', () => {
     expect(screen.getByTestId('stellar-entity-card-count-measurement').textContent).toContain('0건');
   });
 
-  it('emits LEDGER + RECALL deep-link hrefs (★ U4 spec param keys)', () => {
+  // ★ REQ-013 (PO 2026-07-02) — 팝업 내 "기록/검색에서 보기" 딥링크 버튼 폐기.
+  //   해당 회귀 잠금 skip. 딥링크 컨트랙트는 향후 별도 surface 로 이동.
+  it.skip('emits LEDGER + RECALL deep-link hrefs (★ U4 spec param keys)', () => {
     // fix/stellar-ux-self-audit U4 — deep-link param keys switched to the
     // spec form: `/ledger?entity_uid=<uid>` and `/recall?focus=<uid>` so the
     // contract is uniform across surfaces (PR brief / e2e / future routing).
@@ -210,7 +212,8 @@ describe('v2 entity-node + links (★ fix/stellar-cards-entity-node-compat)', ()
     expect(container.textContent ?? '').not.toContain('(주체 없음)');
   });
 
-  it('LEDGER href uses entity.id when kind === "entity" (★ U4 entity_uid)', () => {
+  // ★ REQ-013 (PO 2026-07-02) — 딥링크 버튼 폐기.
+  it.skip('LEDGER href uses entity.id when kind === "entity" (★ U4 entity_uid)', () => {
     // fix/stellar-ux-self-audit U4 — spec form `entity_uid=<uid>`.
     const entity = makeEntity({ id: 'uid-a' });
     render(
@@ -378,7 +381,8 @@ describe('claim node branch (★ V3 — STELLAR 발언 full context)', () => {
     ).toBe('A');
   });
 
-  it('claim card shows RECALL (focus=<id>) + LEDGER (fact=<id>) deep links', () => {
+  // ★ REQ-013 (PO 2026-07-02) — 팝업 내 "기록/검색에서 보기" 딥링크 폐기.
+  it.skip('claim card shows RECALL (focus=<id>) + LEDGER (fact=<id>) deep links', () => {
     // fix/stellar-ux-self-audit U4 — claim 노드도 RECALL 은 `focus=<fact_uid>`.
     // LEDGER 는 fact-scoped page 이므로 `fact=<fact_uid>` 유지.
     const longText = 'Q'.repeat(220);

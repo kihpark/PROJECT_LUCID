@@ -35,7 +35,8 @@
  */
 'use client';
 
-import Link from 'next/link';
+// ★ REQ-013 (PO 2026-07-02) — 팝업 내 "기록에서 보기" / "검색에서 보기"
+//   버튼 폐기 (entity + claim 분기 모두). next/link import 제거 — 남은 링크 없음.
 import { useState } from 'react';
 import type { StellarLink, StellarNode } from '@/lib/syntheticGraph';
 import {
@@ -134,6 +135,41 @@ export interface StellarEntityCardProps {
   onEntityChanged?: () => void;
   /** Close handler — clears the focus on the parent. */
   onClose: () => void;
+  /** ★ REQ-013 (PO 2026-07-02) — 팝업을 선택된 노드의 오른쪽에 띄우기.
+   *  StellarGraph 가 fgRef.graph2ScreenCoords(node.x,y,z) 로 계산해
+   *  StellarView 를 통해 넘겨준다. null 이면 옛 top-right 위치로 fallback. */
+  position?: { x: number; y: number } | null;
+}
+
+/** ★ REQ-013 — 뷰포트 내에서 카드가 잘리지 않도록 clamp.
+ *  screen coords 는 canvas 상단-좌 origin. 카드 폭 360 / 대략 높이 480. */
+function computeCardStyle(
+  position: { x: number; y: number } | null | undefined,
+): React.CSSProperties {
+  const CARD_WIDTH = 360;
+  const CARD_HEIGHT_ESTIMATE = 520;
+  const OFFSET_X = 40;
+  const OFFSET_Y = -100;
+  const MARGIN = 12;
+  if (!position) {
+    // fallback: 옛 top-right 위치.
+    return { top: 16, right: 18, marginTop: 56 };
+  }
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1600;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
+  let left = position.x + OFFSET_X;
+  let top = position.y + OFFSET_Y;
+  // Right edge clamp — 노드가 오른쪽에 있으면 왼쪽으로 뒤집는다.
+  if (left + CARD_WIDTH + MARGIN > vw) {
+    left = Math.max(MARGIN, position.x - CARD_WIDTH - OFFSET_X);
+  }
+  if (left < MARGIN) left = MARGIN;
+  // Bottom edge clamp.
+  if (top + CARD_HEIGHT_ESTIMATE + MARGIN > vh) {
+    top = Math.max(MARGIN, vh - CARD_HEIGHT_ESTIMATE - MARGIN);
+  }
+  if (top < MARGIN) top = MARGIN;
+  return { left, top };
 }
 
 export function StellarEntityCard({
@@ -143,7 +179,9 @@ export function StellarEntityCard({
   spaceId,
   onEntityChanged,
   onClose,
+  position,
 }: StellarEntityCardProps) {
+  const posStyle = computeCardStyle(position);
   // REQ-012-v1 — merge modal toggle local state.
   // Lives here (not on parent) because the entity card is the single
   // entry point per PO 의뢰서 (StellarEntityCard / LedgerCard /
@@ -164,20 +202,17 @@ export function StellarEntityCard({
       entity.related_entity_labels && entity.related_entity_labels.length > 0
         ? entity.related_entity_labels
         : null;
-    // fix/stellar-ux-self-audit U4 — claim 딥링크도 entity 카드와 동일한
-    // `focus=<uid>` 컨벤션. claim 노드의 id 는 fact_uid 이므로 그것을
-    // 그대로 focus 로 넘긴다. LEDGER 는 fact-scoped → `fact=<uid>` 유지.
-    const recallHref = `/recall?focus=${encodeURIComponent(entity.id)}`;
-    const ledgerHref = `/ledger?fact=${encodeURIComponent(entity.id)}`;
+    // ★ REQ-013 (PO 2026-07-02) — claim 팝업에서 "기록·검색 딥링크" 폐기.
+    //   recallHref / ledgerHref 계산 자체 제거 (dead code 방지).
     return (
       <aside
         data-testid="stellar-entity-card-claim"
         role="dialog"
         aria-label="claim detail"
+        onMouseDown={(e) => e.stopPropagation()}
         style={{
-          position: 'absolute',
-          top: 16,
-          right: 18,
+          position: position ? 'fixed' : 'absolute',
+          ...posStyle,
           zIndex: 20,
           width: 360,
           maxHeight: 'calc(100% - 32px)',
@@ -186,7 +221,6 @@ export function StellarEntityCard({
           border: `1px solid ${PANEL_BORDER}`,
           borderRadius: 14,
           padding: 18,
-          marginTop: 56,
           color: TEXT_PRIMARY,
           boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
           backdropFilter: 'blur(10px)',
@@ -263,17 +297,8 @@ export function StellarEntityCard({
         >
           이 발언 1건
         </div>
-        <div data-testid="stellar-entity-card-claim-deeplinks"
-          style={{ marginTop: 18, borderTop: `1px solid ${PANEL_BORDER}`, paddingTop: 14, display: 'flex', gap: 8 }}>
-          <Link href={recallHref} data-testid="stellar-entity-card-claim-recall-link"
-            style={{ flex: 1, background: 'rgba(94,234,212,0.08)', border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 8, padding: '8px 10px', fontSize: 12, fontWeight: 600, textAlign: 'center', textDecoration: 'none' }}>
-            검색 에서 보기
-          </Link>
-          <Link href={ledgerHref} data-testid="stellar-entity-card-claim-ledger-link"
-            style={{ flex: 1, background: 'rgba(94,234,212,0.08)', border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 8, padding: '8px 10px', fontSize: 12, fontWeight: 600, textAlign: 'center', textDecoration: 'none' }}>
-            기록 에서 보기
-          </Link>
-        </div>
+        {/* ★ REQ-013 (PO 2026-07-02) — claim 팝업의 "기록·검색 딥링크" 폐기.
+         *   사용자가 팝업에서 이동 필요를 못 느꼈고, 시각 잡음 감소가 우선. */}
       </aside>
     );
   }
@@ -300,34 +325,22 @@ export function StellarEntityCard({
     entity.entity_type?.trim() ||
     entity.subject_entity_type?.trim() ||
     null;
-  // LEDGER / RECALL 딥링크.
-  // v2 entity 노드는 node.id 가 곧 entity uid → 직접 사용.
-  // 레거시는 subject_uid 가 fact 안의 entity 참조 → 그 값을 사용.
-  //
-  // fix/stellar-ux-self-audit U4 — entity 딥링크의 param key 를 spec 형식
-  // (`entity_uid`, `focus`) 으로 고정. 옛 형식 (`entity=`, `q=<name>`) 은
-  // LEDGER / RECALL 페이지가 아직 query 를 읽지 않더라도, 외부 surface (PR
-  // brief / e2e 검증 / 미래 라우팅) 가 일관된 contract 를 기대한다. 이름이
-  // 아닌 entity uid 를 RECALL 에 넘겨 동일 entity 의 모든 fact 가
-  // surface 되도록 의미를 통일한다.
+  // ★ REQ-013 (PO 2026-07-02) — entity 팝업 내 "기록·검색 딥링크" 버튼 폐기.
+  //   ledgerHref / recallHref 계산 제거. ledgerEntityKey 는 EntityNameEdit /
+  //   EntityTypeDropdown / MergeCandidates / EntityDelete 진입 조건에 계속
+  //   쓰이므로 유지한다.
   const ledgerEntityKey =
     entity.kind === 'entity' ? entity.id : entity.subject_uid;
-  const ledgerHref = ledgerEntityKey
-    ? `/ledger?entity_uid=${encodeURIComponent(ledgerEntityKey)}`
-    : '/ledger';
-  const recallFocusKey =
-    entity.kind === 'entity' ? entity.id : entity.subject_uid ?? entity.id;
-  const recallHref = `/recall?focus=${encodeURIComponent(recallFocusKey ?? '')}`;
 
   return (
     <aside
       data-testid="stellar-entity-card"
       role="dialog"
       aria-label="entity detail"
+      onMouseDown={(e) => e.stopPropagation()}
       style={{
-        position: 'absolute',
-        top: 16,
-        right: 18,
+        position: position ? 'fixed' : 'absolute',
+        ...posStyle,
         zIndex: 20,
         width: 360,
         maxHeight: 'calc(100% - 32px)',
@@ -336,7 +349,6 @@ export function StellarEntityCard({
         border: `1px solid ${PANEL_BORDER}`,
         borderRadius: 14,
         padding: 18,
-        marginTop: 56,
         color: TEXT_PRIMARY,
         boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
         backdropFilter: 'blur(10px)',
@@ -444,54 +456,10 @@ export function StellarEntityCard({
         </div>
       </div>
 
-      {/* LEDGER / RECALL 딥링크 — 의뢰서 verbatim. */}
-      <div
-        data-testid="stellar-entity-card-deeplinks"
-        style={{
-          marginTop: 18,
-          borderTop: `1px solid ${PANEL_BORDER}`,
-          paddingTop: 14,
-          display: 'flex',
-          gap: 8,
-        }}
-      >
-        <Link
-          href={ledgerHref}
-          data-testid="stellar-entity-card-ledger-link"
-          style={{
-            flex: 1,
-            background: 'rgba(94,234,212,0.08)',
-            border: `1px solid ${ACCENT}`,
-            color: ACCENT,
-            borderRadius: 8,
-            padding: '8px 10px',
-            fontSize: 12,
-            fontWeight: 600,
-            textAlign: 'center',
-            textDecoration: 'none',
-          }}
-        >
-          기록 에서 보기
-        </Link>
-        <Link
-          href={recallHref}
-          data-testid="stellar-entity-card-recall-link"
-          style={{
-            flex: 1,
-            background: 'rgba(94,234,212,0.08)',
-            border: `1px solid ${ACCENT}`,
-            color: ACCENT,
-            borderRadius: 8,
-            padding: '8px 10px',
-            fontSize: 12,
-            fontWeight: 600,
-            textAlign: 'center',
-            textDecoration: 'none',
-          }}
-        >
-          검색 에서 보기
-        </Link>
-      </div>
+      {/* ★ REQ-013 (PO 2026-07-02) — 팝업 내 "기록/검색에서 보기" 버튼 폐기.
+       *   사용자는 팝업 안에서 편집·병합·삭제 중심으로 조작한다. 딥링크는
+       *   시각 잡음이었고 팝업 우측 노드 위치 접근성을 방해했다. 팝업 X /
+       *   Esc / outside-click 으로 닫고 상단 네비게이션으로 이동. */}
 
       {/* ★ W2 (STELLAR 6-class fix, 2026-06-29) — measurement values.
        *  entity 카드는 "수치 fact N건" 카운트만 보여줬을 뿐 실제

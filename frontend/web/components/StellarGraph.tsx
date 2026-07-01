@@ -244,6 +244,14 @@ export interface StellarGraphProps {
   onNodeHover?: (node: StellarNode | null) => void;
   /** Click callback (full node). */
   onNodeClick?: (node: StellarNode) => void;
+  /** ★ REQ-013 (PO 2026-07-02) — 노드 클릭 시 그 노드의 스크린 좌표를
+   *  같이 전달. 부모(StellarView)가 StellarEntityCard 를 그 좌표 오른쪽에
+   *  배치하도록 한다. fgRef.graph2ScreenCoords(x,y,z) 결과가 null 이면
+   *  null 을 넘겨 옛 top-right fallback 사용. */
+  onNodeClickWithCoords?: (
+    node: StellarNode,
+    coords: { x: number; y: number } | null,
+  ) => void;
   /** ★ W1 (STELLAR 6-class fix, 2026-06-29) — edge-click callback. The
    *  parent (StellarView) wired this in props but the actual ForceGraph3D
    *  renderer ignored it — the EdgeFactsList only ever opened from the
@@ -364,6 +372,14 @@ interface ForceGraphRefHandle {
     lookAt?: { x: number; y: number; z: number } | null,
     duration?: number,
   ) => void;
+  /** ★ REQ-013 (PO 2026-07-02) — react-force-graph-3d exposes
+   *  graph2ScreenCoords(x,y,z) → { x, y } in canvas pixel space. Used to
+   *  anchor the entity popup right next to the clicked node. */
+  graph2ScreenCoords?: (
+    x: number,
+    y: number,
+    z: number,
+  ) => { x: number; y: number };
 }
 
 // B-62-fix2 — UnrealBloomPass exposes the ping-pong target arrays we need
@@ -484,6 +500,7 @@ export function StellarGraph(props: StellarGraphProps) {
     mode,
     onNodeHover,
     onNodeClick,
+    onNodeClickWithCoords,
     onLinkClick,
     onLinkHover,
     focusedId = null,
@@ -1541,7 +1558,35 @@ export function StellarGraph(props: StellarGraphProps) {
           enableNodeDrag={false}
           showNavInfo={false}
           onNodeHover={handleHoverInternal}
-          onNodeClick={onNodeClick}
+          /* ★ REQ-013 (PO 2026-07-02) — 노드 클릭 시 부모에게 screen coords 도 함께
+           *  전달. graph2ScreenCoords 가 없거나(테스트 mock 등) exception 시 null. */
+          onNodeClick={(rawNode: unknown) => {
+            const node = rawNode as StellarNode & {
+              x?: number;
+              y?: number;
+              z?: number;
+            };
+            onNodeClick?.(node);
+            if (onNodeClickWithCoords) {
+              let coords: { x: number; y: number } | null = null;
+              try {
+                const g2s = fgRef.current?.graph2ScreenCoords;
+                if (typeof g2s === 'function') {
+                  const raw = g2s(node.x ?? 0, node.y ?? 0, node.z ?? 0);
+                  if (
+                    raw &&
+                    Number.isFinite(raw.x) &&
+                    Number.isFinite(raw.y)
+                  ) {
+                    coords = { x: raw.x, y: raw.y };
+                  }
+                }
+              } catch {
+                coords = null;
+              }
+              onNodeClickWithCoords(node, coords);
+            }
+          }}
           /* ★ L4 (STELLAR legend/shape/hover, PO 2026-06-29) — link hover
            * callback. ForceGraph3D fires onLinkHover with the raw link
            * object (or null on leave). We forward the StellarLink directly

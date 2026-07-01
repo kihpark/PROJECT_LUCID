@@ -8,6 +8,13 @@
  *   배지 render 폐기. 6 형태 (cube/sphere/diamond/octahedron/roundedSquare/
  *   cone) 가 주 채널, amber 6 명도 는 보조 채널, 한국어 라벨 6.
  *
+ * ★ REQ-013 (PO 2026-07-02) — LEGEND ↔ 필터 통합.
+ *   옛 좌하단 StellarLeftPanel (WHO/WHAT/WHERE/기타 체크박스) 폐기. 각
+ *   범례 row 자체가 clickable → 해당 spec 의 bucket 을 ON/OFF 로 토글.
+ *   OFF 시 row 는 dim 처리 (opacity 0.35 + strikethrough) 로 시각 상태 표시.
+ *   CLAIM row 는 showClaims 토글을 담당 (옛 "발언 숨김/보기" 버튼 폐기 —
+ *   기능 여기로 이관).
+ *
  * 위반 클래스 (★ PO verbatim):
  *   V1.  WHO/사람 vs unknown 시각 동일 → 양쪽 모두 sphere/teal 이라 분포
  *        디버그 시 unknown 노드를 사람 노드와 혼동.
@@ -19,6 +26,8 @@
  *        "WHERE = 빨간 구 + 핀셋" 인데 실제는 "회색 원형뿔" — UX 신뢰 깨짐.
  *   ★ V3 (2026-07-01). 배지 (자원/개념/행위/지식/사건/지표) render 어수선 →
  *        PO 재수정: 배지 폐기, 형태를 주 구분자, 색은 보조.
+ *   ★ REQ-013 (2026-07-02). LEGEND (안내) + 좌하단 필터 박스 (기능) 이중 —
+ *        하나의 legend row 가 안내 + 필터 두 역할을 모두 담당하도록 통합.
  *
  * Fix 원칙:
  *   • LEGEND_SPECS 단일 source (stellarLegendShapes.ts). 이 컴포넌트 와
@@ -27,6 +36,7 @@
  *   • props.nodes 로 현재 visible 노드를 받아 V1++ 카운트 계산.
  *   • unknown = 별도 row (작은 점 + 회색). person 과 시각 충돌 0.
  *   • ★ 2026-07-01 — 배지 render 0. 형태 6종 = 주 구분자. 색·라벨 = 보조.
+ *   • ★ REQ-013 (2026-07-02) — row = <button>. bucketState[specKey] 로 ON/OFF.
  */
 'use client';
 
@@ -49,14 +59,13 @@ export interface StellarLegendProps {
   /** ★ L1 — default visible. The toggle persists in localStorage so the
    *  PO's preference survives reload. */
   defaultVisible?: boolean;
-  /** ★ V1++ (PO 2026-06-29) — current visible nodes for the per-row count.
-   *  Optional: when omitted the legend still renders categories without
-   *  counts, so unit tests / Storybook can mount the component standalone.
-   *  Counts use node.entity_type ?? null and fall through to the 'unknown'
-   *  row when no spec matches — that match mirrors the renderer's dispatch
-   *  via specForEntityType so the count is exactly what the user sees on
-   *  the canvas. */
+  /** ★ V1++ (PO 2026-06-29) — current visible nodes for the per-row count. */
   nodes?: ReadonlyArray<StellarNode>;
+  /** ★ REQ-013 (PO 2026-07-02) — bucket 상태 (per-spec-key). true = 활성.
+   *  없으면 모두 true (backward-compat: 테스트 mount 시). */
+  bucketState?: Record<string, boolean>;
+  /** ★ REQ-013 — 사용자가 legend row 를 클릭하면 해당 spec.key 를 toggle. */
+  onBucketToggle?: (specKey: string) => void;
 }
 
 const LS_KEY = 'lucid.stellar.legend.visible';
@@ -82,13 +91,7 @@ function persistVisible(visible: boolean): void {
   }
 }
 
-/** ★ V1++ helper — bucket each node into the legend spec it belongs to.
- *  Mirrors specForEntityType but resolves to the spec INDEX so the caller
- *  can build a count array in one pass. CLAIM and unknown are special
- *  buckets:
- *    - claim:  node.kind === 'claim' OR node.fact_type === 'claim'
- *    - unknown: no entity_type, OR entity_type that no other spec claims.
- *  Exported for unit tests. */
+/** ★ V1++ helper — bucket each node into the legend spec it belongs to. */
 export function indexForNode(
   specs: ReadonlyArray<LegendSpec>,
   node: StellarNode,
@@ -124,11 +127,7 @@ export function computeLegendCounts(
   return counts;
 }
 
-/** ★ V1 — small inline SVG dot for the unknown swatch. The text-character
- *  swatch (SHAPE_LABEL['dot'] = '•') reads identical to person at 14px on
- *  many fonts; an explicit 6px filled circle inside an 18px frame creates a
- *  clearly different visual silhouette (★ V1 핵심: unknown 과 사람 이
- *  시각적으로 즉시 구분돼야 한다). */
+/** ★ V1 — small inline SVG dot for the unknown swatch. */
 function UnknownSwatch({ color }: { color: string }): React.ReactElement {
   return (
     <svg
@@ -146,10 +145,10 @@ function UnknownSwatch({ color }: { color: string }): React.ReactElement {
 export function StellarLegend(props: StellarLegendProps = {}): React.ReactElement {
   const defaultVisible = props.defaultVisible ?? true;
   const nodes = props.nodes ?? [];
-  // ★ default = visible (PO 명시). User can collapse and the choice persists.
+  const bucketState = props.bucketState;
+  const onBucketToggle = props.onBucketToggle;
   const [visible, setVisible] = useState<boolean>(() => readVisible(defaultVisible));
 
-  // ★ V1++ — per-row count, memo so the math only re-runs on node list change.
   const counts = useMemo(() => computeLegendCounts(LEGEND_SPECS, nodes), [nodes]);
 
   function onToggle(): void {
@@ -169,7 +168,7 @@ export function StellarLegend(props: StellarLegendProps = {}): React.ReactElemen
         top: props.topOffset ?? 110,
         right: 18,
         zIndex: 10,
-        width: visible ? 248 : 130,
+        width: visible ? 264 : 130,
         padding: visible ? '12px 14px' : '6px 10px',
         borderRadius: 12,
         background: PANEL_BG,
@@ -200,7 +199,7 @@ export function StellarLegend(props: StellarLegendProps = {}): React.ReactElemen
             fontWeight: 600,
           }}
         >
-          범례
+          범례 · 필터
         </span>
         <button
           type="button"
@@ -237,75 +236,109 @@ export function StellarLegend(props: StellarLegendProps = {}): React.ReactElemen
             margin: 0,
             display: 'flex',
             flexDirection: 'column',
-            gap: 6,
+            gap: 4,
           }}
         >
           {LEGEND_SPECS.map((spec, i) => {
             const count = counts[i] ?? 0;
+            // ★ REQ-013 — bucket 활성 상태. bucketState 없으면 항상 활성.
+            const active = bucketState ? bucketState[spec.key] !== false : true;
+            const clickable = Boolean(onBucketToggle);
             return (
-              <li
-                key={spec.key}
-                data-testid={`stellar-legend-item-${spec.key}`}
-                data-bucket={spec.bucket}
-                data-sub-bucket={spec.subBucket ?? ''}
-                data-shape={spec.shape}
-                data-color={spec.color}
-                data-count={count}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 11,
-                  color: TEXT_BODY,
-                }}
-              >
-                <span
-                  data-testid={`stellar-legend-swatch-${spec.key}`}
+              <li key={spec.key} style={{ margin: 0, padding: 0 }}>
+                <button
+                  type="button"
+                  data-testid={`stellar-legend-item-${spec.key}`}
+                  data-bucket={spec.bucket}
+                  data-sub-bucket={spec.subBucket ?? ''}
                   data-shape={spec.shape}
                   data-color={spec.color}
-                  aria-hidden="true"
+                  data-count={count}
+                  data-active={active ? '1' : '0'}
+                  aria-pressed={active}
+                  onClick={() => onBucketToggle?.(spec.key)}
+                  disabled={!clickable}
                   style={{
-                    display: 'inline-flex',
+                    width: '100%',
+                    display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 18,
-                    height: 18,
-                    color: spec.color,
-                    fontSize: 14,
-                    lineHeight: 1,
-                    fontWeight: 700,
-                    flexShrink: 0,
-                  }}
-                >
-                  {spec.shape === 'dot' ? (
-                    <UnknownSwatch color={spec.color} />
-                  ) : (
-                    SHAPE_LABEL[spec.shape]
-                  )}
-                </span>
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {spec.label}
-                </span>
-                {/* ★ 2026-07-01 (PO 재수정 verbatim: "박스 태그 제거 (어수선)").
-                 *  이전 M-Dogfood-C 결정 (subBucketLabelKo 배지 노출) 폐기.
-                 *  구분 채널 = 형태 6종 (주) + amber 6 명도 (보조) + 라벨 6.
-                 *  배지 render 0. spec.subBucketLabelKo 는 데이터 유지 하지만
-                 *  DOM 노출 X — 회귀 시 재활성화 대비 (data 는 lib 에 그대로). */}
-                {/* ★ V1++ — per-category count. Always rendered (even when 0)
-                 *  so the dashboard "지금 분포 = 0" 도 명시적으로 보인다.
-                 *  data-testid 는 카운트 만 추출 가능하게 분리. */}
-                <span
-                  data-testid={`stellar-legend-count-${spec.key}`}
-                  style={{
-                    color: TEXT_DIM,
+                    gap: 8,
                     fontSize: 11,
-                    fontVariantNumeric: 'tabular-nums',
-                    marginLeft: 4,
-                    flexShrink: 0,
+                    color: TEXT_BODY,
+                    background: active
+                      ? 'transparent'
+                      : 'rgba(0,0,0,0.25)',
+                    border: `1px solid ${active ? 'transparent' : PANEL_BORDER}`,
+                    borderRadius: 6,
+                    padding: '4px 6px',
+                    cursor: clickable ? 'pointer' : 'default',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                    opacity: active ? 1 : 0.42,
+                    textDecoration: active ? 'none' : 'line-through',
+                    transition: 'opacity 120ms ease, background 120ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!clickable) return;
+                    e.currentTarget.style.background = active
+                      ? 'rgba(63,224,198,0.06)'
+                      : 'rgba(0,0,0,0.35)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!clickable) return;
+                    e.currentTarget.style.background = active
+                      ? 'transparent'
+                      : 'rgba(0,0,0,0.25)';
                   }}
                 >
-                  ({count})
-                </span>
+                  <span
+                    data-testid={`stellar-legend-swatch-${spec.key}`}
+                    data-shape={spec.shape}
+                    data-color={spec.color}
+                    aria-hidden="true"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 18,
+                      height: 18,
+                      color: spec.color,
+                      fontSize: 14,
+                      lineHeight: 1,
+                      fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {spec.shape === 'dot' ? (
+                      <UnknownSwatch color={spec.color} />
+                    ) : (
+                      SHAPE_LABEL[spec.shape]
+                    )}
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {spec.label}
+                  </span>
+                  <span
+                    data-testid={`stellar-legend-count-${spec.key}`}
+                    style={{
+                      color: TEXT_DIM,
+                      fontSize: 11,
+                      fontVariantNumeric: 'tabular-nums',
+                      marginLeft: 4,
+                      flexShrink: 0,
+                    }}
+                  >
+                    ({count})
+                  </span>
+                </button>
               </li>
             );
           })}

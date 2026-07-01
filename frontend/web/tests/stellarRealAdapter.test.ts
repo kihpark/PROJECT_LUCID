@@ -37,7 +37,15 @@ function mockApi(facts: unknown[], brief: unknown = null) {
   vi.doMock('@/lib/api', () => ({
     getHomeBrief: vi.fn().mockResolvedValue(brief),
     listSpaceFacts: vi.fn().mockResolvedValue({ facts, total: facts.length, truncated: false }),
-    recall: vi.fn(),
+    recall: vi.fn().mockResolvedValue({ facts: [], total: 0 }),
+    // ★ REQ-013 (PO 2026-07-02) — adapter 가 isMeaningfulLabel 을 import 하므로
+    //   mock 에도 함께 노출. 옛 real 구현 규약과 동일한 semantics.
+    isMeaningfulLabel: (label: string | null | undefined) => {
+      if (!label) return false;
+      const trimmed = label.trim();
+      if (!trimmed) return false;
+      return /[\p{L}\p{N}]/u.test(trimmed);
+    },
   }));
 }
 
