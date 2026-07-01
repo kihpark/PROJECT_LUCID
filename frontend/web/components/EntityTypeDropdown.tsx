@@ -106,7 +106,7 @@ export function EntityTypeDropdown({
           textTransform: 'uppercase',
         }}
       >
-        종류 변경
+        타입 변경
       </div>
       {lowConfidence ? (
         <div
@@ -132,6 +132,12 @@ export function EntityTypeDropdown({
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {/* ★ REQ-012 UI 완성도 fix (PO 2026-07-01) — native <select> 은 브라우저
+         *  기본 스타일(흰 배경 + 회색 텍스트) 을 쓴다 → 다크 테마 위반. 명시적
+         *  dark palette 을 select + option 양쪽에 적용해 사이드 패널 (#0b1114)
+         *  과 시각 일관성을 지킨다. option 스타일은 브라우저 종속이므로
+         *  Chromium 계열 (Playwright 대상) 에서 확실히 반영되는 최소 조합만
+         *  사용한다. */}
         <select
           data-testid="entity-type-select"
           value={selected}
@@ -139,19 +145,29 @@ export function EntityTypeDropdown({
           disabled={saving}
           style={{
             flex: 1,
-            background: 'rgba(255,255,255,0.04)',
+            background: '#0b1114',
             color: TEXT_PRIMARY,
             border: `1px solid ${PANEL_BORDER}`,
             borderRadius: 6,
             padding: '6px 8px',
             fontSize: 12,
+            fontFamily: 'Pretendard, sans-serif',
+            colorScheme: 'dark',
           }}
         >
-          <option value="" disabled>
+          <option
+            value=""
+            disabled
+            style={{ background: '#0b1114', color: TEXT_PRIMARY }}
+          >
             (선택)
           </option>
           {ENTITY_TYPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
+            <option
+              key={opt.value}
+              value={opt.value}
+              style={{ background: '#0b1114', color: TEXT_PRIMARY }}
+            >
               {opt.label} ({opt.value})
             </option>
           ))}

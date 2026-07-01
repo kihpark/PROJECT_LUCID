@@ -1492,6 +1492,93 @@ describe('M3-2e regression guard - interactions', () => {
     expect(screen.queryByTestId('stellar-entity-card')).not.toBeInTheDocument();
   });
 
+  // ★ REQ-012 UI 완성도 fix (PO 2026-07-01) — 저장 후 STELLAR 즉시 반영.
+  //   handleEntityChanged 가 (1) realLoader 를 refetch (★ 새 색/형태/topology)
+  //   하고 (2) focused entity 상태를 fresh 그래프 노드로 rebind → EntityCard
+  //   에 새 entity_type 이 즉시 반영 (stale 표시 회귀 방지).
+  it('★ REQ-012 UI 완성도: EntityTypeDropdown 저장 → refetch + focused rebind', async () => {
+    const before: StellarGraphData = {
+      nodes: [
+        {
+          id: 'ent-광주', label: '광주', cluster: 0, weight: 5,
+          x: 0, y: 0, z: 0,
+          subject: '광주', predicate: '', object: '',
+          kind: 'entity',
+          entity_type: 'organization',
+        },
+      ],
+      links: [],
+      clusters: ['space'],
+    };
+    const after: StellarGraphData = {
+      nodes: [
+        {
+          id: 'ent-광주', label: '광주', cluster: 0, weight: 5,
+          x: 0, y: 0, z: 0,
+          subject: '광주', predicate: '', object: '',
+          kind: 'entity',
+          entity_type: 'location',
+        },
+      ],
+      links: [],
+      clusters: ['space'],
+    };
+    let call = 0;
+    const realLoader = vi.fn().mockImplementation(async () => {
+      call += 1;
+      return call === 1 ? before : after;
+    });
+    // spaceId 필요 (dropdown 이 활성화되도록).
+    window.localStorage.setItem('lucid_space_id', 'space-abc');
+    window.localStorage.setItem('lucid.stellar.source', 'real');
+
+    // API mock: changeEntityType.
+    const api = await import('@/lib/api');
+    const changeSpy = vi.spyOn(api, 'changeEntityType').mockResolvedValue({
+      entity_uid: 'ent-광주',
+      primary_label: '광주',
+      previous_entity_type: 'organization',
+      entity_type: 'location',
+      relabel_history_size: 1,
+      updated_at: '2026-07-01T00:00:00Z',
+    });
+
+    render(
+      <StellarView
+        renderer={MockRenderer}
+        syntheticBuilder={fakeSyntheticBuilder}
+        realLoader={realLoader}
+      />,
+    );
+    await waitFor(() => expect(realLoader).toHaveBeenCalledTimes(1));
+
+    // 1) 노드 focus → entity card 진입.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mock-fire-click'));
+    });
+    const typeEl = await screen.findByTestId('stellar-entity-card-type');
+    expect(typeEl.getAttribute('data-entity-type')).toBe('organization');
+
+    // 2) 드롭박스에서 location 선택 + 저장.
+    const select = screen.getByTestId('entity-type-select') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'location' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('entity-type-save'));
+    });
+
+    // 3) API 호출 + refetch 발생.
+    expect(changeSpy).toHaveBeenCalledWith('space-abc', 'ent-광주', 'location');
+    await waitFor(() => expect(realLoader).toHaveBeenCalledTimes(2));
+
+    // 4) focused rebind → EntityCard 가 fresh entity_type 노출.
+    await waitFor(() => {
+      const t = screen.getByTestId('stellar-entity-card-type');
+      expect(t.getAttribute('data-entity-type')).toBe('location');
+    });
+
+    changeSpy.mockRestore();
+  });
+
   it('pickClusterFocusNode 6-path resolver preserved (after M3-2d)', () => {
     expect(typeof pickClusterFocusNode).toBe('function');
     const data: StellarGraphData = {

@@ -101,4 +101,37 @@ describe('EntityTypeDropdown', () => {
     const button = screen.getByTestId('entity-type-save') as HTMLButtonElement;
     expect(button.disabled).toBe(true);
   });
+
+  // ★ REQ-012 UI 완성도 fix (PO 2026-07-01) — 세 가지 시각/텍스트 회귀 잠금.
+  it('label reads "타입 변경" (was "종류 변경") — PO copy correction', () => {
+    render(
+      <EntityTypeDropdown
+        spaceId="space-1"
+        entityUid="ent-1"
+        currentType="organization"
+      />,
+    );
+    const form = screen.getByTestId('entity-type-dropdown');
+    expect(form.textContent).toMatch(/타입 변경/);
+    expect(form.textContent).not.toMatch(/종류 변경/);
+  });
+
+  it('select uses dark palette (dark theme regression lock)', () => {
+    render(
+      <EntityTypeDropdown
+        spaceId="space-1"
+        entityUid="ent-1"
+        currentType="organization"
+      />,
+    );
+    const select = screen.getByTestId('entity-type-select') as HTMLSelectElement;
+    // ★ background/color 은 verbatim 다크 hex — 흰 배경 회귀 방지.
+    expect(select.style.background).toBe('rgb(11, 17, 20)'); // #0b1114
+    expect(select.style.colorScheme).toBe('dark');
+    // ★ option 도 다크 명시 (native <option> 브라우저 기본은 시스템 색).
+    const options = Array.from(select.options);
+    for (const opt of options) {
+      expect(opt.style.background).toBe('rgb(11, 17, 20)');
+    }
+  });
 });
