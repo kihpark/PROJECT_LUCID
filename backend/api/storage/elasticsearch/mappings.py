@@ -146,6 +146,12 @@ LUCID_FACTS_MAPPING: dict[str, Any] = {
             # panel and offer restore.
             "retracted_at": {"type": "date"},
             "retracted_by": {"type": "keyword"},
+            # ★ REQ-014-C C4 (PO 2026-07-02) — entity soft delete 의 파생.
+            # REQ-012-v2 delete_entity 가 subject_uid==entity_uid OR
+            # object_value==entity_uid 인 fact 들을 retract 하면서 이 필드에
+            # 'user_entity_delete' 로 이유를 남긴다. dynamic=strict 이라 미리
+            # 선언해야 strict_dynamic_mapping_exception 500 이 안 난다.
+            "retract_reason": {"type": "keyword"},
             # B-48a Phase 1 placeholder for the locator layer (Phase 2
             # fills char_start / char_end / quote for text, and Phase 3
             # adds image regions / video timecodes). Stored as a nested
@@ -326,6 +332,18 @@ LUCID_OBJECTS_MAPPING: dict[str, Any] = {
             #   primary 가 아님 (병합 시 only set on member docs, target 은 null).
             "canonical_uid": {"type": "keyword"},
             "retired_by_merge": {"type": "date"},
+            # ★ REQ-014-C C4 (PO 2026-07-02) — entity soft delete 필드.
+            # REQ-012-v2 delete_entity 가 lucid_objects doc 에 retired_by_user
+            # (date) + retirement_reason (keyword) 를 쓰는데 dynamic=strict 인
+            # objects mapping 에 필드가 선언 안 되어 있어 첫 delete 시
+            # strict_dynamic_mapping_exception → 500.
+            #
+            # ensure_mappings (backend/api/storage/elasticsearch/indexes.py) 가
+            # boot 시 additive put_mapping 으로 live 인덱스에도 반영한다.
+            # 옛 데이터는 field 가 null 이므로 회귀 없음 (soft delete 안 된
+            # 상태 그대로).
+            "retired_by_user": {"type": "date"},
+            "retirement_reason": {"type": "keyword"},
         },
     },
 }
