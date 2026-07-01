@@ -167,9 +167,12 @@ describe('HomePage', () => {
     expect(screen.queryByTestId('home-status-label')).not.toBeInTheDocument();
 
     // Cold-start CTA.
+    // REQ-014-A (PO 2026-07-02): 이전 "첫 사실 캡처하기 →" → "확장 설치하기 →".
+    // 눌러도 목적이 명확하지 않다는 PO 피드백으로 확장 설치 modal 을 여는
+    // 버튼으로 재설계.
     const cta = screen.getByTestId('home-empty-cta');
     expect(cta).toBeInTheDocument();
-    expect(cta).toHaveTextContent('첫 사실 캡처하기');
+    expect(cta).toHaveTextContent('확장 설치하기');
 
     // Disabled recall input.
     const input = screen.getByTestId(
@@ -699,28 +702,24 @@ describe('LUCID_VERSION constant', () => {
   });
 });
 
-describe('HomePage version footer', () => {
+// REQ-014-A (PO 2026-07-02): home-version-footer 제거 (AppShell footer 만 유지)
+// → 이전에는 홈 페이지에서 "Lucid v0.1.0" 이 두 번 반복 노출됨. 진짜 소스는
+// AppShell 의 app-shell-version-footer 뿐. 아래 describe 는 REGRESSION GUARD
+// 로 남겨 두어 home-version-footer 가 다시 부활하지 않는지만 확인한다.
+describe('HomePage version footer removed (REQ-014-A regression guard)', () => {
   beforeEach(() => {
     useHomeBriefMock.mockReturnValue({ brief: EMPTY, pendingCount: 0 });
   });
 
-  it('renders the version footer on the cold-start (empty) arm', () => {
+  it('cold-start arm: no home-version-footer inside HomePage body', () => {
     render(<HomePage userName="박기흥" />);
-
-    const footer = screen.getByTestId('home-version-footer');
-    expect(footer).toBeInTheDocument();
-    expect(footer).toHaveTextContent(`Lucid v${LUCID_VERSION}`);
-    expect(footer).toHaveTextContent('Lucid v0.1.0');
+    expect(screen.queryByTestId('home-version-footer')).not.toBeInTheDocument();
   });
 
-  it('renders the version footer on the populated arm', () => {
+  it('populated arm: no home-version-footer inside HomePage body', () => {
     useHomeBriefMock.mockReturnValue({ brief: POPULATED, pendingCount: 3 });
-
     render(<HomePage userName="박기흥" />);
-
-    const footer = screen.getByTestId('home-version-footer');
-    expect(footer).toBeInTheDocument();
-    expect(footer).toHaveTextContent('Lucid v0.1.0');
+    expect(screen.queryByTestId('home-version-footer')).not.toBeInTheDocument();
   });
 });
 
