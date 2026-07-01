@@ -91,3 +91,61 @@ export function factKindLabelKo(kind: string | null | undefined): string {
   if (!kind) return '엔티티';
   return FACT_KIND_LABELS_KO[kind.toLowerCase()] ?? '엔티티';
 }
+
+// ---------------------------------------------------------------------------
+// ★ REQ-011-v2 dogfood-3 fix (PO 2026-07-01) — canonical_name resolve helpers.
+//
+// 원칙 (REQ-004 STAGE 3+4 verbatim, PO 재확인 2026-07-01):
+//   • UUID / obj-N 은 사용자 화면에 절대 노출하지 않는다.
+//   • canonical_name (label) 이 있으면 그대로 표시.
+//   • 없으면 "미해결 entity" placeholder (★ UUID 아님).
+//   • 출처 UID 도 동일 원칙 — URL(http/https) 는 노출 OK, 그 외는 "미해결 출처".
+//
+// LedgerView 가 자체 구현하던 resolveLabel / OBJECT_REF_PATTERN 을 여기로 승격.
+// 새 컴포넌트가 회귀 없이 재사용하도록 공통화한다.
+// ---------------------------------------------------------------------------
+
+/** UUID4 (하이픈 포함) + 옛 obj-N id — 사용자 노출 금지 형식.
+ *  ★ RecallEvidenceCard / EntityEditModal / 후속 카드 모두 이 패턴을 안전지대. */
+export const OBJECT_REF_PATTERN =
+  /^(?:obj-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** entity 미해결 placeholder — subject / object 이 canonical 을 못 끌어올 때. */
+export const UNRESOLVED_ENTITY_LABEL = '미해결 entity';
+
+/** source 미해결 placeholder — source_uid 가 UUID 형식이라 사람이 못 읽을 때. */
+export const UNRESOLVED_SOURCE_LABEL = '미해결 출처';
+
+/** 값이 UUID / obj-N 모양이면 true (canonical_name 조회 실패 사례). */
+export function isUuidLike(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return OBJECT_REF_PATTERN.test(value);
+}
+
+/** ★ 표시층 canonical_name resolver.
+ *  label 이 있고 UUID 형식이 아니면 label. 그 외 → "미해결 entity".
+ *  ★ UUID 를 그대로 반환하는 경로 없음 (LedgerView 옛 구현과의 차이 —
+ *  거긴 value 를 그대로 반환하는 경로가 남아 있었으나, dogfood-3 (PO 2026-
+ *  07-01) 재확인으로 "표시층 UUID 노출 0" 을 더 엄격 적용). */
+export function resolveEntityLabel(
+  label: string | null | undefined,
+): string {
+  const trimmed = label?.trim();
+  if (!trimmed) return UNRESOLVED_ENTITY_LABEL;
+  if (isUuidLike(trimmed)) return UNRESOLVED_ENTITY_LABEL;
+  return trimmed;
+}
+
+/** 출처 라벨 resolver.
+ *  http(s):// 로 시작하면 호스트+path 요약을 표시.
+ *  그 외 (UUID / bare id) 는 "미해결 출처" placeholder.
+ *  ★ v3 후속 = source_labels endpoint 로 canonical title 회수. */
+export function resolveSourceLabel(uid: string | null | undefined): string {
+  const trimmed = uid?.trim();
+  if (!trimmed) return UNRESOLVED_SOURCE_LABEL;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed.replace(/^https?:\/\//i, '').slice(0, 50);
+  }
+  // ★ v3 = source 테이블 조회. 지금은 UUID / bare id 는 사용자에게 감춘다.
+  return UNRESOLVED_SOURCE_LABEL;
+}

@@ -61,7 +61,7 @@ import {
   recall,
   searchEntitySuggestions,
 } from '@/lib/api';
-import { entityTypeLabelKo } from '@/lib/displayNames';
+import { entityTypeLabelKo, sectionLabelKo } from '@/lib/displayNames';
 import type {
   EntitySuggestion,
   RecallFact,
@@ -369,8 +369,13 @@ export function RecallView({ spaceId }: Props) {
             padding: '22px 20px 40px',
           }}
         >
-          {/* RECALL 라벨. */}
+          {/* ★ REQ-011-v2 dogfood-3 fix (PO 2026-07-01) — Recall 잔재 청소.
+           *  옛: 'RECALL · 검증된 것만 답합니다' (사용자 화면에 영문 코드
+           *  노출 = REQ-002 회귀). REQ-002 원칙 = displayNames.SECTION_LABELS_KO
+           *  를 통해 사용자 표시명 = "검색". test-id 는 그대로 (내부 identifier
+           *  유지). */}
           <div
+            data-testid="recall-scope-label"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -379,14 +384,14 @@ export function RecallView({ spaceId }: Props) {
             }}
           >
             <span
-              className="font-mono"
               style={{
                 fontSize: 11,
-                letterSpacing: '0.16em',
+                letterSpacing: '0.06em',
                 color: COLORS.tealMint,
+                fontWeight: 600,
               }}
             >
-              RECALL
+              {sectionLabelKo('RECALL')}
             </span>
             <span style={{ fontSize: 11, color: COLORS.textFaint }}>
               · 검증된 것만 답합니다
@@ -540,8 +545,11 @@ export function RecallView({ spaceId }: Props) {
             </span>
           </div>
 
-          {/* 최근 recall. */}
+          {/* ★ REQ-011-v2 dogfood-3 fix (PO 2026-07-01) — 옛: '최근 recall'.
+           *  사용자 화면 = "최근 검색" (REQ-002 원칙). test-id / 코드 identifier
+           *  는 그대로 유지 (내부 코드네임 = RECALL). */}
           <div
+            data-testid="recall-recent-heading"
             style={{
               fontSize: 11,
               letterSpacing: '0.04em',
@@ -550,7 +558,7 @@ export function RecallView({ spaceId }: Props) {
               marginBottom: 9,
             }}
           >
-            최근 recall
+            최근 검색
           </div>
           <div
             data-testid="recall-recent-list"

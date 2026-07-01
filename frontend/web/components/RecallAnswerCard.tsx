@@ -18,7 +18,46 @@
  *   - isExample default 는 props 가 안 줄 때만 true 로 fallback 가능하도록
  *     호출부에서 명시 전달.
  *   - 시각 디자인 변경 0.
+ *
+ * ★ REQ-011-v2 dogfood-3 fix (PO 2026-07-01) — 근거 충분도 4 단계 명세.
+ *   옛 v1/v2 는 항상 3/4 채움 (하드코딩). PO dogfood 3 재확인 verbatim:
+ *     "기준 정의(fact수? 출처다양성?) 명시하거나 제거. 정의 없는 지표 금지."
+ *
+ *   결정: fact 수 기준 4 단계 명시.
+ *     · 1건 → 1/4 "부족"    (신뢰 낮음 — 단일 사실만)
+ *     · 2-4건 → 2/4 "낮음"    (교차 검증 부족)
+ *     · 5-10건 → 3/4 "충분"    (교차 검증 확보)
+ *     · 11건+ → 4/4 "풍부"    (강한 근거)
+ *
+ *   출처 다양성 (uniqueSources) 은 별도 지표 — 카드 상단 trust-meta 에 이미
+ *   "출처 N곳" 으로 노출. 이 4 단계 바는 fact 밀도만 반영. Rationale = 사용자
+ *   질문에 대한 검증 사실 밀도가 카드의 "충분도" 의 1차 신호이며, 출처 다양
+ *   성은 별도 축이므로 하나의 바에 섞으면 명확성이 떨어진다.
+ *
+ *   tooltip = <div title=""> 로 각 단계 기준을 hover 노출 (★ PO "정의 명시").
  */
+
+const SUFFICIENCY_TOOLTIP =
+  '근거 충분도 (검증 사실 수 기준):\n'
+  + '  · 1건 = 부족 (단일 사실)\n'
+  + '  · 2-4건 = 낮음 (교차 검증 부족)\n'
+  + '  · 5-10건 = 충분 (교차 검증 확보)\n'
+  + '  · 11건+ = 풍부 (강한 근거)\n'
+  + '\n출처 다양성은 상단 "출처 N곳" 지표를 참고.';
+
+interface SufficiencyLevel {
+  filled: number;
+  label: string;
+  key: 'insufficient' | 'low' | 'sufficient' | 'abundant';
+}
+
+/** ★ REQ-011-v2 dogfood-3 fix — fact 수 → 충분도 (1..4) + 한국어 label. */
+export function sufficiencyLevelForFacts(facts: number): SufficiencyLevel {
+  if (facts <= 1) return { filled: 1, label: '부족', key: 'insufficient' };
+  if (facts <= 4) return { filled: 2, label: '낮음', key: 'low' };
+  if (facts <= 10) return { filled: 3, label: '충분', key: 'sufficient' };
+  return { filled: 4, label: '풍부', key: 'abundant' };
+}
 
 interface Props {
   answerText: string;
@@ -35,10 +74,13 @@ export function RecallAnswerCard({
   confFacts,
   isExample = true,
 }: Props) {
+  const sufficiency = sufficiencyLevelForFacts(confFacts);
   return (
     <div
       data-testid="recall-answer-card"
       data-recall-answer-example={isExample ? 'true' : 'false'}
+      data-recall-sufficiency-level={sufficiency.key}
+      data-recall-sufficiency-filled={sufficiency.filled}
       style={{
         background: 'linear-gradient(180deg,#0c1417,#0a1013)',
         border: '1px solid #173028',
@@ -70,7 +112,21 @@ export function RecallAnswerCard({
         >
           ANSWER
         </span>
-        <span style={{ fontSize: 11.5, color: '#5a8f86' }}>근거 충분</span>
+        {/* ★ REQ-011-v2 dogfood-3 fix — 근거 충분도 라벨.
+         *  옛: 항상 '근거 충분' (하드코딩). 신: fact 수 기준 4 단계
+         *  ('부족'/'낮음'/'충분'/'풍부'). tooltip 으로 기준 안내. */}
+        <span
+          data-testid="recall-sufficiency-label"
+          title={SUFFICIENCY_TOOLTIP}
+          style={{
+            fontSize: 11.5,
+            color: '#5a8f86',
+            cursor: 'help',
+            borderBottom: '1px dotted #2f5952',
+          }}
+        >
+          근거 {sufficiency.label}
+        </span>
         {isExample && (
           <span
             className="font-mono"
@@ -86,12 +142,28 @@ export function RecallAnswerCard({
             예시
           </span>
         )}
-        {/* 4 칸 충분도 바 (3/4 채움). */}
-        <span style={{ display: 'flex', gap: 3, marginLeft: 1 }}>
-          <span style={{ width: 16, height: 4, borderRadius: 2, background: '#2DD4BF' }} />
-          <span style={{ width: 16, height: 4, borderRadius: 2, background: '#2DD4BF' }} />
-          <span style={{ width: 16, height: 4, borderRadius: 2, background: '#2DD4BF' }} />
-          <span style={{ width: 16, height: 4, borderRadius: 2, background: '#1c2f2c' }} />
+        {/* ★ REQ-011-v2 dogfood-3 fix — 4 칸 충분도 바 (fact 수 기준 dynamic).
+         *  1건 → 1/4, 2-4건 → 2/4, 5-10건 → 3/4, 11+건 → 4/4. */}
+        <span
+          data-testid="recall-sufficiency-bar"
+          title={SUFFICIENCY_TOOLTIP}
+          style={{ display: 'flex', gap: 3, marginLeft: 1, cursor: 'help' }}
+        >
+          {[1, 2, 3, 4].map((slot) => (
+            <span
+              key={slot}
+              data-recall-sufficiency-slot={slot}
+              data-recall-sufficiency-slot-filled={
+                slot <= sufficiency.filled ? 'true' : 'false'
+              }
+              style={{
+                width: 16,
+                height: 4,
+                borderRadius: 2,
+                background: slot <= sufficiency.filled ? '#2DD4BF' : '#1c2f2c',
+              }}
+            />
+          ))}
         </span>
       </div>
       <p

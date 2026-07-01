@@ -105,10 +105,26 @@ export function RecallEntityEditModal({
             >
               {primaryLabel}
             </div>
+            {/* ★ REQ-011-v2 dogfood-3 fix (PO 2026-07-01) — UUID 화면 노출 0.
+             *  UID 는 REQ-012 API 호출용 / e2e 재현용으로 DOM 에는 남기되,
+             *  사용자 시각적으로는 완전 숨김 (screen-reader only 관례).
+             *  옛 3-line stack (ENTITY / label / uid) → 2-line 으로 축소되어
+             *  실제 여백도 재구성. */}
             <div
               data-testid="recall-entity-edit-modal-uid"
-              className="font-mono"
-              style={{ fontSize: 10, color: TEXT_DIM, marginTop: 3 }}
+              className="font-mono sr-only"
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                width: 1,
+                height: 1,
+                padding: 0,
+                margin: -1,
+                overflow: 'hidden',
+                clip: 'rect(0,0,0,0)',
+                whiteSpace: 'nowrap',
+                border: 0,
+              }}
             >
               {entityUid}
             </div>
