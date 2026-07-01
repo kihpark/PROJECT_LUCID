@@ -642,6 +642,70 @@ export function unmergeEntity(
   );
 }
 
+// ───────────────────────────────────────────────────────────────────
+// REQ-012-v2 (PO 2026-07-01, image #145 dogfood) — name edit + delete.
+// ───────────────────────────────────────────────────────────────────
+
+export interface EntityNameChangeResult {
+  entity_uid: string;
+  primary_label: string;
+  previous_name: string | null;
+  aliases: string[];
+  relabel_history_size: number;
+  updated_at: string;
+}
+
+/** REQ-012-v2 — entity 대표명 변경. 옛 이름은 aliases 로 흡수 (server-side). */
+export function updateEntityName(
+  spaceId: string,
+  entityUid: string,
+  name: string,
+  opts?: { previousName?: string; reason?: string },
+): Promise<EntityNameChangeResult> {
+  return request<EntityNameChangeResult>(
+    `/api/spaces/${spaceId}/entities/${encodeURIComponent(entityUid)}/name`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        previous_name: opts?.previousName ?? null,
+        reason: opts?.reason ?? null,
+      }),
+    },
+  );
+}
+
+export interface EntityDeleteResult {
+  entity_uid: string;
+  primary_label: string;
+  retired_at: string;
+  facts_retracted: number;
+}
+
+/** REQ-012-v2 — entity soft delete. 연결 fact 는 자동 retract. */
+export function deleteEntity(
+  spaceId: string,
+  entityUid: string,
+  reason?: string,
+): Promise<EntityDeleteResult> {
+  return request<EntityDeleteResult>(
+    `/api/spaces/${spaceId}/entities/${encodeURIComponent(entityUid)}`,
+    {
+      method: 'DELETE',
+      body: JSON.stringify({ reason: reason ?? null }),
+    },
+  );
+}
+
+/** REQ-012-v2 — fact soft delete alias. 옛 B-48b retractFact 재사용
+ *  (retracted_at 세팅 = 소프트 삭제). 이름만 사용자 mental model 에 맞게. */
+export function deleteFact(
+  spaceId: string,
+  factUid: string,
+): Promise<FactMutationResponse> {
+  return retractFact(spaceId, factUid);
+}
+
 // Module-level predicate cache — predicates are global vocabulary that
 // rarely change. First call fetches; subsequent calls return the same
 // promise so only one in-flight request is ever made even if the component

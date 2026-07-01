@@ -1,16 +1,30 @@
-﻿"""Entity endpoints — suggestion + REQ-012-v1 사용자 수정 (type 변경 + merge/unmerge).
+﻿"""Entity endpoints — suggestion + REQ-012-v1 / v2 사용자 수정.
 
-GET /api/spaces/{space_id}/entities/suggest?q=<partial>&limit=5
-POST /api/spaces/{space_id}/entities/{uid}/type        — REQ-012-v1 기능 A
-POST /api/spaces/{space_id}/entities/merge             — REQ-012-v1 기능 B
-POST /api/spaces/{space_id}/entities/unmerge           — REQ-012-v1 기능 B 되돌리기
-GET  /api/spaces/{space_id}/entities/{uid}/merge-candidates — REQ-012-v1 기능 B 후보
+REQ-012-v1 (2026-07-01):
+  GET /api/spaces/{space_id}/entities/suggest?q=<partial>&limit=5
+  POST /api/spaces/{space_id}/entities/{uid}/type        — 기능 A (type 변경)
+  POST /api/spaces/{space_id}/entities/merge             — 기능 B (병합)
+  POST /api/spaces/{space_id}/entities/unmerge           — 기능 B 되돌리기
+  GET  /api/spaces/{space_id}/entities/{uid}/merge-candidates — 후보
 
-PO 의뢰서 verbatim (REQ-012-v1 2026-07-01):
-  - entity 종류 수정 (10종 closed set) + 검증 행위로 기록 + AI confidence
-  - 노드 합치기 (광주 + 광주광역시 / 삼성전자 2개) — canonical 하나 + alias
-    보존 + fact 이전 + merge_provenance (v3 §7 되돌릴 수 있게)
-  - 분리 (잘못 병합 되돌리기)
+REQ-012-v2 (PO 2026-07-01, image #145 dogfood):
+  POST /api/spaces/{space_id}/entities/{uid}/name        — ★ name edit
+  DELETE /api/spaces/{space_id}/entities/{uid}           — ★ soft delete
+
+PO 의뢰서 verbatim:
+  - v1: entity 종류 수정 (10종 closed set) + 검증 행위로 기록 + AI confidence
+  - v1: 노드 합치기 (광주 + 광주광역시 / 삼성전자 2개) — canonical 하나 +
+    alias 보존 + fact 이전 + merge_provenance (v3 §7 되돌릴 수 있게)
+  - v1: 분리 (잘못 병합 되돌리기)
+  - v2: 사용자가 "한 총리" → "한성숙" 으로 이름 바꾸고 싶다면? (name edit)
+  - v2: 사용자가 노드와 엣지를 선택하고 delete 하고 싶다면? (soft delete)
+
+v3 §7 provenance (v2 verbatim):
+  - name edit → relabel_history append (from_primary / to_primary /
+    reason='user_name_edit'), primary_label + name + name_en 동기 갱신
+  - node delete → retired_by_user 필드 (retired_by_merge 와 구분) +
+    audit=action:'edit' with decision_metadata.user_delete=True.
+    복원 가능 (unmerge 처럼 되돌리기는 v3 이후).
 """
 from __future__ import annotations
 
@@ -112,8 +126,11 @@ def suggest_entities(
                 # M3-1 canonical apply (PO 2026-06-27): 자동완성에서
                 # canonical 병합으로 retire 된 entity 제외. 같은 표면형
                 # ("애플 / 애플") 중 canonical target 만 노출.
+                # REQ-012-v2 (PO 2026-07-01): 사용자가 삭제한 entity
+                # (retired_by_user) 도 함께 숨김.
                 "must_not": [
                     {"exists": {"field": "retired_by_merge"}},
+                    {"exists": {"field": "retired_by_user"}},
                 ],
             },
         },
@@ -854,6 +871,7 @@ def merge_candidates(
                 ],
                 "must_not": [
                     {"exists": {"field": "retired_by_merge"}},
+                    {"exists": {"field": "retired_by_user"}},
                     {"term": {"object_uid": entity_uid}},
                 ],
                 "should": [
@@ -915,3 +933,366 @@ def merge_candidates(
 
     return MergeCandidatesResponse(items=items)
 
+
+# ─────────────────────────────────────────────────────────────────────
+# REQ-012-v2 (PO 2026-07-01) — entity name edit
+# ─────────────────────────────────────────────────────────────────────
+#
+# PO image #145 dogfood: "한 총리" → "한성숙" 처럼 사용자가 대표명을 바꾸고
+# 싶을 때. v3 §7 alias 추가 / 대표명 지정 권한. 처리:
+#   1. lucid_objects.primary_label + name 동기 갱신 (STELLAR / RECALL 색과
+#      surface 가 name 을 통해 렌더되므로 두 필드 모두 필요).
+#   2. name 이 영어권이면 name_en 도 함께 (heuristic 재사용).
+#   3. 옛 primary_label 은 aliases 로 흡수 (사용자가 익숙한 이름 검색 가능).
+#   4. relabel_history append reason='user_name_edit' (v1 type change 와 동
+#      일한 log 슬롯 재사용 — nested field 추가 없이 strict mode 통과).
+#   5. validation_logs action='edit' + decision_metadata.name_change=True.
+
+class EntityNameChangeRequest(BaseModel):
+    """REQ-012-v2 — entity 대표명 변경 입력.
+
+    name = 새 primary_label.
+    previous_name = 옛 이름 (선택 — 서버가 실제 doc 에서 다시 확인).
+    """
+    name: str = Field(..., min_length=1, max_length=200)
+    previous_name: str | None = Field(default=None, max_length=200)
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class EntityNameChangeResponse(BaseModel):
+    """REQ-012-v2 — entity 대표명 변경 응답."""
+    entity_uid: str
+    primary_label: str
+    previous_name: str | None
+    aliases: list[str]
+    relabel_history_size: int
+    updated_at: str
+
+
+@router.post(
+    "/entities/{entity_uid}/name", response_model=EntityNameChangeResponse,
+)
+def change_entity_name(
+    space_id: uuid.UUID,
+    entity_uid: str = Path(..., min_length=1, max_length=200),
+    body: EntityNameChangeRequest = ...,
+    user: User = Depends(get_current_user),
+) -> EntityNameChangeResponse:
+    """REQ-012-v2 — entity 대표명 변경.
+
+    1. KS guard (entity 가 caller 의 KS 안인지 확인).
+    2. 새 name strip → 유효성 검사.
+    3. lucid_objects.primary_label + name 동기 갱신, name_en heuristic.
+    4. 옛 primary_label 은 aliases 로 흡수 (중복 제거, case-insensitive).
+    5. relabel_history append reason='user_name_edit'.
+    6. validation_logs action='edit' + decision_metadata.name_change=True.
+    """
+    new_name = body.name.strip()
+    if not new_name:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "name_cannot_be_empty",
+        )
+
+    session = make_sessionmaker()()
+    try:
+        ks = session.get(KnowledgeSpace, space_id)
+        if ks is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "space_not_found")
+        if ks.user_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+    finally:
+        session.close()
+
+    client = get_client()
+    src = _resolve_entity_doc(client, str(ks.id), entity_uid)
+
+    # retired_by_merge / retired_by_user 는 name edit 금지 (일관성).
+    if src.get("retired_by_merge") or src.get("retired_by_user"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "entity_retired",
+        )
+
+    prev_name = str(src.get("primary_label") or src.get("name") or "") or None
+    if prev_name and prev_name == new_name:
+        # No-op — return current state.
+        existing_history = list(src.get("relabel_history") or [])
+        return EntityNameChangeResponse(
+            entity_uid=entity_uid,
+            primary_label=new_name,
+            previous_name=prev_name,
+            aliases=list(src.get("aliases") or []),
+            relabel_history_size=len(existing_history),
+            updated_at=str(src.get("updated_at") or ""),
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 옛 primary 를 aliases 로 흡수 — 사용자가 옛 이름으로 검색해도 찾을 수
+    # 있게. 중복 제거는 case-insensitive.
+    def _norm(s: str) -> str:
+        return s.strip().lower()
+    existing_aliases = [str(a) for a in (src.get("aliases") or [])]
+    seen = {_norm(new_name)}
+    new_aliases: list[str] = []
+    for a in existing_aliases:
+        if a and _norm(a) not in seen:
+            seen.add(_norm(a))
+            new_aliases.append(a)
+    if prev_name and _norm(prev_name) not in seen:
+        seen.add(_norm(prev_name))
+        new_aliases.append(prev_name)
+
+    history_entry = {
+        "at": now_iso,
+        "from_primary": prev_name or "",
+        "to_primary": new_name,
+        "reason": "user_name_edit",
+    }
+    existing_history = list(src.get("relabel_history") or [])
+    existing_history.append(history_entry)
+
+    update_doc: dict[str, Any] = {
+        "primary_label": new_name,
+        "name": new_name,
+        "aliases": new_aliases,
+        "relabel_history": existing_history,
+        "updated_at": now_iso,
+    }
+    # If the incoming name is ASCII-only, keep name_en in sync — STELLAR
+    # english search path relies on this field.
+    if _primary_lang(new_name) == "en":
+        update_doc["name_en"] = new_name
+
+    try:
+        client.update(
+            index=LUCID_OBJECTS,
+            id=entity_uid,
+            doc=update_doc,
+            refresh="wait_for",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("entity name change ES write failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="entity_update_failed",
+        ) from exc
+
+    # audit — v1 type_change 와 동일한 슬롯. name_change=True 로 구분.
+    session = make_sessionmaker()()
+    try:
+        log = ValidationLog(
+            user_id=user.id,
+            fact_uid=None,
+            object_uid=entity_uid,
+            action="edit",
+            validator_id=user.id,
+            decision_metadata={
+                "name_change": True,
+                "from_name": prev_name,
+                "to_name": new_name,
+                "reason": body.reason or "user_name_edit",
+                "aliases_after": new_aliases,
+            },
+        )
+        session.add(log)
+        session.commit()
+    except Exception as exc:  # noqa: BLE001 - audit failure must not block
+        logger.warning("validation_logs write failed for name change: %s", exc)
+        session.rollback()
+    finally:
+        session.close()
+
+    return EntityNameChangeResponse(
+        entity_uid=entity_uid,
+        primary_label=new_name,
+        previous_name=prev_name,
+        aliases=new_aliases,
+        relabel_history_size=len(existing_history),
+        updated_at=now_iso,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# REQ-012-v2 (PO 2026-07-01) — entity soft delete
+# ─────────────────────────────────────────────────────────────────────
+#
+# PO image #145 dogfood: "사용자가 노드와 엣지를 선택하고 delete 를 하고
+# 싶다면?" — soft delete (retired_by_user 필드). retired_by_merge 와 구분
+# 하여 unmerge / undo 경로가 서로 오염되지 않게 한다. 연결 fact 는:
+#   - subject_uid == entity_uid 인 fact 는 자동 retract (retracted_at 세팅,
+#     retracted_by = user, retract_reason = 'user_entity_delete').
+#   - object_value == entity_uid 인 fact 는 자동 retract (같은 이유). literal
+#     object 이나 다른 entity 참조 는 그대로 유지.
+# 이 자동 retract 은 fact 자체의 soft delete 라 recall.py 의 restore_fact 로
+# 되돌릴 수 있다 (v3 §7 되돌리기 정합).
+
+class EntityDeleteRequest(BaseModel):
+    """REQ-012-v2 — entity 삭제 입력."""
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class EntityDeleteResponse(BaseModel):
+    """REQ-012-v2 — entity 삭제 응답."""
+    entity_uid: str
+    primary_label: str
+    retired_at: str
+    facts_retracted: int
+
+
+@router.delete(
+    "/entities/{entity_uid}", response_model=EntityDeleteResponse,
+)
+def delete_entity(
+    space_id: uuid.UUID,
+    entity_uid: str = Path(..., min_length=1, max_length=200),
+    body: EntityDeleteRequest | None = None,
+    user: User = Depends(get_current_user),
+) -> EntityDeleteResponse:
+    """REQ-012-v2 — entity soft delete.
+
+    1. KS guard.
+    2. lucid_objects.retired_by_user set + retirement_reason.
+    3. subject_uid == entity_uid OR object_value == entity_uid 인 fact 들을
+       retract (retracted_at, retracted_by).
+    4. validation_logs action='edit' + decision_metadata.user_delete=True.
+    """
+    session = make_sessionmaker()()
+    try:
+        ks = session.get(KnowledgeSpace, space_id)
+        if ks is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "space_not_found")
+        if ks.user_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+    finally:
+        session.close()
+
+    client = get_client()
+    src = _resolve_entity_doc(client, str(ks.id), entity_uid)
+
+    if src.get("retired_by_merge"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "entity_retired_by_merge",
+        )
+    if src.get("retired_by_user"):
+        # Already deleted — idempotent 200 (같은 결과).
+        prev_retired_at = str(src.get("retired_by_user") or "")
+        return EntityDeleteResponse(
+            entity_uid=entity_uid,
+            primary_label=str(
+                src.get("primary_label") or src.get("name") or ""
+            ),
+            retired_at=prev_retired_at,
+            facts_retracted=0,
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    primary_label = str(src.get("primary_label") or src.get("name") or "")
+
+    # 1. entity doc soft delete.
+    try:
+        client.update(
+            index=LUCID_OBJECTS,
+            id=entity_uid,
+            doc={
+                "retired_by_user": now_iso,
+                "retirement_reason": (
+                    (body.reason if body else None) or "user_delete"
+                ),
+                "updated_at": now_iso,
+            },
+            refresh="wait_for",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("entity delete ES write failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="entity_update_failed",
+        ) from exc
+
+    # 2. 연결 fact retract — subject_uid == entity_uid OR object_value ==
+    #    entity_uid. retracted_at 없는 것만 새로 스탬프.
+    fact_query = {
+        "bool": {
+            "filter": [
+                {"term": {"knowledge_space_id": str(ks.id)}},
+                {
+                    "bool": {
+                        "should": [
+                            {"term": {"subject_uid": entity_uid}},
+                            {"term": {"object_value": entity_uid}},
+                        ],
+                        "minimum_should_match": 1,
+                    }
+                },
+            ],
+            "must_not": [
+                {"exists": {"field": "retracted_at"}},
+            ],
+        }
+    }
+    facts_retracted = 0
+    try:
+        resp = client.search(
+            index=LUCID_FACTS,
+            size=1000,
+            query=fact_query,
+            _source=["fact_uid"],
+        )
+        hits = resp.get("hits", {}).get("hits", []) or []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("entity delete: fact scan failed: %s", exc)
+        hits = []
+
+    for hit in hits:
+        fid = hit.get("_id")
+        if not fid:
+            continue
+        try:
+            client.update(
+                index=LUCID_FACTS,
+                id=fid,
+                doc={
+                    "retracted_at": now_iso,
+                    "retracted_by": str(user.id),
+                    "retract_reason": "user_entity_delete",
+                    "updated_at": now_iso,
+                },
+                refresh="wait_for",
+            )
+            facts_retracted += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "entity delete: fact %s retract failed: %s", fid, exc,
+            )
+
+    # 3. audit row.
+    session = make_sessionmaker()()
+    try:
+        log = ValidationLog(
+            user_id=user.id,
+            fact_uid=None,
+            object_uid=entity_uid,
+            action="edit",
+            validator_id=user.id,
+            decision_metadata={
+                "user_delete": True,
+                "primary_label": primary_label,
+                "reason": (body.reason if body else None) or "user_delete",
+                "facts_retracted": facts_retracted,
+                "retired_at": now_iso,
+            },
+        )
+        session.add(log)
+        session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("validation_logs write failed for delete: %s", exc)
+        session.rollback()
+    finally:
+        session.close()
+
+    return EntityDeleteResponse(
+        entity_uid=entity_uid,
+        primary_label=primary_label,
+        retired_at=now_iso,
+        facts_retracted=facts_retracted,
+    )

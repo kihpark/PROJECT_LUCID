@@ -46,6 +46,8 @@ import {
 import { entityTypeLabelKo } from '@/lib/displayNames';
 import { EntityTypeDropdown } from './EntityTypeDropdown';
 import { MergeCandidatesModal } from './MergeCandidatesModal';
+import { EntityNameEdit } from './EntityNameEdit';
+import { EntityDeleteButton } from './EntityDeleteButton';
 
 const ACCENT = '#5EEAD4';
 const WHO_COLOR = '#5EEAD4';
@@ -546,6 +548,13 @@ export function StellarEntityCard({
        *  spaceId 가 있을 때만 활성 (synthetic / 익명 모드는 기존 placeholder). */}
       {spaceId && entity.kind === 'entity' && ledgerEntityKey ? (
         <>
+          {/* ★ REQ-012-v2 (PO 2026-07-01 image #145) — 대표명 편집 진입점. */}
+          <EntityNameEdit
+            spaceId={spaceId}
+            entityUid={ledgerEntityKey}
+            currentName={entityName}
+            onChanged={() => onEntityChanged?.()}
+          />
           <EntityTypeDropdown
             spaceId={spaceId}
             entityUid={ledgerEntityKey}
@@ -596,6 +605,17 @@ export function StellarEntityCard({
               }}
             />
           ) : null}
+          {/* ★ REQ-012-v2 (PO 2026-07-01 image #145) — 노드 삭제 진입점.
+           *  soft delete + 자동 fact retract. 되살리기는 v3. */}
+          <EntityDeleteButton
+            spaceId={spaceId}
+            entityUid={ledgerEntityKey}
+            primaryLabel={entityName}
+            onDeleted={() => {
+              onEntityChanged?.();
+              onClose();
+            }}
+          />
         </>
       ) : (
         <div
