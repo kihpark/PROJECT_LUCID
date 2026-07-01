@@ -660,3 +660,246 @@ def test_bucket_for_legacy_class_still_routes_correctly() -> None:
     assert _bucket_for("place") == "place"
     assert _bucket_for(None) == "other"
     assert _bucket_for("concept") == "other"
+
+
+# ---------------------------------------------------------------------------
+# fix/enrich-labels-cascade-fallback (PO 2026-07-01) — _resolve_label
+# cascade + _enrich_with_labels wiring.
+#
+# Repro: 이재명 대통령 (uid 466b13bb) had name='이재명 대통령',
+# primary_label='이재명 대통령', canonical_name=None. All 4 facts
+# referencing subject_uid=466b13bb came back with subject_label=None
+# because the enricher read `name` only and, in the sweep, 87/87
+# entities also had canonical_name=None.
+#
+# Contract:
+#   1. cascade order canonical_name -> name -> primary_label -> None
+#   2. subject / object / speaker / related_entity all use the cascade
+#   3. entities missing every candidate stay None (FE shows 미해결)
+# ---------------------------------------------------------------------------
+
+from api.routes.recall import _enrich_with_labels, _resolve_label
+
+
+def test_resolve_label_prefers_canonical_name_when_present() -> None:
+    """First cascade tier: canonical_name wins over name / primary_label."""
+    src = {
+        "canonical_name": "이재명",
+        "name": "재명 이",
+        "primary_label": "President Lee",
+    }
+    assert _resolve_label(src) == "이재명"
+
+
+def test_resolve_label_falls_back_to_name_when_canonical_none() -> None:
+    """★ PO repro: canonical_name=None but name is present —
+    the previous single-field lookup surfaced None; the cascade
+    surfaces the name."""
+    src = {
+        "canonical_name": None,
+        "name": "이재명 대통령",
+        "primary_label": "이재명 대통령",
+    }
+    assert _resolve_label(src) == "이재명 대통령"
+
+
+def test_resolve_label_falls_back_to_primary_label_when_name_missing() -> None:
+    """Second-tier fallback: only primary_label populated. This is the
+    B-62 decomposer path — some legacy docs never got `name` written
+    and only carry the canonical primary_label."""
+    src = {"canonical_name": None, "name": None, "primary_label": "SpaceX"}
+    assert _resolve_label(src) == "SpaceX"
+
+
+def test_resolve_label_returns_none_when_all_candidates_empty() -> None:
+    """Last resort: FE surfaces 미해결 entity so the miss stays visible."""
+    assert _resolve_label({}) is None
+    assert _resolve_label({"canonical_name": None, "name": None}) is None
+    assert _resolve_label(
+        {"canonical_name": "", "name": "", "primary_label": ""},
+    ) is None
+
+
+def test_resolve_label_treats_empty_string_as_missing() -> None:
+    """Empty strings must not satisfy the cascade — otherwise a
+    doc with name='' would win and the FE renders nothing."""
+    src = {"canonical_name": "", "name": "이재명 대통령"}
+    assert _resolve_label(src) == "이재명 대통령"
+
+
+def _make_recall_fact(
+    *,
+    fact_uid: str = "fn-1",
+    subject_uid: str = "obj-subj-1",
+    object_value: str = "literal answer",
+    speaker_uid: str | None = None,
+    related_entity_uids: list[str] | None = None,
+) -> RecallFact:
+    return RecallFact(
+        fact_uid=fact_uid,
+        claim="X",
+        subject_uid=subject_uid,
+        predicate="did",
+        object_value=object_value,
+        source_uids=[],
+        validated_at=datetime.now(UTC),
+        validator_id="user-1",
+        validation_method="manual",
+        knowledge_space_id="ks-1",
+        score=0.9,
+        speaker_uid=speaker_uid,
+        related_entity_uids=related_entity_uids or [],
+    )
+
+
+def _mget_response(docs: list[dict]) -> dict:
+    """Shape an ES mget response the way the client returns it."""
+    return {"docs": docs}
+
+
+def _mget_doc(
+    uid: str,
+    *,
+    canonical_name: str | None = None,
+    name: str | None = None,
+    primary_label: str | None = None,
+    entity_class: str | None = None,
+) -> dict:
+    return {
+        "_id": uid,
+        "found": True,
+        "_source": {
+            "object_uid": uid,
+            "canonical_name": canonical_name,
+            "name": name,
+            "primary_label": primary_label,
+            "class": entity_class,
+        },
+    }
+
+
+def test_enrich_with_labels_rescues_canonical_none_via_name_fallback() -> None:
+    """★ PO repro: subject_uid=466b13bb, ES doc has canonical_name=None
+    but name='이재명 대통령'. Post-cascade: subject_label populated."""
+    subj_uid = str(uuid4())
+    fact = _make_recall_fact(subject_uid=subj_uid)
+    client = MagicMock()
+    client.mget.return_value = _mget_response([
+        _mget_doc(
+            subj_uid,
+            canonical_name=None,
+            name="이재명 대통령",
+            primary_label="이재명 대통령",
+            entity_class="person",
+        ),
+    ])
+    with patch("api.routes.recall.get_client", return_value=client):
+        out = _enrich_with_labels([fact], "ks-1")
+
+    assert len(out) == 1
+    assert out[0].subject_label == "이재명 대통령"
+    assert out[0].subject_entity_type == "person"
+
+
+def test_enrich_with_labels_primary_label_only_still_resolves() -> None:
+    """canonical_name=None AND name=None — primary_label is the only
+    surviving surface. Legacy B-62-decomposer docs are shaped this way."""
+    subj_uid = str(uuid4())
+    fact = _make_recall_fact(subject_uid=subj_uid)
+    client = MagicMock()
+    client.mget.return_value = _mget_response([
+        _mget_doc(
+            subj_uid,
+            canonical_name=None,
+            name=None,
+            primary_label="SpaceX",
+            entity_class="organization",
+        ),
+    ])
+    with patch("api.routes.recall.get_client", return_value=client):
+        out = _enrich_with_labels([fact], "ks-1")
+
+    assert out[0].subject_label == "SpaceX"
+
+
+def test_enrich_with_labels_all_candidates_missing_returns_none() -> None:
+    """Last-resort miss: ES doc found but every candidate blank.
+    subject_label stays None so the FE renders 미해결 entity."""
+    subj_uid = str(uuid4())
+    fact = _make_recall_fact(subject_uid=subj_uid)
+    client = MagicMock()
+    client.mget.return_value = _mget_response([
+        _mget_doc(subj_uid, canonical_name=None, name=None, primary_label=None),
+    ])
+    with patch("api.routes.recall.get_client", return_value=client):
+        out = _enrich_with_labels([fact], "ks-1")
+
+    assert out[0].subject_label is None
+
+
+def test_enrich_with_labels_uses_cascade_for_speaker_uid() -> None:
+    """fix/enrich-labels-cascade-fallback: speaker_uid resolves via the
+    same cascade. Claim-layer facts with speaker_uid but no canonical
+    name previously showed a blank 발화자 badge."""
+    subj_uid = str(uuid4())
+    speaker_uid = str(uuid4())
+    fact = _make_recall_fact(subject_uid=subj_uid, speaker_uid=speaker_uid)
+    client = MagicMock()
+    client.mget.return_value = _mget_response([
+        _mget_doc(subj_uid, name="Subject A"),
+        _mget_doc(speaker_uid, canonical_name=None, name="이재명 대통령"),
+    ])
+    with patch("api.routes.recall.get_client", return_value=client):
+        out = _enrich_with_labels([fact], "ks-1")
+
+    assert out[0].subject_label == "Subject A"
+    assert out[0].speaker_label == "이재명 대통령"
+
+
+def test_enrich_with_labels_uses_cascade_for_related_entity_uids() -> None:
+    """fix/enrich-labels-cascade-fallback: related_entity_labels is
+    index-aligned with related_entity_uids. Missing entries stay None
+    so the FE can zip and show 미해결 for the missing ones."""
+    subj_uid = str(uuid4())
+    rel_a = str(uuid4())
+    rel_b = str(uuid4())  # will NOT be in mget response — missing
+    fact = _make_recall_fact(
+        subject_uid=subj_uid, related_entity_uids=[rel_a, rel_b],
+    )
+    client = MagicMock()
+    client.mget.return_value = _mget_response([
+        _mget_doc(subj_uid, name="Subject A"),
+        _mget_doc(rel_a, canonical_name=None, primary_label="Related A"),
+        # rel_b: mark as not-found so the resolver skips it
+        {"_id": rel_b, "found": False},
+    ])
+    with patch("api.routes.recall.get_client", return_value=client):
+        out = _enrich_with_labels([fact], "ks-1")
+
+    assert out[0].related_entity_labels == ["Related A", None]
+
+
+def test_enrich_with_labels_batches_all_uid_families_in_one_mget() -> None:
+    """One ES round-trip regardless of how many uid families the facts
+    reference. Guards against a regression where speaker_uid /
+    related_entity_uids trigger extra mget calls."""
+    subj_uid = str(uuid4())
+    speaker_uid = str(uuid4())
+    rel_uid = str(uuid4())
+    fact = _make_recall_fact(
+        subject_uid=subj_uid,
+        speaker_uid=speaker_uid,
+        related_entity_uids=[rel_uid],
+    )
+    client = MagicMock()
+    client.mget.return_value = _mget_response([
+        _mget_doc(subj_uid, name="S"),
+        _mget_doc(speaker_uid, name="Sp"),
+        _mget_doc(rel_uid, name="R"),
+    ])
+    with patch("api.routes.recall.get_client", return_value=client):
+        _enrich_with_labels([fact], "ks-1")
+
+    assert client.mget.call_count == 1
+    call_ids = set(client.mget.call_args.kwargs["body"]["ids"])
+    assert call_ids == {subj_uid, speaker_uid, rel_uid}
