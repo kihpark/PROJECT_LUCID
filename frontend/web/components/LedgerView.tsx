@@ -28,6 +28,7 @@ import { fetchLedger as apiFetchLedger } from '@/lib/api';
 import { useStateChange } from '@/lib/sync';
 import { predicateLabel } from '@/lib/predicateLabels';
 import type { LedgerItem } from '@/lib/types';
+import { FactDeleteButton } from './FactDeleteButton';
 
 interface Props {
   spaceId: string;
@@ -180,9 +181,13 @@ export function groupByDate(facts: LedgerItem[], now = new Date()): Group[] {
 
 interface LedgerCardProps {
   fact: LedgerItem;
+  /** REQ-012-v2 (PO 2026-07-01) — space id 가 있으면 사실 삭제 UI 활성. */
+  spaceId?: string;
+  /** REQ-012-v2 — 삭제 성공 후 상위 리스트 갱신 hook. */
+  onDeleted?: (factUid: string) => void;
 }
 
-function LedgerCard({ fact }: LedgerCardProps) {
+function LedgerCard({ fact, spaceId, onDeleted }: LedgerCardProps) {
   const subjectDisplay = resolveLabel(fact.subject_uid, fact.subject_label);
   const objectDisplay = resolveLabel(fact.object_value, fact.object_label);
   const isObjectEntity = !!fact.object_label;
@@ -353,6 +358,21 @@ function LedgerCard({ fact }: LedgerCardProps) {
           ))}
         </footer>
       )}
+      {/* ★ REQ-012-v2 (PO 2026-07-01 image #145) — 사실 (엣지) 삭제 자리.
+       *  soft delete (retract) → 옛 B-48b endpoint 재사용. */}
+      {spaceId ? (
+        <div
+          data-testid={`ledger-fact-${fact.fact_uid}-delete-slot`}
+          className="mt-3 flex justify-end"
+        >
+          <FactDeleteButton
+            spaceId={spaceId}
+            factUid={fact.fact_uid}
+            inline
+            onDeleted={() => onDeleted?.(fact.fact_uid)}
+          />
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -550,7 +570,18 @@ export function LedgerView({ spaceId }: Props) {
                 {group.label}
               </h2>
               {group.items.map((fact) => (
-                <LedgerCard key={fact.fact_uid} fact={fact} />
+                <LedgerCard
+                  key={fact.fact_uid}
+                  fact={fact}
+                  spaceId={spaceId}
+                  onDeleted={(uid) => {
+                    // Optimistic remove: drop the row from local list. Server
+                    // has soft-deleted (retracted_at) so a future reload will
+                    // stay consistent.
+                    setFacts((prev) => prev.filter((f) => f.fact_uid !== uid));
+                    setTotal((t) => Math.max(0, t - 1));
+                  }}
+                />
               ))}
             </section>
           ))}

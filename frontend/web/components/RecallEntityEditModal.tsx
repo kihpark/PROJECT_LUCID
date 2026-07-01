@@ -17,6 +17,8 @@
 import { useState } from 'react';
 import { EntityTypeDropdown } from './EntityTypeDropdown';
 import { MergeCandidatesModal } from './MergeCandidatesModal';
+import { EntityNameEdit } from './EntityNameEdit';
+import { EntityDeleteButton } from './EntityDeleteButton';
 
 const ACCENT = '#5EEAD4';
 const TEXT_PRIMARY = '#eaf1f2';
@@ -148,6 +150,14 @@ export function RecallEntityEditModal({
           </button>
         </div>
 
+        {/* ★ REQ-012-v2 (PO 2026-07-01 image #145) — 대표명 편집. */}
+        <EntityNameEdit
+          spaceId={spaceId}
+          entityUid={entityUid}
+          currentName={primaryLabel}
+          onChanged={() => onChanged?.()}
+        />
+
         {/* REQ-012-v1 기능 A — entity 종류 변경. */}
         <EntityTypeDropdown
           spaceId={spaceId}
@@ -200,6 +210,17 @@ export function RecallEntityEditModal({
             }}
           />
         ) : null}
+
+        {/* ★ REQ-012-v2 (PO 2026-07-01 image #145) — 노드 삭제 진입점. */}
+        <EntityDeleteButton
+          spaceId={spaceId}
+          entityUid={entityUid}
+          primaryLabel={primaryLabel}
+          onDeleted={() => {
+            onChanged?.();
+            onClose();
+          }}
+        />
       </div>
     </div>
   );
