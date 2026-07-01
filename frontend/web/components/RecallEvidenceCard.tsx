@@ -25,6 +25,11 @@
 
 import type { RecallExampleFact } from '@/lib/recall-history';
 import type { RecallFact } from '@/lib/types';
+import {
+  resolveEntityLabel,
+  resolveSourceLabel,
+  UNRESOLVED_SOURCE_LABEL,
+} from '@/lib/displayNames';
 
 interface ExampleProps {
   fact: RecallExampleFact;
@@ -40,30 +45,55 @@ interface RealProps {
 
 type Props = ExampleProps | RealProps;
 
-/** ★ REQ-011-v2 — recall API → 카드 표시 라벨로의 안전 매핑.
- *  subject_label 미해결(null) → '미해결 entity' (★ PO 의뢰서 verbatim).
- *  object_label > object_value > '미해결' 순.
- *  source = 첫 번째 source_uid (★ 라벨 회수는 v3 후속). */
+/** ★ REQ-011-v2 dogfood-3 fix (PO 2026-07-01) —
+ *  recall API → 카드 표시 라벨로의 안전 매핑.
+ *
+ *  dogfood 3 이슈 2 재확인 verbatim:
+ *    "UID 화면 노출 = REQ-004 STAGE 3+4 원칙 전체 적용.
+ *     UUID → canonical_name 조회. 못 찾으면 '미해결 entity' placeholder."
+ *
+ *  기존 구현이 subject_label 이 있으면 그대로 사용했으나, backend 가
+ *  드물게 UUID 를 subject_label 위치로 흘려보내는 회귀 케이스가 있어
+ *  resolveEntityLabel 이 label 자체가 UUID 형식인지도 검사한다.
+ *
+ *  object_value 를 fallback 으로 쓰던 옛 로직도 폐기 — object 가 entity
+ *  이면 object_uid 가 있고, object_value 는 UUID 사본. object 가 literal
+ *  이면 object_uid 는 null 이며 object_value 가 사람이 읽는 값이므로
+ *  literal 만 fallback 대상.
+ *
+ *  source_uid 는 URL 이면 host+path 표시, 그 외 (UUID) 는 "미해결 출처".
+ *  ★ 다중 source 는 첫 non-placeholder 를 우선. 모두 UUID → "미해결 출처".
+ */
 function deriveRealDisplay(rf: RecallFact): {
   subject: string;
   predicate: string;
   object: string;
   src: string;
+  srcResolved: boolean;
   date: string;
   by: string;
 } {
+  const objectIsEntity = !!(rf.object_uid && rf.object_uid.trim());
+  const objectRaw = objectIsEntity ? rf.object_label : (rf.object_label ?? rf.object_value);
+  const object = objectIsEntity
+    ? resolveEntityLabel(rf.object_label)
+    : (objectRaw?.trim() || resolveEntityLabel(null));
+
+  // source: URL 이 있는 첫 번째를 우선. 없으면 "미해결 출처".
+  const resolvedList = (rf.source_uids ?? []).map(resolveSourceLabel);
+  const firstUrlIdx = resolvedList.findIndex(
+    (s) => s !== UNRESOLVED_SOURCE_LABEL,
+  );
+  const src = firstUrlIdx >= 0 ? resolvedList[firstUrlIdx]! : UNRESOLVED_SOURCE_LABEL;
+
   return {
-    subject: rf.subject_label && rf.subject_label.trim()
-      ? rf.subject_label
-      : '미해결 entity',
+    subject: resolveEntityLabel(rf.subject_label),
     predicate: rf.predicate_label && rf.predicate_label.trim()
       ? rf.predicate_label
       : rf.predicate,
-    object:
-      (rf.object_label && rf.object_label.trim())
-        || (rf.object_value && rf.object_value.trim())
-        || '미해결',
-    src: rf.source_uids[0] ?? '',
+    object,
+    src,
+    srcResolved: firstUrlIdx >= 0,
     date: rf.validated_at?.slice(0, 10) ?? '',
     by: rf.validator_id ?? '',
   };
@@ -79,6 +109,7 @@ export function RecallEvidenceCard(props: Props) {
         predicate: props.fact!.p,
         object: props.fact!.o,
         src: props.fact!.src,
+        srcResolved: true, // v1 예시 = 이미 사람이 읽는 값 (Bloomberg / WSJ …).
         date: props.fact!.date,
         by: props.fact!.by,
       };
@@ -191,11 +222,14 @@ export function RecallEvidenceCard(props: Props) {
         }}
       >
         <span
+          data-testid="recall-evidence-source"
+          data-recall-source-resolved={display.srcResolved ? 'true' : 'false'}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 4,
-            color: '#7d9b95',
+            color: display.srcResolved ? '#7d9b95' : '#7a6a58',
+            fontStyle: display.srcResolved ? 'normal' : 'italic',
           }}
         >
           <span
@@ -203,7 +237,7 @@ export function RecallEvidenceCard(props: Props) {
               width: 5,
               height: 5,
               borderRadius: '50%',
-              background: '#2f6f64',
+              background: display.srcResolved ? '#2f6f64' : '#5a4a3a',
             }}
           />
           {display.src}
