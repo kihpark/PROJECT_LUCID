@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { ActionButton } from './ActionButton';
 import { GraphNoteEditor } from './GraphNoteEditor';
 import {
@@ -8,9 +8,14 @@ import {
   classifyClaimModality,
   MODALITY_LABEL,
 } from './ClaimModalityBadge';
-import { searchEntitySuggestions, listPredicates } from '@/lib/api';
-import type { FactAction, FactSummary, ObjectSummary, EntitySuggestion, PredicateEntry } from '@/lib/types';
+import type { FactAction, FactSummary, ObjectSummary } from '@/lib/types';
 import type { Lang } from './LangToggle';
+import {
+  ActionFactForm,
+  MeasurementFactForm,
+  ClaimFactForm,
+  type FactFormEdits,
+} from './FactTypeForms';
 
 // ---------------------------------------------------------------------------
 // fact-display-unification — shared fact_type-aware sub-components.
@@ -79,11 +84,20 @@ export function FactTypeBadge({
   // CLAIM, measurement 노드는 MEASUREMENT 배지로 표시되는데 action 만
   // 빠져 fact_type 식별 일관성이 깨졌다. fix: action 도 ACTION 배지.
   // legacy (null) 도 action 으로 fallback 하는 것과 일관되게 ACTION 으로.
+  //
+  // ★ REQ-014-B B3 (PO 2026-07-02) — ACTION 태그 초록.
+  //   옛: 회색 (text-text-secondary + bg-bg-elevated) — CLAIM (accent-cool
+  //   teal), MEASUREMENT (accent-warm amber) 와 색 대비가 약해 3종 fact_type
+  //   식별이 흐릿했다. fix: emerald (#10B981) 로 통일. 회색 팔레트 폐기.
+  //   Tailwind 표준 emerald-400/500 스케일을 그대로 사용 — 프로젝트 팔레트
+  //   에 별도 accent-success 가 있지만 e2e 가 색 코드로 검증할 수 있게 명시
+  //   verbatim 값을 유지. data-fact-badge-color attr 은 e2e 스냅샷용.
   if (factType === 'action' || factType == null) {
     return (
       <span
         data-testid={`fact-action-badge-${factUid}`}
-        className="inline-flex items-center text-xxs font-mono text-text-secondary bg-bg-elevated/40 border border-border-subtle rounded px-1.5 py-0.5"
+        data-fact-badge-color="#10B981"
+        className="inline-flex items-center text-xxs font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/40 rounded px-1.5 py-0.5"
         title="행위 (subject가 object에 한 일)"
       >
         ACTION
@@ -195,8 +209,19 @@ interface EditPayload {
   action: FactAction;
   editedClaim?: string;
   editedSubjectUid?: string;
+  editedSubjectLabel?: string;
   editedPredicate?: string;
   editedObjectValue?: string;
+  editedObjectLabel?: string;
+  // ★ REQ-014-B B1 — fact_type 별 폼의 편집 payload.
+  editedMetric?: string;
+  editedMeasurementValue?: number | null;
+  editedMeasurementUnit?: string;
+  editedAsOf?: string;
+  editedSpeakerUid?: string;
+  editedSpeakerLabel?: string;
+  editedSpeechAct?: string;
+  editedContentClaim?: string;
 }
 
 interface Props {
@@ -206,8 +231,18 @@ interface Props {
   action: FactAction;
   editedClaim?: string;
   editedSubjectUid?: string;
+  editedSubjectLabel?: string;
   editedPredicate?: string;
   editedObjectValue?: string;
+  editedObjectLabel?: string;
+  editedMetric?: string;
+  editedMeasurementValue?: number | null;
+  editedMeasurementUnit?: string;
+  editedAsOf?: string;
+  editedSpeakerUid?: string;
+  editedSpeakerLabel?: string;
+  editedSpeechAct?: string;
+  editedContentClaim?: string;
   onChange: (next: EditPayload) => void;
   reviewMode?: boolean;
   spaceId?: string;
@@ -290,21 +325,9 @@ function regenerateClaim(subjectLabel: string, predicate: string, objectLabel: s
   return `${s} | ${p} | ${o}`;
 }
 
-function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => {
-      setDebounced(value);
-      // decide-ux-v3 instrumentation (step 2): debounce fired
-      if (process.env.NODE_ENV === 'development') {
-        // eslint-disable-next-line no-console
-        console.debug('[FactCard] debounce fired', { value, delay });
-      }
-    }, delay);
-    return () => clearTimeout(id);
-  }, [value, delay]);
-  return debounced;
-}
+// ★ REQ-014-B — useDebounce 는 FactTypeForms 안 EntityField 로 이동. FactCard
+//   자체는 fact_type 별 폼에게 편집 UI 를 위임하므로 debounced 검색은 폼
+//   내부 책임이 됐다.
 
 export function FactCard({
   fact,
@@ -313,8 +336,18 @@ export function FactCard({
   action,
   editedClaim,
   editedSubjectUid,
+  editedSubjectLabel,
   editedPredicate,
   editedObjectValue,
+  editedObjectLabel,
+  editedMetric,
+  editedMeasurementValue,
+  editedMeasurementUnit,
+  editedAsOf,
+  editedSpeakerUid,
+  editedSpeakerLabel,
+  editedSpeechAct,
+  editedContentClaim,
   onChange,
   reviewMode = false,
   spaceId,
@@ -347,133 +380,12 @@ export function FactCard({
   const subjectLabel = resolveEntity(currentSubject, labelMap, lang);
   const objectLabel = resolveEntity(currentObject, labelMap, lang);
 
-  const previewClaim = useMemo(
-    () => regenerateClaim(subjectLabel, currentPredicate, objectLabel),
-    [subjectLabel, currentPredicate, objectLabel],
-  );
-
-  // Entity suggestion state — subject
-  const [subjectQuery, setSubjectQuery] = useState(() =>
-    subjectLabel !== '—' ? subjectLabel : currentSubject,
-  );
-  const [subjectSuggestions, setSubjectSuggestions] = useState<EntitySuggestion[]>([]);
-  const debouncedSubjectQuery = useDebounce(subjectQuery, 200);
-  // decide-ux-v3: suppress the initial auto-fetch when subjectQuery is just
-  // the resolved label of the currently-selected subject. The first time the
-  // user actually types in the input, this flips true and stays true.
-  const [subjectUserTyped, setSubjectUserTyped] = useState(false);
-
-  // Entity suggestion state — object
-  const [objectQuery, setObjectQuery] = useState(() =>
-    objectLabel !== '—' ? objectLabel : currentObject,
-  );
-  const [objectSuggestions, setObjectSuggestions] = useState<EntitySuggestion[]>([]);
-  const debouncedObjectQuery = useDebounce(objectQuery, 200);
-  const [objectUserTyped, setObjectUserTyped] = useState(false);
-
-  // Predicate autocomplete state
-  const [predicateQuery, setPredicateQuery] = useState(currentPredicate);
-  const [predicateCache, setPredicateCache] = useState<PredicateEntry[]>([]);
-  const predicateSuggestions = useMemo(() => {
-    if (!predicateQuery.trim()) return [];
-    const q = predicateQuery.toLowerCase();
-    return predicateCache
-      .filter(
-        (p) =>
-          p.code.toLowerCase().includes(q) ||
-          p.label_ko.toLowerCase().includes(q) ||
-          p.label_en.toLowerCase().includes(q),
-      )
-      .slice(0, 5);
-  }, [predicateQuery, predicateCache]);
-
-  // Load predicate cache on mount when editing
-  useEffect(() => {
-    if (!isEditing) return;
-    listPredicates()
-      .then(setPredicateCache)
-      .catch(() => {/* degrade quietly */});
-  }, [isEditing]);
-
-  // Sync inputs when parent-controlled values change
-  const prevSubjectRef = useRef(currentSubject);
-  const prevObjectRef = useRef(currentObject);
-  const prevPredicateRef = useRef(currentPredicate);
-  useEffect(() => {
-    if (currentSubject !== prevSubjectRef.current) {
-      prevSubjectRef.current = currentSubject;
-      const resolved = resolveEntity(currentSubject, labelMap, lang);
-      setSubjectQuery(resolved !== '—' ? resolved : currentSubject);
-    }
-  }, [currentSubject, labelMap, lang]);
-  useEffect(() => {
-    if (currentObject !== prevObjectRef.current) {
-      prevObjectRef.current = currentObject;
-      const resolved = resolveEntity(currentObject, labelMap, lang);
-      setObjectQuery(resolved !== '—' ? resolved : currentObject);
-    }
-  }, [currentObject, labelMap, lang]);
-  useEffect(() => {
-    if (currentPredicate !== prevPredicateRef.current) {
-      prevPredicateRef.current = currentPredicate;
-      setPredicateQuery(currentPredicate);
-    }
-  }, [currentPredicate]);
-
-  // Fetch subject suggestions
-  // decide-ux-v3 instrumentation (steps 3-5): the gate condition values are
-  // logged on every run; the fetch result is logged on resolve. Open DevTools
-  // verbose console to trace the live path on each keystroke.
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      // eslint-disable-next-line no-console
-      console.debug('[FactCard] subject fetch gate', {
-        isEditing,
-        debouncedSubjectQuery,
-        spaceId,
-        subjectUserTyped,
-      });
-    }
-    if (!isEditing || !debouncedSubjectQuery.trim() || !spaceId || !subjectUserTyped) {
-      setSubjectSuggestions([]);
-      return;
-    }
-    let cancelled = false;
-    const url = `/api/spaces/${spaceId}/entities/suggest?q=${encodeURIComponent(debouncedSubjectQuery)}&limit=5`;
-    if (process.env.NODE_ENV === 'development') {
-      // eslint-disable-next-line no-console
-      console.debug('[FactCard] subject fetch fire', { url });
-    }
-    searchEntitySuggestions(debouncedSubjectQuery, spaceId, 5)
-      .then((items) => {
-        if (process.env.NODE_ENV === 'development') {
-          // eslint-disable-next-line no-console
-          console.debug('[FactCard] subject fetch result', { cancelled, count: items.length, items });
-        }
-        if (!cancelled) setSubjectSuggestions(items);
-      })
-      .catch((err) => {
-        if (process.env.NODE_ENV === 'development') {
-          // eslint-disable-next-line no-console
-          console.debug('[FactCard] subject fetch error', err);
-        }
-        if (!cancelled) setSubjectSuggestions([]);
-      });
-    return () => { cancelled = true; };
-  }, [debouncedSubjectQuery, isEditing, spaceId, subjectUserTyped]);
-
-  // Fetch object suggestions
-  useEffect(() => {
-    if (!isEditing || !debouncedObjectQuery.trim() || !spaceId || !objectUserTyped) {
-      setObjectSuggestions([]);
-      return;
-    }
-    let cancelled = false;
-    searchEntitySuggestions(debouncedObjectQuery, spaceId, 5)
-      .then((items) => { if (!cancelled) setObjectSuggestions(items); })
-      .catch(() => { if (!cancelled) setObjectSuggestions([]); });
-    return () => { cancelled = true; };
-  }, [debouncedObjectQuery, isEditing, spaceId, objectUserTyped]);
+  // ★ REQ-014-B — SPO 3칼럼 획일 폼 폐기 이후 dead code (subjectQuery /
+  //   objectQuery / predicateQuery / suggestion fetch effects / chip-click
+  //   handlers) 는 fact_type 별 폼 (FactTypeForms.tsx 안 EntityField 가
+  //   자체 소유) 으로 위임됐다. 여기 남은 useMemo previewClaim 은 미편집
+  //   요약 view 에서만 참고되며 (dl grid), edit path 는 form 이 자기 preview
+  //   를 그린다.
 
   // Emit helpers
   const emitEdit = (next: { subject?: string; predicate?: string; object?: string }) => {
@@ -490,6 +402,56 @@ export function FactCard({
       editedSubjectUid: nextSubject,
       editedPredicate: nextPredicate,
       editedObjectValue: resolvedObject,
+    });
+  };
+
+  // ★ REQ-014-B B1 — fact_type 별 폼이 부분 patch 를 emit 한다. parent 는
+  //   기존 editedClaim / editedSubjectUid / editedPredicate / editedObjectValue
+  //   을 유지하면서 새 fact_type 필드 (metric / value / unit / as_of /
+  //   speaker_uid / speech_act / content_claim) 를 함께 실어 보낸다. 이
+  //   payload 는 DecideOverlay 가 edited_metadata dict 로 감싸 backend
+  //   _coerce_fact_to_factnode 의 meta.update() 지점에서 fact_summary 위에
+  //   덮인다 — backend 는 이미 measurement_* / speaker_* / content_claim 등
+  //   전체 v0.2 필드를 canonical_kwargs 로 흘리므로 별도 endpoint 확장 없이
+  //   저장 라운드트립이 완결된다 (see backend/api/routes/validate.py
+  //   _coerce_fact_to_factnode L469~478 verbatim).
+  //
+  // ★ B4 subject 수정 반영: `editedSubjectLabel` 을 patch 에 실어
+  //   edited_metadata.subject_label 로도 보낸다. 이는 lucid_facts 문서의
+  //   surface subject_label 을 갱신하는 두 번째 경로이고, entity 대표명
+  //   자체는 여전히 EntityNameEdit path 로만 rename 가능하다는 사실을
+  //   FactTypeForms 안 EntityNameNoticeLink 가 사용자에게 안내한다.
+  const emitFactTypePatch = (patch: FactFormEdits) => {
+    // Recompute claim only when the ACTION triple is what changed —
+    // MEASUREMENT / CLAIM 은 자기 필드의 preview 로 대신 표시된다.
+    let nextClaim = editedClaim;
+    if (fact.fact_type !== 'measurement' && fact.fact_type !== 'claim') {
+      const nextSubject = patch.editedSubjectUid ?? currentSubject;
+      const nextPredicate = patch.editedPredicate ?? currentPredicate;
+      const nextObject = patch.editedObjectValue ?? currentObject;
+      const nextSubjectLabel = resolveEntity(nextSubject, labelMap, lang);
+      const nextObjectLabel = resolveEntity(nextObject, labelMap, lang);
+      nextClaim = regenerateClaim(nextSubjectLabel, nextPredicate, nextObjectLabel);
+    }
+    onChange({
+      action: 'edit',
+      editedClaim: nextClaim,
+      editedSubjectUid: patch.editedSubjectUid ?? editedSubjectUid,
+      editedSubjectLabel: patch.editedSubjectLabel ?? editedSubjectLabel,
+      editedPredicate: patch.editedPredicate ?? editedPredicate,
+      editedObjectValue: patch.editedObjectValue ?? editedObjectValue,
+      editedObjectLabel: patch.editedObjectLabel ?? editedObjectLabel,
+      editedMetric: patch.editedMetric ?? editedMetric,
+      editedMeasurementValue:
+        patch.editedMeasurementValue !== undefined
+          ? patch.editedMeasurementValue
+          : editedMeasurementValue,
+      editedMeasurementUnit: patch.editedMeasurementUnit ?? editedMeasurementUnit,
+      editedAsOf: patch.editedAsOf ?? editedAsOf,
+      editedSpeakerUid: patch.editedSpeakerUid ?? editedSpeakerUid,
+      editedSpeakerLabel: patch.editedSpeakerLabel ?? editedSpeakerLabel,
+      editedSpeechAct: patch.editedSpeechAct ?? editedSpeechAct,
+      editedContentClaim: patch.editedContentClaim ?? editedContentClaim,
     });
   };
 
@@ -535,97 +497,19 @@ export function FactCard({
 
   const onSaveEdit = () => {
     // Keep action='edit' so the parent retains editedSubjectUid /
-    // editedPredicate / editedObjectValue for the batch submit.
-    // Just close the local form.
+    // editedPredicate / editedObjectValue (플러스 REQ-014-B 의 fact_type
+    // 별 필드) for the batch submit. Just close the local form.
     if (process.env.NODE_ENV === 'development') {
       // eslint-disable-next-line no-console
-      console.debug('[FactCard chip-click] 4. save payload', {
-        subjectQuery,
+      console.debug('[FactCard] 4. save payload', {
+        factType: fact.fact_type,
         editedSubjectUid,
-        currentSubject,
+        editedSubjectLabel,
         editedPredicate,
         editedObjectValue,
       });
     }
     setEditFormOpen(false);
-  };
-
-  // decide-chip-click-bind: step 3 — post-state render. Logs the values that
-  // actually landed in the DOM after the chip click batched-render. If step 2
-  // fired but step 3 shows the old query, the bug is in the parent-sync
-  // useEffect (line ~199 above).
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      // eslint-disable-next-line no-console
-      console.debug('[FactCard chip-click] 3. post-state render', {
-        subjectQuery,
-        objectQuery,
-        editedSubjectUid,
-        editedObjectValue,
-        currentSubject,
-      });
-    }
-  }, [subjectQuery, objectQuery, editedSubjectUid, editedObjectValue, currentSubject]);
-
-  // decide-chip-click-bind: LIVE click-path instrumentation. The 5-point
-  // trace lets PO open DevTools verbose console and see the entire chain
-  // each time a chip is clicked. Step 1 = click received here; step 2 =
-  // state setters called; step 3 = post-state render (via useEffect below);
-  // step 4 = save (in onSaveEdit); step 5 = submit (in DecideOverlay).
-  const onSubjectChipClick = (suggestion: EntitySuggestion) => {
-    if (process.env.NODE_ENV === 'development') {
-      // eslint-disable-next-line no-console
-      console.debug('[FactCard chip-click] 1. subject click received', {
-        chip: suggestion,
-      });
-    }
-    // Pre-arm prevSubjectRef so the parent-sync useEffect below does NOT
-    // overwrite subjectQuery when editedSubjectUid lands. Without this,
-    // the sync effect compares the new uid against the old subjectQuery
-    // value and calls resolveEntity(uid) — which, for a fresh entity not
-    // in the Decision objects labelMap, returns the raw uid (or the
-    // "(unresolved)" marker), clobbering the chip's primary_label that
-    // we just placed in the input. PO's "input reverts" repro.
-    prevSubjectRef.current = suggestion.entity_id;
-    setSubjectQuery(suggestion.primary_label);
-    setSubjectSuggestions([]);
-    setSubjectUserTyped(false); // chip-click selects an entity; suppress refetch
-    if (process.env.NODE_ENV === 'development') {
-      // eslint-disable-next-line no-console
-      console.debug('[FactCard chip-click] 2. subject state setters called', {
-        newSubjectQuery: suggestion.primary_label,
-        newSubjectUid: suggestion.entity_id,
-      });
-    }
-    emitEdit({ subject: suggestion.entity_id });
-  };
-
-  const onObjectChipClick = (suggestion: EntitySuggestion) => {
-    if (process.env.NODE_ENV === 'development') {
-      // eslint-disable-next-line no-console
-      console.debug('[FactCard chip-click] 1. object click received', {
-        chip: suggestion,
-      });
-    }
-    // Same pre-arm pattern as subject — keep the input value the chip
-    // label, not the unresolved uid.
-    prevObjectRef.current = suggestion.entity_id;
-    setObjectQuery(suggestion.primary_label);
-    setObjectSuggestions([]);
-    setObjectUserTyped(false);
-    if (process.env.NODE_ENV === 'development') {
-      // eslint-disable-next-line no-console
-      console.debug('[FactCard chip-click] 2. object state setters called', {
-        newObjectQuery: suggestion.primary_label,
-        newObjectUid: suggestion.entity_id,
-      });
-    }
-    emitEdit({ object: suggestion.entity_id });
-  };
-
-  const onPredicateChipClick = (entry: PredicateEntry) => {
-    setPredicateQuery(entry.code);
-    emitEdit({ predicate: entry.code });
   };
 
   return (
@@ -732,145 +616,84 @@ export function FactCard({
         </dl>
       )}
 
+      {/* ★ REQ-014-B B1 (PO 2026-07-02) — fact_type 별 편집 폼.
+       *
+       *  옛: 모든 atomic fact 를 SPO 3칼럼 획일 분해 (subject / predicate /
+       *  object 입력 3 개) — ACTION 은 자연스럽지만 CLAIM (speaker / speech_act /
+       *  content_claim / modality) 와 MEASUREMENT (subject + metric + value +
+       *  unit + as_of) 는 3칼럼에 맞지 않아 사용자 편집 UX 가 붕괴됐다.
+       *  fix: fact_type 별로 편집 컴포넌트 분리.
+       *   - ACTION       → <ActionFactForm />
+       *   - MEASUREMENT  → <MeasurementFactForm />
+       *   - CLAIM        → <ClaimFactForm />
+       *  옛 3칼럼 SPO grid 폐기. legacy null (fact_type 미주석) 은 ACTION
+       *  분기 fallback — 옛 FactTypeBadge 규칙과 동일. */}
+      {isEditing && fact.fact_type === 'measurement' && (
+        <>
+          <MeasurementFactForm
+            fact={fact}
+            factUid={factUid}
+            lang={lang}
+            spaceId={spaceId}
+            objects={objects}
+            edits={{
+              editedSubjectUid,
+              editedSubjectLabel,
+              editedMetric,
+              editedMeasurementValue,
+              editedMeasurementUnit,
+              editedAsOf,
+            }}
+            onEdit={(patch) => emitFactTypePatch(patch)}
+          />
+        </>
+      )}
+      {isEditing && fact.fact_type === 'claim' && (
+        <>
+          <ClaimFactForm
+            fact={fact}
+            factUid={factUid}
+            lang={lang}
+            spaceId={spaceId}
+            objects={objects}
+            edits={{
+              editedSpeakerUid,
+              editedSpeakerLabel,
+              editedSpeechAct,
+              editedContentClaim,
+              editedSubjectUid,
+            }}
+            onEdit={(patch) => emitFactTypePatch(patch)}
+          />
+        </>
+      )}
+      {isEditing
+        && fact.fact_type !== 'measurement'
+        && fact.fact_type !== 'claim'
+        && (
+        <>
+          <ActionFactForm
+            fact={fact}
+            factUid={factUid}
+            lang={lang}
+            spaceId={spaceId}
+            objects={objects}
+            edits={{
+              editedSubjectUid,
+              editedSubjectLabel,
+              editedPredicate,
+              editedObjectValue,
+              editedObjectLabel,
+            }}
+            onEdit={(patch) => emitFactTypePatch(patch)}
+          />
+        </>
+      )}
+
       {isEditing && (
-        <div className="mb-3 pl-7 space-y-3">
-          <div>
-            <label
-              className="text-xxs text-text-muted font-mono opacity-60 block mb-1"
-              htmlFor={`edit-subject-${factUid}`}
-            >
-              subject
-            </label>
-            <input
-              id={`edit-subject-${factUid}`}
-              data-testid={`fact-edit-subject-${factUid}`}
-              type="text"
-              value={subjectQuery}
-              onChange={(e) => {
-                const val = e.target.value;
-                // decide-ux-v3 instrumentation (step 1): subject onChange fired
-                if (process.env.NODE_ENV === 'development') {
-                  // eslint-disable-next-line no-console
-                  console.debug('[FactCard] subject onChange', { val });
-                }
-                setSubjectQuery(val);
-                setSubjectUserTyped(true);
-                emitEdit({ subject: val });
-              }}
-              placeholder="entity name or uid"
-              className={
-                'w-full rounded-md border border-border-subtle bg-bg-elevated '
-                + 'p-2 text-sm text-text-primary focus:outline-none '
-                + 'focus:border-accent-cool'
-              }
-            />
-            {subjectSuggestions.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {subjectSuggestions.map((s) => (
-                  <button
-                    key={s.entity_id}
-                    type="button"
-                    onClick={() => onSubjectChipClick(s)}
-                    data-testid={`subject-chip-${s.entity_id}`}
-                    className="text-xxs rounded border border-accent-cool/40 bg-accent-cool/10 px-2 py-0.5 text-accent-cool hover:bg-accent-cool/20 font-mono"
-                  >
-                    → {s.primary_label} [{s.primary_lang}]
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label
-              className="text-xxs text-text-muted font-mono opacity-60 block mb-1"
-              htmlFor={`edit-predicate-${factUid}`}
-            >
-              predicate
-            </label>
-            <input
-              id={`edit-predicate-${factUid}`}
-              data-testid={`fact-edit-predicate-${factUid}`}
-              type="text"
-              value={predicateQuery}
-              onChange={(e) => {
-                const val = e.target.value;
-                setPredicateQuery(val);
-                emitEdit({ predicate: val });
-              }}
-              placeholder="snake_case_predicate"
-              className={
-                'w-full rounded-md border border-border-subtle bg-bg-elevated '
-                + 'p-2 text-sm text-text-primary font-mono focus:outline-none '
-                + 'focus:border-accent-cool'
-              }
-            />
-            {predicateSuggestions.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {predicateSuggestions.map((p) => (
-                  <button
-                    key={p.code}
-                    type="button"
-                    onClick={() => onPredicateChipClick(p)}
-                    data-testid={`predicate-chip-${p.code}`}
-                    className="text-xxs rounded border border-accent-cool/40 bg-accent-cool/10 px-2 py-0.5 text-accent-cool hover:bg-accent-cool/20 font-mono"
-                  >
-                    {p.label_ko} / {p.label_en} ({p.code})
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label
-              className="text-xxs text-text-muted font-mono opacity-60 block mb-1"
-              htmlFor={`edit-object-${factUid}`}
-            >
-              object
-            </label>
-            <input
-              id={`edit-object-${factUid}`}
-              data-testid={`fact-edit-object-${factUid}`}
-              type="text"
-              value={objectQuery}
-              onChange={(e) => {
-                const val = e.target.value;
-                setObjectQuery(val);
-                setObjectUserTyped(true);
-                emitEdit({ object: val });
-              }}
-              placeholder="entity name or literal value"
-              className={
-                'w-full rounded-md border border-border-subtle bg-bg-elevated '
-                + 'p-2 text-sm text-text-primary focus:outline-none '
-                + 'focus:border-accent-cool'
-              }
-            />
-            {objectSuggestions.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {objectSuggestions.map((s) => (
-                  <button
-                    key={s.entity_id}
-                    type="button"
-                    onClick={() => onObjectChipClick(s)}
-                    data-testid={`object-chip-${s.entity_id}`}
-                    className="text-xxs rounded border border-accent-cool/40 bg-accent-cool/10 px-2 py-0.5 text-accent-cool hover:bg-accent-cool/20 font-mono"
-                  >
-                    → {s.primary_label} [{s.primary_lang}]
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <p className="text-xxs text-text-muted opacity-60 font-mono">
-            preview: <span data-testid={`fact-edit-preview-${factUid}`}>{previewClaim}</span>
-          </p>
-          <p className="text-xxs text-text-muted">
-            Original claim preserved as alias on the persisted FactNode (DR-036).
-          </p>
-        </div>
+        <p className="text-xxs text-text-muted pl-7 mb-3 opacity-60">
+          Original claim preserved as alias on the persisted FactNode (DR-036).
+        </p>
       )}
 
       <div className="flex gap-2 flex-wrap pl-7 items-center justify-between">
