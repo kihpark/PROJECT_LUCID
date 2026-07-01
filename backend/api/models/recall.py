@@ -123,6 +123,14 @@ class RecallFact(LucidBaseModel):
     fact_object_role: dict[str, str] = {}
     link_status: str | None = None
 
+    # fix/enrich-labels-cascade-fallback (PO 2026-07-01): index-aligned
+    # display labels for `related_entity_uids`. Populated by the recall
+    # route's `_enrich_with_labels` pass via the same mget batch as
+    # subject_label / object_label / speaker_label. Missing entries are
+    # None (not the raw uid) so the FE can render "미해결 entity" and
+    # keep the miss visible instead of showing a UUID surface.
+    related_entity_labels: list[str | None] = Field(default_factory=list)
+
 
 class RecallResponse(LucidBaseModel):
     """The thin-slice recall envelope.

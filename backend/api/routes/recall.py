@@ -377,12 +377,45 @@ def _hit_to_fact(hit: dict[str, Any]) -> RecallFact | None:
         return None
 
 
+def _resolve_label(entity_source: dict) -> str | None:
+    """Cascade resolution for an entity's display label.
+
+    fix/enrich-labels-cascade-fallback (PO 2026-07-01) — the previous
+    single-field lookup (`name` only) surfaced None whenever a Korean
+    entity was registered with the surface as `primary_label` but no
+    canonical `name`, or vice versa. Symptom: `이재명 대통령` (uid
+    466b13bb) had name='이재명 대통령', primary_label='이재명 대통령',
+    canonical_name=None, and yet every fact referencing it came back
+    with subject_label=None. 87/87 entities in the sweep had
+    canonical_name=None.
+
+    Cascade (first non-empty wins):
+      1. canonical_name  — v0.2 canonical surface, usually None on
+                           legacy docs but wins when the resolution
+                           gateway has written it.
+      2. name            — the classic lucid_objects surface.
+      3. primary_label   — the B-62 canonical primary label field,
+                           populated by the decomposer + relabel
+                           backfill script.
+      4. None            — last resort. The frontend renders "미해결
+                           entity" so the miss stays visible instead
+                           of silently degrading to a blank card.
+    """
+    return (
+        entity_source.get("canonical_name")
+        or entity_source.get("name")
+        or entity_source.get("primary_label")
+        or None
+    )
+
+
 def _enrich_with_labels(
     facts: list[RecallFact], knowledge_space_id: str,
 ) -> list[RecallFact]:
     """Look up the human-readable name AND entity_type for every entity
     uid the facts reference, then return a new list with subject_label /
-    object_label / subject_entity_type / object_entity_type populated.
+    object_label / speaker_label / related_entity_labels /
+    subject_entity_type / object_entity_type populated.
 
     Uses a single ES mget so the cost is one round-trip regardless of
     how many facts we resolve.
@@ -400,6 +433,16 @@ def _enrich_with_labels(
     palette. Without this enrichment every node falls back to
     STELLAR_ACCENT and the PO's "entity별 구분이 제일 먼저 필요" gate
     stays unfulfilled.
+
+    fix/enrich-labels-cascade-fallback (PO 2026-07-01): expanded to
+    cover speaker_uid + related_entity_uids in the same mget pass, and
+    routed every label resolution through `_resolve_label` so a Korean
+    entity with only `primary_label` set still surfaces on the recall
+    response. Symptom before the fix: 이재명 대통령 (uid 466b13bb) had
+    4 facts, all with subject_label=None because the code read `name`
+    exclusively and the resolution-gateway had never populated `name`
+    for that doc. Cascade rescues canonical_name-missing / name-missing
+    entities without a re-index.
     """
     if not facts:
         return facts
@@ -410,10 +453,19 @@ def _enrich_with_labels(
             uids[f.subject_uid] = None
         if f.object_value and _is_entity_ref(f.object_value):
             uids[f.object_value] = None
+        # fix/enrich-labels-cascade-fallback: speaker_uid + related_entity_uids
+        # go into the same mget batch so no extra ES round-trip is
+        # incurred to resolve the claim-layer speaker / referenced
+        # entities. Legacy facts without these fields simply skip.
+        if f.speaker_uid:
+            uids[f.speaker_uid] = None
+        for ref_uid in (f.related_entity_uids or []):
+            if ref_uid:
+                uids[ref_uid] = None
     if not uids:
         return facts
 
-    name_by_uid: dict[str, str] = {}
+    label_by_uid: dict[str, str] = {}
     # fix/m32b-entity-type-degree-actual-wiring: parallel dict mapping
     # entity uid -> classifier `class`. Populated from the same mget
     # response, so no extra ES round-trip. Missing/legacy docs simply
@@ -434,16 +486,21 @@ def _enrich_with_labels(
                 continue
             src = doc.get("_source") or {}
             uid = src.get("object_uid") or doc.get("_id")
-            name = src.get("name")
-            if uid and name:
-                name_by_uid[uid] = name
+            # fix/enrich-labels-cascade-fallback: cascade through
+            # canonical_name -> name -> primary_label instead of the
+            # old single-field `name` lookup. Rescues legacy Korean
+            # entities that only carry `primary_label` (or only
+            # `name`) without needing a re-index sweep.
+            label = _resolve_label(src)
+            if uid and label:
+                label_by_uid[uid] = label
             # fix/m32b-entity-type-degree-actual-wiring: pull `class`
-            # alongside `name`. `class` is the v0.2 entity classifier
+            # alongside the label. `class` is the v0.2 entity classifier
             # output (person / organization / group / product / resource
             # / concept / knowledge / event / place) — exact match for
             # the FE ENTITY_COLORS keys in stellarColors.ts. We do NOT
-            # gate on `name` here because an unnamed-but-classified doc
-            # should still drive node color.
+            # gate on the label here because an unnamed-but-classified
+            # doc should still drive node color.
             entity_class = src.get("class")
             if uid and entity_class:
                 entity_type_by_uid[uid] = entity_class
@@ -453,12 +510,22 @@ def _enrich_with_labels(
 
     out: list[RecallFact] = []
     for f in facts:
-        subject_label = name_by_uid.get(f.subject_uid) if f.subject_uid else None
+        subject_label = label_by_uid.get(f.subject_uid) if f.subject_uid else None
         object_label = (
-            name_by_uid.get(f.object_value)
+            label_by_uid.get(f.object_value)
             if f.object_value and _is_entity_ref(f.object_value)
             else None
         )
+        # fix/enrich-labels-cascade-fallback: speaker_label + parallel
+        # array of related_entity_labels (index-aligned with
+        # related_entity_uids so the FE can zip them). Missing entries
+        # stay None — the FE renders "미해결 entity" for those.
+        speaker_label = (
+            label_by_uid.get(f.speaker_uid) if f.speaker_uid else None
+        )
+        related_entity_labels = [
+            label_by_uid.get(ref_uid) for ref_uid in (f.related_entity_uids or [])
+        ]
         # fix/m32b-entity-type-degree-actual-wiring: same shape as the
         # label resolution above — entity-type is only meaningful for
         # actual entity refs; literals leave the field as None.
@@ -474,6 +541,8 @@ def _enrich_with_labels(
             f.model_copy(update={
                 "subject_label": subject_label,
                 "object_label": object_label,
+                "speaker_label": speaker_label,
+                "related_entity_labels": related_entity_labels,
                 "subject_entity_type": subject_entity_type,
                 "object_entity_type": object_entity_type,
             })
