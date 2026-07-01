@@ -41,14 +41,19 @@ test('★ i18n stellar legend: 범례 한국어 (영문 코드 0)', async ({
   await expect(title).toHaveText('범례');
 
   // 2. 각 row 의 한국어 라벨 verbatim (★ PO 의뢰서 #3).
+  // ★ 2026-07-01 — WHAT 6 소분류 전부 별도 row. 한국어 라벨 = 자원/개념/행위/
+  //   지식/사건/지표 (옛 "자원·제품" 등 합성 라벨 폐기, PO 요구 = 순수 6 토큰).
+  //   옛 EVENT top-level bucket 폐기 → what-event 로 흡수.
   const expectedLabels: Record<string, string> = {
     person: '사람',
     organization: '조직',
     group: '그룹',
-    'what-resource': '자원·제품',
-    'what-knowledge': '개념·지식',
-    'what-task': '행위·역할',
-    event: '사건',
+    'what-resource': '자원',
+    'what-concept': '개념',
+    'what-task': '행위',
+    'what-knowledge': '지식',
+    'what-event': '사건',
+    'what-metric': '지표',
     place: '장소',
     claim: '발언',
     unknown: '기타',

@@ -23,15 +23,29 @@ describe('ENTITY_COLORS (M3-2b + ★ L2 PO 2026-06-29 mapping)', () => {
     expect(whoSet.size).toBe(3);
   });
 
-  it('maps WHAT entity types to amber/gold', () => {
-    expect(ENTITY_COLORS.product).toBe('#F5C36B');
-    expect(ENTITY_COLORS.resource).toBe('#F5C36B');
-    expect(ENTITY_COLORS.concept).toBe('#F5C36B');
-    expect(ENTITY_COLORS.knowledge).toBe('#F5C36B');
-  });
+  // ★ 2026-07-01 (PO verbatim: "자원/개념/행위/지식/사건/지표 전부 구분되게.
+  //   일부만 태그 X. 형태·명도·라벨 전부 구분되게. 색 = amber family 유지").
+  //   WHAT 6 소분류 = amber family 6 명도. resource = base #F5C36B,
+  //   나머지는 amber-400/500/600/700/800 (더 어두워지는 순).
+  it('★ WHAT 6 소분류 = amber family 6 명도 (전부 구분)', () => {
+    expect(ENTITY_COLORS.resource).toBe('#F5C36B');   // amber-300 (base)
+    expect(ENTITY_COLORS.product).toBe('#F5C36B');    // resource alias
+    expect(ENTITY_COLORS.concept).toBe('#E5A94B');    // amber-400
+    expect(ENTITY_COLORS.task).toBe('#D69235');       // amber-500
+    expect(ENTITY_COLORS.knowledge).toBe('#C77B1F');  // amber-600
+    expect(ENTITY_COLORS.event).toBe('#B86408');      // amber-700 (★ 옛 violet 폐기)
+    expect(ENTITY_COLORS.metric).toBe('#A94D00');     // amber-800
 
-  it('maps WHAT-EVENT to violet', () => {
-    expect(ENTITY_COLORS.event).toBe('#A78BFA');
+    // 6 명도가 서로 다름 (product = resource alias 이므로 5 unique + 1 alias).
+    const whatSet = new Set<string>([
+      ENTITY_COLORS.resource,
+      ENTITY_COLORS.concept,
+      ENTITY_COLORS.task,
+      ENTITY_COLORS.knowledge,
+      ENTITY_COLORS.event,
+      ENTITY_COLORS.metric,
+    ]);
+    expect(whatSet.size).toBe(6);
   });
 
   it('maps WHERE to slate/blue-gray', () => {
@@ -44,14 +58,16 @@ describe('colorForEntityType (lookup helper)', () => {
     expect(colorForEntityType('person')).toBe('#5EEAD4');
     expect(colorForEntityType('organization')).toBe('#22D3EE');
     expect(colorForEntityType('group')).toBe('#A3E635');
-    expect(colorForEntityType('event')).toBe('#A78BFA');
+    // ★ 2026-07-01 — event 는 amber family 로 이동 (violet 폐기).
+    expect(colorForEntityType('event')).toBe('#B86408');
+    expect(colorForEntityType('metric')).toBe('#A94D00');
     expect(colorForEntityType('place')).toBe('#7A8CA3');
   });
 
   it('is case-insensitive', () => {
     expect(colorForEntityType('Person')).toBe('#5EEAD4');
     expect(colorForEntityType('ORGANIZATION')).toBe('#22D3EE');
-    expect(colorForEntityType('EVENT')).toBe('#A78BFA');
+    expect(colorForEntityType('EVENT')).toBe('#B86408');
   });
 
   it('falls back to STELLAR_ACCENT for unknown / null / undefined', () => {
@@ -68,8 +84,8 @@ describe('CLAIM node color (★ PO 2026-06-29: entity 와 시각 구분)', () =>
     // ★ 새 light cool grey → channel-agnostic neutral
     expect(CLAIM_NODE_COLOR).toBe('#CBD5E1');
     expect(CLAIM_NODE_COLOR).not.toBe('#5EEAD4'); // ★ WHO 와 겹치면 안 됨
-    expect(CLAIM_NODE_COLOR).not.toBe('#F5C36B'); // ★ WHAT
-    expect(CLAIM_NODE_COLOR).not.toBe('#A78BFA'); // ★ EVENT
+    expect(CLAIM_NODE_COLOR).not.toBe('#F5C36B'); // ★ WHAT / 자원
+    expect(CLAIM_NODE_COLOR).not.toBe('#B86408'); // ★ WHAT / 사건 (amber-700)
     expect(CLAIM_NODE_COLOR).not.toBe('#7A8CA3'); // ★ WHERE
   });
 

@@ -23,15 +23,27 @@ describe('ENTITY_SHAPES (M3-2b + ★ L2 PO 2026-06-29 shape vocab)', () => {
     expect(whoShapes.size).toBe(3);
   });
 
-  it('maps WHAT types to sphere (★ L2 — default WHAT 묶음)', () => {
-    expect(ENTITY_SHAPES.product).toBe('sphere');
-    expect(ENTITY_SHAPES.resource).toBe('sphere');
+  // ★ 2026-07-01 (PO verbatim: "자원/개념/행위/지식/사건/지표 전부 구분되게").
+  //   WHAT 6 소분류 = 6 형태 (cube / sphere / diamond / octahedron /
+  //   roundedSquare / cone). 옛 "sphere 공유" 결정 폐기.
+  it('★ WHAT 6 소분류 = 6 형태 (전부 구분)', () => {
+    expect(ENTITY_SHAPES.resource).toBe('cube');
+    expect(ENTITY_SHAPES.product).toBe('cube');       // resource alias
     expect(ENTITY_SHAPES.concept).toBe('sphere');
-    expect(ENTITY_SHAPES.knowledge).toBe('sphere');
-  });
-
-  it('maps EVENT to roundedSquare', () => {
+    expect(ENTITY_SHAPES.task).toBe('diamond');
+    expect(ENTITY_SHAPES.knowledge).toBe('octahedron');
     expect(ENTITY_SHAPES.event).toBe('roundedSquare');
+    expect(ENTITY_SHAPES.metric).toBe('cone');
+
+    const whatSet = new Set<string>([
+      ENTITY_SHAPES.resource!,
+      ENTITY_SHAPES.concept!,
+      ENTITY_SHAPES.task!,
+      ENTITY_SHAPES.knowledge!,
+      ENTITY_SHAPES.event!,
+      ENTITY_SHAPES.metric!,
+    ]);
+    expect(whatSet.size).toBe(6);
   });
 
   it('maps WHERE to pin', () => {
@@ -45,6 +57,9 @@ describe('shapeForEntityType (lookup helper)', () => {
     expect(shapeForEntityType('organization')).toBe('cube');
     expect(shapeForEntityType('group')).toBe('diamond');
     expect(shapeForEntityType('event')).toBe('roundedSquare');
+    // ★ 2026-07-01 WHAT-6 확장.
+    expect(shapeForEntityType('knowledge')).toBe('octahedron');
+    expect(shapeForEntityType('metric')).toBe('cone');
     expect(shapeForEntityType('place')).toBe('pin');
   });
 
@@ -72,6 +87,9 @@ describe('SHAPE_LABEL (★ L1/L2 — legend swatch character vocabulary)', () =>
     expect(SHAPE_LABEL.sphere.length).toBeGreaterThan(0);
     expect(SHAPE_LABEL.cube.length).toBeGreaterThan(0);
     expect(SHAPE_LABEL.diamond.length).toBeGreaterThan(0);
+    // ★ 2026-07-01 WHAT-6 — 새 shape 토큰 (octahedron / cone) 도 스와치 라벨 확보.
+    expect(SHAPE_LABEL.octahedron.length).toBeGreaterThan(0);
+    expect(SHAPE_LABEL.cone.length).toBeGreaterThan(0);
     expect(SHAPE_LABEL.roundedSquare.length).toBeGreaterThan(0);
     expect(SHAPE_LABEL.pin.length).toBeGreaterThan(0);
     expect(SHAPE_LABEL.dot.length).toBeGreaterThan(0);

@@ -1,6 +1,9 @@
 /**
  * ★ fix/stellar-v1-v2-v4-legend-class (PO 2026-06-29) — STELLAR LEGEND ↔ 노드
  * single source of truth.
+ * ★ 2026-07-01 (PO verbatim: "자원/개념/행위/지식/사건/지표 전부 구분되게.
+ *   일부만 태그 X. 형태·명도·라벨 전부 구분되게") — WHAT 6 소분류 전부 별도
+ *   row (형태·명도·라벨 3 채널 완전 분리). 옛 "same amber 공유" 결정 폐기.
  *
  * 위반 클래스 (PO verbatim):
  *   V1.  WHO/사람 vs unknown 시각 동일 → 같은 sphere + 다른 색? 무엇? → 사용자가
@@ -11,6 +14,10 @@
  *   V2.  LEGEND "WHERE = 빨간 구 + 핀셋" 안내인데 실제는 "회색 원형뿔". LEGEND
  *        이 안내하는 모양/색과 ForceGraph3D 의 nodeThreeObject 가 그리는 모양/
  *        색이 따로 살아 있어서 사용자가 안내를 받아도 화면에서 못 찾는다.
+ *   ★ WHAT-6. (2026-07-01 PO) "자원/개념/행위/지식/사건/지표 = 6 소분류 인데
+ *        일부만 태그되어 있고, 색이 동일해 사용자가 amber cube 가 자원인지
+ *        행위인지 모른다" — 6 sub-row 로 완전 분리. amber family 6 명도 +
+ *        6 형태 (cube/sphere/diamond/octahedron/roundedSquare/cone).
  *
  * Fix 원칙 (★ same-source):
  *   • LEGEND 와 nodeThreeObject 둘 다 이 파일의 LEGEND_SPECS 와
@@ -18,9 +25,9 @@
  *     되어 V2 의 "안내 vs 실제 불일치" 가 구조적으로 불가능해진다.
  *   • specForEntityType(null | unknown) = LEGEND_SPECS 의 'unknown' row 와
  *     동일한 spec — 색·형태가 사람/조직 어떤 것과도 다른 작은 점 (dot, 회색).
- *   • WHAT 묶음은 LEGEND 한 줄을 3 sub-row (RESOURCE / KNOWLEDGE / TASK) 로
- *     확장 — 같은 amber 색을 공유 (★ PO 결정: 색 분리 X) 하되 한국어 안내가
- *     달라서 사용자가 의미를 알 수 있다.
+ *   • WHAT 묶음은 LEGEND 6 sub-row (자원/개념/행위/지식/사건/지표) 로 완전
+ *     확장. amber family 6 명도 (F5C36B→A94D00) + 6 형태. 옛 EVENT top-level
+ *     bucket 폐기 (사건 = WHAT sub).
  *   • LEGEND row 우측에 "({count})" — props.nodes 로 들어온 현재 노드들 중
  *     spec.entity_types 에 해당하는 개수.
  */
@@ -34,6 +41,10 @@ import { ENTITY_COLORS, CLAIM_NODE_COLOR } from './stellarColors';
 export const UNKNOWN_SHAPE: StellarShape = 'dot';
 export const UNKNOWN_COLOR = '#9CA3AF';
 
+/** ★ 2026-07-01 (PO): EVENT 별개 top-level bucket 폐기 — 사건 은 WHAT 6 소분류
+ *  중 하나. amber family 6 명도 안에서 표시 (색 별개 bucket 유지 X). type
+ *  literal 에서는 'EVENT' 유지 (호출부·테스트 회귀 0) 하지만 LEGEND_SPECS 는
+ *  더 이상 EVENT bucket row 를 emit 하지 않는다. */
 export type LegendBucket = 'WHO' | 'WHAT' | 'EVENT' | 'WHERE' | 'CLAIM' | 'unknown';
 
 export interface LegendSpec {
@@ -44,10 +55,9 @@ export interface LegendSpec {
   /** Sub-bucket label for V1+ (WHAT 의 RESOURCE / KNOWLEDGE / TASK). */
   subBucket?: string;
   /** ★ M-Dogfood-C (PO 2026-07-01) — WHAT 묶음 시각 보강.
-   *  WHAT 의 cube/sphere/diamond 형태는 WHO 묶음 (organization/person/group)
-   *  과 형태가 겹친다 (색만 다름). 사용자가 "이 cube 가 조직인가 자원인가" 를
-   *  즉각 구분할 수 있도록 LEGEND 의 WHAT 행에 한국어 sub-bucket 한 글자
-   *  배지를 별도로 노출한다. WHO / WHERE / EVENT / CLAIM / unknown 은 undefined
+   *  ★ 2026-07-01 확장: PO "자원/개념/행위/지식/사건/지표 전부 구분되게. 일부
+   *  만 태그 X" — WHAT 6 소분류 모두 subBucketLabelKo 배지 노출 (자원/개념/
+   *  행위/지식/사건/지표). WHO / WHERE / CLAIM / unknown 은 undefined
    *  (배지 미노출). */
   subBucketLabelKo?: string;
   /** Korean label shown in the legend row. */
@@ -66,7 +76,13 @@ export interface LegendSpec {
  *  feat/i18n-ko-display-names-separation (★ PO 2026-06-30): LEGEND row 의
  *  `label` 은 ★ 한국어만 (영문 코드 WHO/WHAT/RESOURCE 등 노출 0). 내부
  *  식별자 (`bucket`, `subBucket`, `key`, `entity_types`) 는 코드네임
- *  유지 — 회귀 0. */
+ *  유지 — 회귀 0.
+ *
+ *  ★ 2026-07-01 (PO verbatim: "자원/개념/행위/지식/사건/지표 전부 구분되게.
+ *  일부만 태그 X. 형태·명도·라벨 전부 구분되게"):
+ *    - WHAT 6 소분류 모두 별도 row (한국어 라벨 · 6 명도 amber · 6 형태).
+ *    - 옛 EVENT top-level bucket 폐기 → WHAT/사건 (roundedSquare, amber-700).
+ *    - subBucketLabelKo 배지는 6 WHAT row 전부에 노출 (일부만 태그 X). */
 export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
   // WHO 묶음 — 형태 분리 (sphere / cube / diamond), 색 미세 분리.
   // 라벨은 한국어 단일 토큰 (사람 / 조직 / 그룹).
@@ -97,25 +113,27 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     shape: 'diamond',
     color: ENTITY_COLORS.group,
   },
-  // WHAT 묶음 — sub-bucket 분리 (RESOURCE / KNOWLEDGE / TASK). 색은 같은
-  // amber 공유, 형태와 한국어 라벨이 의미 전달.
+  // ── WHAT 6 소분류 ─────────────────────────────────────────────────────
+  // ★ 2026-07-01 PO — 6 sub-row 전부. 각 row 는 형태·명도·라벨 3 채널로
+  //   완전히 구분된다. subBucketLabelKo 배지도 6 row 모두에 노출.
   {
     key: 'what-resource',
     bucket: 'WHAT',
     subBucket: 'RESOURCE',
     subBucketLabelKo: '자원',
-    label: '자원·제품',
+    label: '자원',
+    // resource / product — "자원" family. product 는 legacy alias 로 유지.
     entity_types: ['resource', 'product'],
     shape: 'cube',
-    color: ENTITY_COLORS.product,
+    color: ENTITY_COLORS.resource,
   },
   {
-    key: 'what-knowledge',
+    key: 'what-concept',
     bucket: 'WHAT',
-    subBucket: 'KNOWLEDGE',
+    subBucket: 'CONCEPT',
     subBucketLabelKo: '개념',
-    label: '개념·지식',
-    entity_types: ['concept', 'knowledge'],
+    label: '개념',
+    entity_types: ['concept'],
     shape: 'sphere',
     color: ENTITY_COLORS.concept,
   },
@@ -124,24 +142,49 @@ export const LEGEND_SPECS: ReadonlyArray<LegendSpec> = [
     bucket: 'WHAT',
     subBucket: 'TASK',
     subBucketLabelKo: '행위',
-    label: '행위·역할',
-    // procedure / service / problem / metric — backend taxonomy 의 "task"
-    // family. ★ entity_types 에 없는 새 토큰이 들어와도 unknown 으로 fallback
-    // 하므로 안전. metric 도 여기에 끼워 두면 metric 노드가 LEGEND 한 자리에
-    // 표시된다.
-    entity_types: ['procedure', 'service', 'problem', 'metric', 'task'],
+    label: '행위',
+    // task / procedure / service / problem — "task" family.
+    entity_types: ['task', 'procedure', 'service', 'problem'],
     shape: 'diamond',
-    color: ENTITY_COLORS.product,
+    color: ENTITY_COLORS.task,
   },
-  // EVENT — 둥근사각 / violet.
   {
-    key: 'event',
-    bucket: 'EVENT',
+    key: 'what-knowledge',
+    bucket: 'WHAT',
+    subBucket: 'KNOWLEDGE',
+    subBucketLabelKo: '지식',
+    label: '지식',
+    entity_types: ['knowledge'],
+    shape: 'octahedron',
+    color: ENTITY_COLORS.knowledge,
+  },
+  {
+    key: 'what-event',
+    bucket: 'WHAT',
+    subBucket: 'EVENT',
+    subBucketLabelKo: '사건',
     label: '사건',
+    // ★ 옛 EVENT top-level bucket 폐기, WHAT/사건 sub-row 로 흡수.
+    //   entity_types 는 그대로 (event / artifact) → 회귀 0.
     entity_types: ['event', 'artifact'],
     shape: 'roundedSquare',
     color: ENTITY_COLORS.event,
   },
+  {
+    key: 'what-metric',
+    bucket: 'WHAT',
+    subBucket: 'METRIC',
+    subBucketLabelKo: '지표',
+    label: '지표',
+    entity_types: ['metric'],
+    shape: 'cone',
+    color: ENTITY_COLORS.metric,
+  },
+  // ── /WHAT ────────────────────────────────────────────────────────────
+  // ★ 2026-07-01 회귀 브릿지 — 옛 'event' key row 를 원하는 호출부가 있을 수
+  //   있어 test-id `stellar-legend-item-event` 를 유지해야 할 필요가 있다면
+  //   테스트에서 what-event 로 참조하도록 수정. LEGEND 상 event top-level
+  //   bucket row 는 폐기.
   // WHERE — ★ V2 fix: LEGEND 의 형태/색과 renderer 가 그리는 형태/색이 1:1.
   // shape='pin' → nodeThreeObject 에서 ConeGeometry, color=#7A8CA3 (slate).
   {

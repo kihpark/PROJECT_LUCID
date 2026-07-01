@@ -1,29 +1,36 @@
 /**
- * ★ M-Dogfood-C (PO 2026-07-01) — LEGEND WHAT 소분류 형태·라벨 분리 가드.
+ * ★ 2026-07-01 (PO verbatim: "자원/개념/행위/지식/사건/지표 전부 구분되게.
+ *   일부만 태그 X. 형태·명도·라벨 전부 구분되게") — LEGEND WHAT 6 소분류
+ *   전부 분리 가드.
  *
- * 배경 (PO verbatim):
- *   "범례 WHAT 소분류 (자원/개념/행위/지식) = 색 같아도 형태·라벨로 구분".
- *
- * V1+ fix (LEGEND_SPECS 단일 source) 이후 WHAT 묶음의 cube/sphere/diamond
- * 형태가 WHO 묶음 (organization/person/group) 과 형태가 겹친다 (색만 다름).
- * 사용자가 "이 cube 가 조직인가 자원인가" 를 즉각 구분할 수 있도록 LEGEND
- * 의 WHAT 행에 한국어 sub-bucket 한 글자 배지 (자원·개념·행위) 가 별도로
- * 노출돼야 한다 — 본 spec 이 회귀 가드.
+ * 옛 결정 폐기: "같은 amber 색 공유 (색 분리 X)" 옵션 → PO 정정 이후 6 sub-row
+ *   전부 색 (명도) · 형태 · 한국어 라벨 3 채널 완전 분리.
  *
  * 검증:
- *   1. WHAT 묶음 3 행 (what-resource / what-knowledge / what-task) 의 shape
- *      attribute 가 서로 다르다 (cube / sphere / diamond).
- *   2. 각 행에 subBucketLabelKo 배지 (자원/개념/행위) 가 노출.
- *   3. 한국어 라벨 (자원·제품 / 개념·지식 / 행위·역할) 이 화면에 보인다.
- *   4. 같은 amber 색을 공유 (색 분리 X — PO 결정).
- *   5. WHO / WHERE / EVENT / CLAIM / unknown 행에는 sub-bucket 배지 미노출
- *      (★ over-rendering 가드).
+ *   1. WHAT 6 sub-row (what-resource / what-concept / what-task /
+ *      what-knowledge / what-event / what-metric) 모두 노출.
+ *   2. 6 row 의 shape attribute 가 서로 다르다
+ *      (cube / sphere / diamond / octahedron / roundedSquare / cone).
+ *   3. 6 row 의 color attribute (amber family 6 명도) 도 서로 다르다.
+ *   4. 6 row 모두에 subBucketLabelKo 배지 (자원/개념/행위/지식/사건/지표) 노출.
+ *   5. 한국어 라벨 (자원 / 개념 / 행위 / 지식 / 사건 / 지표) 이 화면에 보인다.
+ *   6. WHO / WHERE / CLAIM / unknown 행에는 sub-bucket 배지 미노출 (★ over-
+ *      rendering 가드).
  */
 import { test, expect } from './fixtures/auth';
 import { wipeAndSeed, SEED_FACTS } from './fixtures/backend-seed';
 import { captureEvidence } from './helpers/screenshot';
 
-test('★ WHAT 소분류 = 형태·라벨·배지 3 채널 분리', async ({
+const WHAT_ROWS = [
+  { key: 'what-resource', shape: 'cube', badge: '자원', label: '자원' },
+  { key: 'what-concept', shape: 'sphere', badge: '개념', label: '개념' },
+  { key: 'what-task', shape: 'diamond', badge: '행위', label: '행위' },
+  { key: 'what-knowledge', shape: 'octahedron', badge: '지식', label: '지식' },
+  { key: 'what-event', shape: 'roundedSquare', badge: '사건', label: '사건' },
+  { key: 'what-metric', shape: 'cone', badge: '지표', label: '지표' },
+] as const;
+
+test('★ WHAT 6 소분류 = 형태·명도·라벨·배지 3 채널 전부 분리', async ({
   authenticatedPage: page,
 }) => {
   await page.addInitScript(() => {
@@ -41,57 +48,48 @@ test('★ WHAT 소분류 = 형태·라벨·배지 3 채널 분리', async ({
   const legend = page.getByTestId('stellar-legend');
   await expect(legend).toBeVisible();
 
-  const resource = page.getByTestId('stellar-legend-item-what-resource');
-  const knowledge = page.getByTestId('stellar-legend-item-what-knowledge');
-  const task = page.getByTestId('stellar-legend-item-what-task');
-
-  for (const row of [resource, knowledge, task]) {
-    await expect(row).toBeVisible();
-    // 한국어 라벨 (영문 코드 노출 0).
-    await expect(row).toHaveAttribute('data-bucket', 'WHAT');
+  // ── 1. 6 row 모두 노출, data-bucket = WHAT ─────────────────────────
+  const shapes: string[] = [];
+  const colors: string[] = [];
+  for (const row of WHAT_ROWS) {
+    const item = page.getByTestId(`stellar-legend-item-${row.key}`);
+    await expect(item).toBeVisible();
+    await expect(item).toHaveAttribute('data-bucket', 'WHAT');
+    const s = await item.getAttribute('data-shape');
+    const c = await item.getAttribute('data-color');
+    expect(s).toBe(row.shape);
+    expect(c).toBeTruthy();
+    shapes.push(s ?? '');
+    colors.push(c ?? '');
   }
 
-  // 형태 분리 — 셋이 모두 달라야.
-  const shapeR = await resource.getAttribute('data-shape');
-  const shapeK = await knowledge.getAttribute('data-shape');
-  const shapeT = await task.getAttribute('data-shape');
-  expect(shapeR).toBe('cube');
-  expect(shapeK).toBe('sphere');
-  expect(shapeT).toBe('diamond');
-  // 명시적 분리 검증 (★ 형태 같으면 즉시 fail).
-  expect(new Set([shapeR, shapeK, shapeT]).size).toBe(3);
+  // ── 2. 6 형태 전부 다름 (일부만 태그 X 가드) ────────────────────────
+  expect(new Set(shapes).size).toBe(6);
 
-  // 같은 amber 색 공유 (★ PO 결정 — 색 분리 X, 형태·라벨로만).
-  const colorR = await resource.getAttribute('data-color');
-  const colorK = await knowledge.getAttribute('data-color');
-  const colorT = await task.getAttribute('data-color');
-  expect(colorR).toBe(colorK);
-  expect(colorK).toBe(colorT);
+  // ── 3. 6 명도 전부 다름 (★ 옛 "같은 amber 색 공유" 결정 폐기) ──────
+  expect(new Set(colors).size).toBe(6);
 
-  // 한국어 sub-bucket 배지.
-  const badgeR = page.getByTestId('stellar-legend-subbucket-what-resource');
-  const badgeK = page.getByTestId('stellar-legend-subbucket-what-knowledge');
-  const badgeT = page.getByTestId('stellar-legend-subbucket-what-task');
-  await expect(badgeR).toBeVisible();
-  await expect(badgeK).toBeVisible();
-  await expect(badgeT).toBeVisible();
-  await expect(badgeR).toHaveText('자원');
-  await expect(badgeK).toHaveText('개념');
-  await expect(badgeT).toHaveText('행위');
+  // ── 4. 6 row 모두 sub-bucket 배지 노출 (한국어) ─────────────────────
+  for (const row of WHAT_ROWS) {
+    const badge = page.getByTestId(`stellar-legend-subbucket-${row.key}`);
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveText(row.badge);
+  }
 
-  // 한국어 long-label (자원·제품 등) 이 화면에 보인다.
-  await expect(resource).toContainText('자원·제품');
-  await expect(knowledge).toContainText('개념·지식');
-  await expect(task).toContainText('행위·역할');
+  // ── 5. 한국어 라벨 화면 노출 ────────────────────────────────────────
+  for (const row of WHAT_ROWS) {
+    const item = page.getByTestId(`stellar-legend-item-${row.key}`);
+    await expect(item).toContainText(row.label);
+  }
 
   await captureEvidence(
     page,
     'legend-what-subcategory-shape',
-    '01-what-subcategories-distinct',
+    '01-what-6-subcategories-all-distinct',
   );
 });
 
-test('★ WHO/WHERE/EVENT/CLAIM/unknown 행에는 sub-bucket 배지 미노출', async ({
+test('★ WHO/WHERE/CLAIM/unknown 행에는 sub-bucket 배지 미노출 (over-rendering 가드)', async ({
   authenticatedPage: page,
 }) => {
   await page.addInitScript(() => {
@@ -111,7 +109,6 @@ test('★ WHO/WHERE/EVENT/CLAIM/unknown 행에는 sub-bucket 배지 미노출', 
     'person',
     'organization',
     'group',
-    'event',
     'place',
     'claim',
     'unknown',

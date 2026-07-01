@@ -1359,13 +1359,28 @@ export function StellarGraph(props: StellarGraphProps) {
           geometry = new THREE.BoxGeometry(radius * 1.6, radius * 1.6, radius * 1.6);
           break;
         case 'diamond': {
-          // ★ diamond = octahedron (마름모의 3D 형태)
+          // ★ diamond = octahedron subdivision 1 (마름모의 3D 형태, 뾰족한 축).
+          //   knowledge 의 octahedron 과 시각 구분되도록 subdivision 0 유지
+          //   (더 각진 마름모).
           geometry = new THREE.OctahedronGeometry(radius * 1.1, 0);
+          break;
+        }
+        case 'octahedron': {
+          // ★ 2026-07-01 (PO WHAT 6 분리) — 지식 (knowledge). diamond 와 시각
+          //   차이를 크게 두려고 subdivision 1 (구에 더 가까운 다면체) + 살짝
+          //   더 큰 반경. WHAT/task 의 diamond 와 형태·명도 모두 다르다.
+          geometry = new THREE.OctahedronGeometry(radius * 1.25, 1);
           break;
         }
         case 'roundedSquare': {
           // Tetrahedron — distinct from sphere/cube/diamond, evokes "사건".
           geometry = new THREE.TetrahedronGeometry(radius * 1.2, 0);
+          break;
+        }
+        case 'cone': {
+          // ★ 2026-07-01 (PO WHAT 6 분리) — 지표 (metric). pin 과 다른 orientation
+          //   (tip up = 상승 축 metaphor). pin 은 rotation.z = π 로 tip down.
+          geometry = new THREE.ConeGeometry(radius * 0.85, radius * 2.0, 16);
           break;
         }
         case 'pin': {
@@ -1391,7 +1406,15 @@ export function StellarGraph(props: StellarGraphProps) {
       // 되도록 살짝 회전 — 동일 entity_type 끼리는 같은 방향을 유지하므로
       // 사용자가 형태를 학습하기 쉽다.
       if (shape === 'diamond') mesh.rotation.y = Math.PI / 4;
+      // ★ 2026-07-01 WHAT-6 — 지식 octahedron 은 diamond 와 다른 축으로 회전
+      //   시켜 시각 구분을 강조 (subdivision 차이 + orientation 차이).
+      if (shape === 'octahedron') {
+        mesh.rotation.x = Math.PI / 6;
+        mesh.rotation.z = Math.PI / 6;
+      }
       if (shape === 'pin') mesh.rotation.z = Math.PI; // cone tip down
+      // ★ 2026-07-01 WHAT-6 — 지표 cone 은 tip-up 기본 orientation 유지 (수치·
+      //   상승 축 metaphor). 명시적 rotation 미부여 = default = tip up.
       // ★ V1 — annotate the mesh so e2e tests can read the spec back from
       // the scene graph and prove LEGEND ↔ mesh stay in sync.
       mesh.userData = {
