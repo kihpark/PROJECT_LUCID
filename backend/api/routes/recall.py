@@ -501,7 +501,14 @@ def _enrich_with_labels(
             # the FE ENTITY_COLORS keys in stellarColors.ts. We do NOT
             # gate on the label here because an unnamed-but-classified
             # doc should still drive node color.
-            entity_class = src.get("class")
+            #
+            # ★ REQ-014-D (PO 2026-07-02) — entity_type / class 동시 조회.
+            #   REQ-012-v1 change_entity_type 는 두 필드 모두 갱신 (class 는
+            #   legacy, entity_type 은 v3 표준). 하지만 legacy 문서 중에는
+            #   entity_type 만 있거나 class 만 있는 경우가 혼재한다. class
+            #   먼저 확인하고 없으면 entity_type 으로 폴백 → 새 규칙 (v3)
+            #   과 옛 규칙 (v0.2) 문서 둘 다 정상 노출.
+            entity_class = src.get("class") or src.get("entity_type")
             if uid and entity_class:
                 entity_type_by_uid[uid] = entity_class
     except Exception as exc:  # noqa: BLE001 - degrade quietly
@@ -537,6 +544,13 @@ def _enrich_with_labels(
             if f.object_value and _is_entity_ref(f.object_value)
             else None
         )
+        # ★ REQ-014-D (PO 2026-07-02) — speaker_entity_type 회복.
+        #   claim 화자 uid 도 mget 배치에 이미 포함되어 있으므로 별도 round-
+        #   trip 없이 채울 수 있다. FE stellarRealAdapter 가 화자 노드를 만들
+        #   때 이 값을 ensureEntity 에 넘겨서 노드 색·타입이 즉시 반영된다.
+        speaker_entity_type = (
+            entity_type_by_uid.get(f.speaker_uid) if f.speaker_uid else None
+        )
         out.append(
             f.model_copy(update={
                 "subject_label": subject_label,
@@ -545,6 +559,7 @@ def _enrich_with_labels(
                 "related_entity_labels": related_entity_labels,
                 "subject_entity_type": subject_entity_type,
                 "object_entity_type": object_entity_type,
+                "speaker_entity_type": speaker_entity_type,
             })
         )
     return out

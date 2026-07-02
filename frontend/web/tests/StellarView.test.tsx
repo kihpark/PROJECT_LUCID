@@ -268,7 +268,11 @@ describe('StellarView', () => {
             object: '환율 변동성 상승 가능성',
             fact_type: 'claim',
             speaker_label: '한국은행',
-            speech_act: '발표했다',
+            // ★ REQ-014-D (PO 2026-07-02) — 한국어 술어 modality 매핑.
+            //   옛: '발표했다' 는 modality 매핑 안 됐지만, 이제 assertion 계열
+            //   로 매핑되어 UI 가 '단정' 을 표시한다. 자유 텍스트 fall-through
+            //   시나리오는 매핑되지 않는 verb 로 교체.
+            speech_act: '꺼냈다',
             content_claim: '환율 변동성 상승 가능성',
           },
         ],
@@ -284,9 +288,9 @@ describe('StellarView', () => {
     expect(tip.getAttribute('data-fact-type')).toBe('claim');
     // Speaker on the head, bracketed speech_act on the mid, content on the body.
     expect(screen.getByTestId('stellar-hover-card-speaker').textContent).toBe('한국은행');
-    // '발표했다' is a natural-language verb (not assertion/judgment/opinion)
+    // '꺼냈다' is a natural-language verb (not one of the mapped modality verbs)
     // so it falls through verbatim — no modality classification, no brackets.
-    expect(screen.getByTestId('stellar-hover-card-speech-act').textContent).toBe('발표했다');
+    expect(screen.getByTestId('stellar-hover-card-speech-act').textContent).toBe('꺼냈다');
     expect(screen.getByTestId('stellar-hover-card-content').textContent).toContain(
       '환율 변동성 상승 가능성',
     );

@@ -428,10 +428,46 @@ def merge_entities(
         doc = _resolve_entity_doc(client, str(ks.id), uid)
         # already-retired members cannot be re-merged into a new canonical
         # (would orphan the previous merge's provenance). Reject explicitly.
+        #
+        # ★ REQ-014-D (PO 2026-07-02) — informative 409 payload.
+        #   옛: detail 이 "member_already_retired:{uid}" 문자열 하나 → 프론트가
+        #   "왜 실패했는지 / 어느 canonical 로 이미 병합됐는지" 알 방법 없음.
+        #   사용자는 그저 API 409 만 봄. STELLAR 는 잔존 그래프에서 아직
+        #   retired member 를 노드로 보여주고 있는 상태 (별도 refresh 트리거
+        #   필요). fix: dict detail 로 code + 어느 canonical 로 병합됐는지 +
+        #   해당 canonical 의 표시명을 함께 반환 → 프론트가 사용자에게
+        #   "이미 X 로 병합됨" 메시지 + 자동 refresh 유도.
         if doc.get("retired_by_merge"):
+            merged_into = str(doc.get("canonical_uid") or "")
+            merged_into_label: str | None = None
+            if merged_into and merged_into != uid:
+                try:
+                    parent_doc = _resolve_entity_doc(
+                        client, str(ks.id), merged_into,
+                    )
+                    merged_into_label = str(
+                        parent_doc.get("primary_label")
+                        or parent_doc.get("name")
+                        or "",
+                    ) or None
+                except HTTPException:
+                    merged_into_label = None
             raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                f"member_already_retired:{uid}",
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "member_already_retired",
+                    "entity_uid": uid,
+                    "primary_label": str(
+                        doc.get("primary_label") or doc.get("name") or "",
+                    ) or None,
+                    "merged_into_canonical_uid": merged_into or None,
+                    "merged_into_primary_label": merged_into_label,
+                    "retired_at": str(doc.get("retired_by_merge") or "") or None,
+                    "message": (
+                        f"이미 다른 canonical('{merged_into_label or merged_into}') "
+                        "로 병합된 노드입니다. 그래프를 새로고침 하세요."
+                    ),
+                },
             )
         member_docs.append(doc)
 
@@ -906,11 +942,21 @@ def merge_candidates(
                     {"exists": {"field": "retired_by_user"}},
                     {"term": {"object_uid": entity_uid}},
                 ],
+                # ★ REQ-014-D (PO 2026-07-02) — merge_candidates ES 400 fix.
+                #   옛: match_phrase_prefix on `primary_label` — LIVE ES 는 이
+                #   필드가 legacy `keyword` (mapping 은 text 로 정의됐지만 옛
+                #   인덱스는 keyword 로 남아있음). Elasticsearch: "Can only use
+                #   phrase prefix queries on text fields". 결과: search 전부 400
+                #   → merge_candidates 가 항상 [] 반환 → 사용자가 후보를 못 봄.
+                #   fix: `primary_label` 삭제, text 필드 (name / aliases /
+                #   name_en) 만 사용. `primary_label` prefix 매칭이 필요하면
+                #   `prefix` (non-tokenized) 쿼리로 대체.
                 "should": [
-                    {"match_phrase_prefix": {"primary_label": primary}},
                     {"match_phrase_prefix": {"name": primary}},
                     {"match_phrase_prefix": {"aliases": primary}},
                     {"match_phrase_prefix": {"name_en": primary}},
+                    # primary_label 은 keyword — prefix 쿼리로 접근.
+                    {"prefix": {"primary_label": primary}},
                 ],
                 "minimum_should_match": 1,
             }

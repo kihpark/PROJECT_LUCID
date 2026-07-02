@@ -30,10 +30,23 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 export class ApiError extends Error {
   status: number;
   detail?: string;
-  constructor(message: string, status: number, detail?: string) {
+  // ★ REQ-014-D (PO 2026-07-02) — 구조화된 detail 지원.
+  //   옛: detail 은 문자열만. 하지만 FastAPI HTTPException 의 detail 은
+  //   dict 도 가능. 예: entities/merge 409 는 code / merged_into_canonical_uid
+  //   / message 를 포함한 dict 로 반환. UI 가 이 필드를 읽어 "이미 X 로
+  //   병합됨" 처럼 사용자 친화 메시지를 렌더할 수 있게 raw payload 를
+  //   같이 노출한다. 기존 `detail: string` 소비자와 회귀 없음.
+  detailPayload?: unknown;
+  constructor(
+    message: string,
+    status: number,
+    detail?: string,
+    detailPayload?: unknown,
+  ) {
     super(message);
     this.status = status;
     this.detail = detail;
+    this.detailPayload = detailPayload;
   }
 }
 
@@ -66,9 +79,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       clearToken();
     }
     let detail: string | undefined;
+    let detailPayload: unknown;
     try {
       const body = await resp.json();
-      detail = typeof body?.detail === 'string' ? body.detail : undefined;
+      // ★ REQ-014-D — detail 이 dict (structured error) 일 때도 저장.
+      //   backend HTTPException detail 이 문자열이면 옛 경로 유지,
+      //   객체이면 message / code 를 표면화하고 raw payload 도 함께 노출.
+      if (typeof body?.detail === 'string') {
+        detail = body.detail;
+      } else if (body?.detail && typeof body.detail === 'object') {
+        detailPayload = body.detail;
+        const msg = (body.detail as { message?: unknown }).message;
+        const code = (body.detail as { code?: unknown }).code;
+        if (typeof msg === 'string') detail = msg;
+        else if (typeof code === 'string') detail = code;
+      }
     } catch {
       // ignore JSON parse failure
     }
@@ -76,6 +101,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       `API ${resp.status} on ${path}`,
       resp.status,
       detail,
+      detailPayload,
     );
   }
 

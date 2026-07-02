@@ -1555,7 +1555,10 @@ describe('FactCard — claim (v0.2.0 step 1)', () => {
     );
     const strip = screen.getByTestId('fact-claim-strip-fn-claim-1');
     expect(strip).toHaveTextContent('안도걸 의원');
-    expect(strip).toHaveTextContent('밝혔다');
+    // ★ REQ-014-D (PO 2026-07-02) — Korean 술어 modality 매핑.
+    //   옛: '밝혔다' 는 raw 로 표시. 이제 KO_ASSERTION_VERBS 에 포함 → strip 은
+    //   canonical 라벨 '단정' 을 표시. content 는 그대로.
+    expect(strip).toHaveTextContent('단정');
     expect(strip).toHaveTextContent('디지털자산기본법 제정에 속도를 낼 것');
   });
 
@@ -1580,7 +1583,8 @@ describe('FactCard — claim (v0.2.0 step 1)', () => {
     // PO explicitly rejected.
     expect(strip.textContent).not.toContain('[안도걸 의원]');
     // Speech act bracketed with trailing colon — the new spec.
-    expect(strip.textContent).toContain('[밝혔다]:');
+    // ★ REQ-014-D (PO 2026-07-02) — '밝혔다' → assertion → 라벨 '단정'.
+    expect(strip.textContent).toContain('[단정]:');
     // The previous quoted "speech_act": rendering must be gone.
     expect(strip.textContent).not.toContain('"밝혔다":');
     // Content claim wrapped in curly quotes (the strip itself owns the
@@ -1909,7 +1913,8 @@ describe('FactCard — decide-claim-format-apply: claim title prefers fact.claim
     expect(speaker).not.toBeNull();
     expect(speaker!.textContent).toBe('안도걸 의원');
     expect(speaker!.className).toMatch(/font-bold/);
-    expect(strip.textContent).toContain('[밝혔다]:');
+    // ★ REQ-014-D (PO 2026-07-02) — '밝혔다' → assertion → 라벨 '단정'.
+    expect(strip.textContent).toContain('[단정]:');
     expect(strip.textContent).toContain('“디지털자산기본법 제정에 속도를 낼 것”');
     // Same negative guards as the unified PO format test for FactCard.
     expect(strip.textContent).not.toContain('[안도걸 의원]');

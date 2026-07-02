@@ -99,6 +99,17 @@ class RecallFact(LucidBaseModel):
     # unit / as_of strip.
     fact_type: Literal["action", "claim", "measurement"] | None = None
     speaker_label: str | None = None
+    # ★ REQ-014-D (PO 2026-07-02) — speaker_entity_type 회복.
+    #   옛: recall 응답에 speaker_entity_type 이 없었다 → STELLAR 그래프의
+    #   claim 화자 노드가 ensureEntity(uid, label, null) 로 생성 → 색·타입
+    #   전부 null → 사용자 UI 에서는 "기타" 로 표시. 사용자가 EntityTypeDropdown
+    #   으로 "사람" 저장을 눌러도 backend 는 이미 person 이므로 200 OK 지만
+    #   UI 는 여전히 기타. 결과: "저장 안 됨" 처럼 보임.
+    #   fix: subject_entity_type 와 동일 mget 배치에서 speaker_uid 도 함께
+    #   조회 → speaker_entity_type 를 채워보낸다. FE stellarRealAdapter 가
+    #   ensureEntity(speaker_uid, speaker_label, speaker_entity_type) 로
+    #   화자 노드도 색·타입을 갖게 된다.
+    speaker_entity_type: str | None = None
     speech_act: str | None = None
     content_claim: str | None = None
     stance: str | None = None

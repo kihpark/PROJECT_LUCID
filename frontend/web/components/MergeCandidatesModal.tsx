@@ -23,6 +23,7 @@ import {
   fetchMergeCandidates,
   mergeEntities,
   unmergeEntity,
+  ApiError,
   type MergeCandidate,
   type EntityMergeResult,
   type EntityUnmergeResult,
@@ -117,8 +118,18 @@ export function MergeCandidatesModal({
       setMergeResult(result);
       onMerged?.(result);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
+      // ★ REQ-014-D (PO 2026-07-02) — 409 informative surface.
+      //   옛: "API 409 on /entities/merge" — 사용자가 왜 실패했는지 알 길 없음.
+      //   fix: backend 가 이미 detail dict 로 code/message/merged_into_* 를
+      //   보낸다. ApiError.detail (message) 을 우선 노출, dict payload 도
+      //   지문화 하이라이트로 함께 안내한다. 병합 대상이 이미 다른 canonical
+      //   로 흡수됐다면 "이미 X 로 병합됨. 그래프를 새로고침 하세요." 안내.
+      if (err instanceof ApiError && err.status === 409 && err.detail) {
+        setError(`병합 실패 (409): ${err.detail}`);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+      }
     } finally {
       setBusy(false);
     }

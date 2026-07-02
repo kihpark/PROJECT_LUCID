@@ -57,6 +57,24 @@ export const MODALITY_LABEL: Record<ClaimModality, string> = {
   opinion: '의견',
 };
 
+// ★ REQ-014-D (PO 2026-07-02) — 한국어 술어 매핑 (ClaimModalityBadge 와 동기).
+//   옛: 영문 키워드만 인식 → 실제 backend 의 한국어 술어 ("말했다"/"발표했다"
+//   /"주장했다"/"시사했다") 는 전부 null → 호버 카드에도 modality 표시 X.
+//   ClaimModalityBadge 의 KO_* 세트와 같은 값을 유지 (한 곳에서 바꾸면
+//   반드시 다른 곳도 업데이트). 지식 라운드 후 backend 표준화 시 합쳐진다.
+const KO_ASSERTION_VERBS_HOVER = new Set([
+  '말했다', '밝혔다', '발표했다', '확인했다', '알렸다', '언급했다',
+  '설명했다', '전했다', '보고했다', '공개했다', '고지했다',
+]);
+const KO_JUDGMENT_VERBS_HOVER = new Set([
+  '주장했다', '분석했다', '진단했다', '지적했다', '평가했다', '판단했다',
+  '비판했다', '반박했다', '해석했다', '결론지었다',
+]);
+const KO_OPINION_VERBS_HOVER = new Set([
+  '시사했다', '우려했다', '예상했다', '전망했다', '기대했다', '촉구했다',
+  '요구했다', '제안했다', '희망했다', '선호했다', '추정했다', '추측했다',
+]);
+
 export function classifyClaimModality(
   speechAct: string | null | undefined,
 ): ClaimModality | null {
@@ -65,6 +83,10 @@ export function classifyClaimModality(
   if (v === 'assertion' || v === 'assert' || v === 'assertions') return 'assertion';
   if (v === 'judgment' || v === 'judgement' || v === 'judge') return 'judgment';
   if (v === 'opinion' || v === 'opine' || v === 'opinions') return 'opinion';
+  const raw = speechAct.trim();
+  if (KO_ASSERTION_VERBS_HOVER.has(raw)) return 'assertion';
+  if (KO_JUDGMENT_VERBS_HOVER.has(raw)) return 'judgment';
+  if (KO_OPINION_VERBS_HOVER.has(raw)) return 'opinion';
   return null;
 }
 

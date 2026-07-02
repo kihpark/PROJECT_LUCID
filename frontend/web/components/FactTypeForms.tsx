@@ -33,6 +33,12 @@ import type {
   PredicateEntry,
 } from '@/lib/types';
 import type { Lang } from './LangToggle';
+// ★ REQ-014-D (PO 2026-07-02) — modality select 초기값 복원.
+//   ClaimFactForm 의 modality select 는 옛에는 speech_act 가 정확히
+//   'assertion'/'judgment'/'opinion' 일 때만 옵션 매칭 → 한국어 술어
+//   ("말했다"/"발표했다") 는 항상 "양태 미지정" 초기값. classifyClaimModality
+//   가 이제 KO 술어를 매핑하므로 select 도 그 결과를 사용한다.
+import { classifyClaimModality } from './ClaimModalityBadge';
 
 // ---------------------------------------------------------------------------
 // 공통 helpers — 옛 FactCard 의 debounce / label resolver 등을 그대로 옮겨온다.
@@ -760,10 +766,13 @@ export function ClaimFactForm({
         <select
           id={`fact-form-modality-${factUid}`}
           data-testid={`fact-form-modality-select-${factUid}`}
-          value={
-            MODALITY_OPTIONS.find((o) => o.value === currentSpeechAct.toLowerCase())?.value
-            ?? ''
-          }
+          // ★ REQ-014-D (PO 2026-07-02) — modality select 초기값 복원.
+          //   옛: currentSpeechAct.toLowerCase() 를 옵션 value 와 exact 비교
+          //   → 한국어 술어 ("말했다") 는 하나도 매칭 못 함 → 항상 "양태 미지정".
+          //   fix: classifyClaimModality 로 (영문/한국어) 어느 쪽이든 canonical
+          //   modality 로 매핑 후 select value 로 세팅. 매핑 실패한 완전
+          //   자유 텍스트만 미지정으로 남는다.
+          value={classifyClaimModality(currentSpeechAct) ?? ''}
           onChange={(e) => {
             const val = e.target.value;
             if (val) onEdit({ editedSpeechAct: val });

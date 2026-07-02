@@ -217,18 +217,31 @@ function processFact(acc: AccState, fact: RecallFact): void {
     let speakerId: string | null = null;
     let speakerNode: StellarNode | null = null;
     if (isEntityRef(fact.speaker_uid)) {
+      // ★ REQ-014-D (PO 2026-07-02) — speaker_entity_type 회복.
+      //   옛: ensureEntity(uid, label, null) → 화자 노드 entity_type=null →
+      //   StellarEntityCard 이 "기타" 로 표시. 사용자가 EntityTypeDropdown
+      //   에서 "사람" 저장을 눌러도 backend 는 이미 person 이므로 변화가
+      //   없고 UI 는 계속 기타 → "저장 안 됨" 처럼 보임.
+      //   fix: backend 가 새로 채워보내는 fact.speaker_entity_type 을 그대로
+      //   ensureEntity 로 전달 → 화자 노드가 색·타입을 갖는다.
       const speaker = ensureEntity(
         acc,
         fact.speaker_uid as string,
         fact.speaker_label,
-        null,
+        fact.speaker_entity_type ?? null,
       );
       speakerId = speaker.id;
       speakerNode = speaker;
     } else {
       const stub = speakerStubId(fact.speaker_label);
       if (stub) {
-        const speaker = ensureEntity(acc, stub, fact.speaker_label, null);
+        // stub speakers (label-only) 은 uid resolve 실패 → entity_type 도 없음.
+        const speaker = ensureEntity(
+          acc,
+          stub,
+          fact.speaker_label,
+          fact.speaker_entity_type ?? null,
+        );
         speakerId = speaker.id;
         speakerNode = speaker;
       }

@@ -245,6 +245,15 @@ export interface RecallFact {
   fact_type?: 'action' | 'claim' | 'measurement' | null;
   speaker_uid?: string | null;
   speaker_label?: string | null;
+  // ★ REQ-014-D (PO 2026-07-02) — CLAIM 화자 노드 색·타입 회복.
+  //   backend recall 이 subject_entity_type 와 같은 mget 배치에서
+  //   speaker_uid 도 조회해 채워보낸다. FE stellarRealAdapter 가
+  //   ensureEntity(speaker_uid, speaker_label, speaker_entity_type) 로
+  //   화자 노드의 entity_type 을 세팅 → StellarEntityCard 팝업의 "타입 변경"
+  //   드롭다운이 "기타" 가 아닌 실제 값 (예: person) 을 initial 로 표시.
+  //   결과: PO 가 이미 person 인 화자를 person 으로 다시 저장하려 하는
+  //   no-op "저장 안 됨" 착각이 사라진다.
+  speaker_entity_type?: string | null;
   speech_act?: string | null;
   content_claim?: string | null;
   stance?: string | null;

@@ -77,7 +77,7 @@ describe('computeHoverCardPosition (★ U3 HoverCard 위치 가드)', () => {
   });
 });
 
-describe('classifyClaimModality (★ 데이터모델 v2)', () => {
+describe('classifyClaimModality (★ 데이터모델 v2 + REQ-014-D KO)', () => {
   it('returns "assertion" for 단정 keywords', () => {
     expect(classifyClaimModality('assertion')).toBe('assertion');
     expect(classifyClaimModality('Assert')).toBe('assertion');
@@ -89,8 +89,26 @@ describe('classifyClaimModality (★ 데이터모델 v2)', () => {
   it('returns "opinion" for 의견 keywords', () => {
     expect(classifyClaimModality('opinion')).toBe('opinion');
   });
-  it('returns null for natural-language verbs (no modality binding)', () => {
-    expect(classifyClaimModality('발표했다')).toBeNull();
+  // ★ REQ-014-D (PO 2026-07-02) — 한국어 술어도 매핑.
+  //   옛: 한국어 술어는 전부 null → 실제 backend 데이터 (전부 한국어)
+  //   에서 modality 배지가 하나도 안 붙었음. fix: 대표 동사 세트로 매핑.
+  it('returns "assertion" for 단정 계열 한국어 술어', () => {
+    expect(classifyClaimModality('말했다')).toBe('assertion');
+    expect(classifyClaimModality('발표했다')).toBe('assertion');
+    expect(classifyClaimModality('밝혔다')).toBe('assertion');
+  });
+  it('returns "judgment" for 판단 계열 한국어 술어', () => {
+    expect(classifyClaimModality('주장했다')).toBe('judgment');
+    expect(classifyClaimModality('분석했다')).toBe('judgment');
+    expect(classifyClaimModality('지적했다')).toBe('judgment');
+  });
+  it('returns "opinion" for 의견 계열 한국어 술어', () => {
+    expect(classifyClaimModality('시사했다')).toBe('opinion');
+    expect(classifyClaimModality('우려했다')).toBe('opinion');
+    expect(classifyClaimModality('예상했다')).toBe('opinion');
+  });
+  it('returns null for uncategorised free-form verbs', () => {
+    expect(classifyClaimModality('꺼냈다')).toBeNull();
     expect(classifyClaimModality(null)).toBeNull();
     expect(classifyClaimModality('')).toBeNull();
   });
@@ -123,7 +141,12 @@ describe('StellarHoverCard — fact_type render branches', () => {
       fact_type: 'claim',
       subject: '한국은행',
       speaker_label: '한국은행',
-      speech_act: '발표했다',
+      // ★ REQ-014-D (PO 2026-07-02) — 한국어 술어도 modality 매핑.
+      //   옛: '발표했다' → null → data-modality=''.
+      //   신: '발표했다' → 'assertion' → data-modality='assertion'.
+      //   위 테스트 (자연어 동사 미분류) 시나리오는 매핑되지 않는 자유
+      //   텍스트 verb 로 교체한다 (사용자가 커스텀 verb 를 넣은 경우).
+      speech_act: '꺼냈다',
       content_claim: '환율 변동성 상승 가능성',
       related_entity_uids: ['e1', 'e2'],
       related_entity_labels: ['미국 연준', '환율위원회'],
@@ -131,10 +154,10 @@ describe('StellarHoverCard — fact_type render branches', () => {
     render(<StellarHoverCard fact={fact} position={POS} />);
     const card = screen.getByTestId('stellar-hover-card');
     expect(card.getAttribute('data-fact-type')).toBe('claim');
-    // '발표했다' is not one of the v2 modality keywords → no modality binding.
+    // '꺼냈다' is not one of the modality keywords → no modality binding.
     expect(card.getAttribute('data-modality')).toBe('');
     expect(screen.getByTestId('stellar-hover-card-speaker').textContent).toBe('한국은행');
-    expect(screen.getByTestId('stellar-hover-card-speech-act').textContent).toBe('발표했다');
+    expect(screen.getByTestId('stellar-hover-card-speech-act').textContent).toBe('꺼냈다');
     expect(screen.getByTestId('stellar-hover-card-content').textContent).toContain(
       '환율 변동성 상승 가능성',
     );
