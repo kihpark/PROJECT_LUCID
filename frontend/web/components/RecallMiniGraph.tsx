@@ -23,13 +23,38 @@
  *    Stellar 수준의 인터랙션을 넣지 말 것."
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RecallExampleGraphNode } from '@/lib/recall-history';
 
 interface Props {
   center: string;
   nodes: RecallExampleGraphNode[];
   height?: number;
+}
+
+/**
+ * ★ REQ-014-F (PO 2026-07-02) — 라벨 겹침 정리.
+ *
+ * PO 지적 verbatim: "라벨들이 서로 겹침 (outlined plans to strengthen…,
+ *   is accelerating development of, reaffirmed…) — 저게 맞아?"
+ *
+ * 원인: edge predicate 라벨을 모두 edge midpoint 에 그리다 보니,
+ *   중심에서 방사되는 여러 edge 의 midpoint 가 서로 가까워 겹침. 또한
+ *   자연어 predicate 는 길이가 길어 (10-40 char) 서로 침범.
+ *
+ * 처방 (PO 권장 A + hover full text):
+ *   1. 그린 label 은 `truncate(edge, 14)` — 넘치면 "…" 붙임
+ *   2. midpoint 를 노드 방향으로 62% 이동 — 중심 근처 클러스터 회피
+ *   3. hover 시 해당 edge/노드는 full text 로 강조 (상시)
+ *   4. 노드 라벨도 `truncate(label, 12)` — 화면 밖 튀는 것 방지
+ *
+ * Canvas fillText 는 이미 라벨 hover 시 fully readable (밝은 색) 이므로
+ *   툴팁을 추가로 얹지 않는다 — 캔버스만 유지 (컴포넌트 단순함 유지).
+ */
+function truncateLabel(s: string, max: number): string {
+  if (!s) return s;
+  if (s.length <= max) return s;
+  return s.slice(0, Math.max(1, max - 1)) + '…';
 }
 
 export function RecallMiniGraph({
@@ -41,6 +66,9 @@ export function RecallMiniGraph({
   const ptrRef = useRef({ x: -999, y: -999 });
   const sizeRef = useRef({ w: 0, h: 0 });
   const rafRef = useRef<number | null>(null);
+  // hover state exposed to DOM so e2e / a11y 툴이 볼 수 있다.
+  const [hoverIdx, setHoverIdx] = useState<number>(-2);
+  const hoverRef = useRef<number>(-2);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -113,8 +141,16 @@ export function RecallMiniGraph({
           hover = i;
         }
       });
+      // hover state → DOM (aria-hidden 내부; e2e 훅용).
+      if (hover !== hoverRef.current) {
+        hoverRef.current = hover;
+        setHoverIdx(hover);
+      }
 
       // edges.
+      // ★ REQ-014-F: predicate 라벨 midpoint 이동 (중심→노드 방향 62%)
+      //   + truncate(14). 여러 edge 의 midpoint 가 중심 부근에 몰려
+      //   겹치던 문제 회피. hover 시 full text.
       ctx.lineWidth = 1.2;
       pts.forEach((p, i) => {
         const on = hover === i || hover === -1;
@@ -125,16 +161,52 @@ export function RecallMiniGraph({
         ctx.moveTo(cx, cy);
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
-        // predicate label.
-        const mx = (cx + p.x) / 2;
-        const my = (cy + p.y) / 2;
-        ctx.font = "10px 'JetBrains Mono', monospace";
+        // predicate label — 노드 쪽으로 62% 이동 (중심 클러스터 회피).
+        const t = 0.62;
+        const mx = cx + (p.x - cx) * t;
+        const my = cy + (p.y - cy) * t;
+        ctx.font = on
+          ? "600 10.5px 'JetBrains Mono', monospace"
+          : "10px 'JetBrains Mono', monospace";
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = on
-          ? 'rgba(150,240,225,0.9)'
-          : 'rgba(120,200,188,0.4)';
-        ctx.fillText(p.edge, mx, my - 1);
+          ? 'rgba(150,240,225,0.95)'
+          : 'rgba(120,200,188,0.55)';
+        // hover 는 full, 아니면 14 char 로 자름.
+        const shownEdge = on ? p.edge : truncateLabel(p.edge, 14);
+        // 배경 shadow (hover 시 가독성) — 캔버스 위에 얇은 dim 박스.
+        if (on) {
+          const metrics = ctx.measureText(shownEdge);
+          const padX = 6;
+          const padY = 3;
+          const w2 = metrics.width + padX * 2;
+          const h2 = 14 + padY;
+          ctx.save();
+          ctx.fillStyle = 'rgba(10,17,20,0.85)';
+          ctx.strokeStyle = 'rgba(45,212,191,0.35)';
+          ctx.lineWidth = 1;
+          const bx = mx - w2 / 2;
+          const by = my - h2 / 2 - 1;
+          ctx.beginPath();
+          // rounded rect (radius 5).
+          const r = 5;
+          ctx.moveTo(bx + r, by);
+          ctx.lineTo(bx + w2 - r, by);
+          ctx.quadraticCurveTo(bx + w2, by, bx + w2, by + r);
+          ctx.lineTo(bx + w2, by + h2 - r);
+          ctx.quadraticCurveTo(bx + w2, by + h2, bx + w2 - r, by + h2);
+          ctx.lineTo(bx + r, by + h2);
+          ctx.quadraticCurveTo(bx, by + h2, bx, by + h2 - r);
+          ctx.lineTo(bx, by + r);
+          ctx.quadraticCurveTo(bx, by, bx + r, by);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+          ctx.fillStyle = 'rgba(180,250,235,0.98)';
+        }
+        ctx.fillText(shownEdge, mx, my - 1);
       });
 
       // outer nodes.
@@ -162,7 +234,9 @@ export function RecallMiniGraph({
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         const ly = p.y + rad + 13;
-        ctx.fillText(p.label, p.x, ly);
+        // ★ REQ-014-F: 노드 라벨도 truncate(12), hover 시 full.
+        const shownLabel = on ? p.label : truncateLabel(p.label, 12);
+        ctx.fillText(shownLabel, p.x, ly);
       });
 
       // center node.
@@ -199,9 +273,14 @@ export function RecallMiniGraph({
     };
   }, [center, nodes, height]);
 
+  // hover 시 노출용 라벨 (SR / e2e / 라벨 잘렸을 때 툴팁 대체용).
+  const hoveredEdge =
+    hoverIdx >= 0 && hoverIdx < nodes.length ? nodes[hoverIdx] : null;
+
   return (
     <div
       data-testid="recall-mini-graph"
+      data-hover-idx={hoverIdx}
       style={{
         position: 'relative',
         background:
@@ -221,6 +300,33 @@ export function RecallMiniGraph({
           cursor: 'crosshair',
         }}
       />
+      {/* SR-only + e2e-visible hover 콘텐츠. 라벨 잘림 시 full text 를
+       *   DOM 에서도 볼 수 있도록 노출 (Canvas 는 텍스트가 아니므로). */}
+      {hoveredEdge && (
+        <span
+          data-testid="recall-mini-graph-hover-label"
+          style={{
+            position: 'absolute',
+            left: 13,
+            top: 11,
+            maxWidth: 'calc(100% - 26px)',
+            padding: '4px 9px',
+            borderRadius: 8,
+            background: 'rgba(10,17,20,0.88)',
+            border: '1px solid rgba(45,212,191,0.35)',
+            fontSize: 11,
+            color: '#c9f5ea',
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {hoveredEdge.label}
+          <span style={{ color: '#5a7c78', margin: '0 6px' }}>·</span>
+          <span style={{ color: '#9ac8be' }}>{hoveredEdge.edge}</span>
+        </span>
+      )}
       <span
         className="font-mono"
         style={{
@@ -232,7 +338,7 @@ export function RecallMiniGraph({
           pointerEvents: 'none',
         }}
       >
-        노드에 커서를 올려보세요
+        노드에 커서를 올리면 원문이 보입니다
       </span>
     </div>
   );

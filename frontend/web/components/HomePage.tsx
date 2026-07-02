@@ -331,17 +331,26 @@ function ActiveRecallInput({
   );
 }
 
-/** Component 7 — 실데이터 지표 한 줄 (REQ-008 v2).
+/** Component 7 — 실데이터 지표 배지 pill (REQ-008 v2 / REQ-014-F).
  *
  * v1 (legacy): "제가 아는 건 당신이 검증한 N개의 사실뿐입니다…" — facts
  *   하나만 노출. PO: "사실 99 카피만 보임 → 실데이터 4 지표로 교체".
  *
- * v2 (REQ-008): "검증된 사실 N · 엔티티 M · 출처 P · 이번 주 +K" — 4 지표
- *   모두 brief.totals 에서 직접. ★ 별도 endpoint 신설 0 (이미 /api/home/brief
- *   가 4 필드 모두 노출 — Discovery D2 확인).
+ * v2 (REQ-008): "검증된 사실 N · 엔티티 M · 출처 P · 이번 주 +K" — mono 한 줄.
  *
- * ★ skeleton 처리: brief 가 fail-soft null 일 때만 placeholder 노출.
- *   여기는 HomePopulated 안 (brief 가 보장됨) 이므로 항상 실값.
+ * ★ REQ-014-F (PO 2026-07-02) — 지표 중복 제거 + 배지화.
+ *   PO verbatim: "'검증된 사실 87·엔티티 149·출처 8·이번 주 +87' 이거 왜
+ *   2번이나 하는데? 최하단 지워야 할 것 아니냐?"
+ *   "검색바 아래 잘 보이게 키우고 별도로 바긋 처리 해서 제대로 지표
+ *   보여주던가"
+ *
+ *   조치:
+ *     (a) 최하단 QuickStats 렌더 삭제 (중복 제거)
+ *     (b) 이 컴포넌트를 검색바 바로 아래로 이동 (렌더 순서 조정)
+ *     (c) mono 한 줄 → pill 배지 4개 (teal border · 큰 숫자 · 라벨)
+ *
+ *   test-id 유지: home-humility, home-humility-facts, -entities, -sources,
+ *     -this-week — REQ-008 e2e 회귀 방지.
  */
 function HumilityLine({
   facts,
@@ -355,35 +364,93 @@ function HumilityLine({
   thisWeek: number;
 }) {
   return (
-    <p
+    <div
       data-testid="home-humility"
+      role="group"
+      aria-label="검증 지표"
       style={{
-        marginTop: 15,
+        marginTop: 18,
         marginBottom: 0,
+        display: 'flex',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: 10,
+        width: '100%',
+        maxWidth: 620,
+      }}
+    >
+      <MetricPill
+        label="검증된 사실"
+        testId="home-humility-facts"
+        value={facts}
+      />
+      <MetricPill
+        label="엔티티"
+        testId="home-humility-entities"
+        value={entities}
+      />
+      <MetricPill
+        label="출처"
+        testId="home-humility-sources"
+        value={sources}
+      />
+      <MetricPill
+        label="이번 주"
+        testId="home-humility-this-week"
+        value={thisWeek}
+        accent
+        plus
+      />
+    </div>
+  );
+}
+
+/** REQ-014-F pill 프리미티브 — teal border, 굵은 숫자, 옅은 라벨.
+ *   숫자 span 은 REQ-008 test-id 계약을 지키기 위해 그대로 유지. */
+function MetricPill({
+  label,
+  value,
+  testId,
+  accent,
+  plus,
+}: {
+  label: string;
+  value: number;
+  testId: string;
+  accent?: boolean;
+  plus?: boolean;
+}) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'baseline',
+        gap: 6,
+        padding: '7px 14px',
+        borderRadius: 999,
+        border: `1px solid ${accent ? 'rgba(63,224,198,0.55)' : 'rgba(63,224,198,0.28)'}`,
+        background: accent ? 'rgba(63,224,198,0.10)' : 'rgba(13,20,23,0.55)',
         fontFamily: "'JetBrains Mono', ui-monospace, monospace",
         fontSize: 12.5,
         letterSpacing: '0.02em',
-        color: TEXT_DIMMEST,
-        textAlign: 'center',
+        color: TEXT_DIMMER,
       }}
     >
-      검증된 사실{' '}
-      <span data-testid="home-humility-facts" style={{ color: '#aebfc2', fontWeight: 600 }}>
-        {facts}
-      </span>{' '}
-      · 엔티티{' '}
-      <span data-testid="home-humility-entities" style={{ color: '#aebfc2', fontWeight: 600 }}>
-        {entities}
-      </span>{' '}
-      · 출처{' '}
-      <span data-testid="home-humility-sources" style={{ color: '#aebfc2', fontWeight: 600 }}>
-        {sources}
-      </span>{' '}
-      · 이번 주{' '}
-      <span data-testid="home-humility-this-week" style={{ color: ACCENT, fontWeight: 600 }}>
-        +{thisWeek}
+      <span
+        data-testid={testId}
+        style={{
+          color: accent ? ACCENT : '#e6eef0',
+          fontWeight: 700,
+          fontSize: 15,
+        }}
+      >
+        {plus ? '+' : ''}
+        {value}
       </span>
-    </p>
+      <span style={{ color: accent ? '#8fe4d4' : TEXT_LABEL, fontWeight: 500 }}>
+        {label}
+      </span>
+    </span>
   );
 }
 
@@ -663,83 +730,14 @@ function BriefingRow({
   );
 }
 
-/** Component 9 — 빠른 현황 바. */
-function QuickStats({ brief }: { brief: HomeBrief }) {
-  return (
-    <div
-      data-testid="home-quick-stats"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 18,
-        marginTop: 30,
-        fontSize: 13,
-        color: TEXT_DIMMER,
-        flexWrap: 'wrap',
-      }}
-    >
-      <Stat
-        label="검증된 사실"
-        value={brief.totals.facts}
-        testId="home-stat-facts"
-      />
-      <Sep />
-      <Stat
-        label="엔티티"
-        value={brief.totals.entities}
-        testId="home-stat-entities"
-      />
-      <Sep />
-      <Stat
-        label="출처"
-        value={brief.totals.sources}
-        testId="home-stat-sources"
-      />
-      <Sep />
-      <Stat
-        label="이번 주"
-        value={brief.totals.this_week_validated}
-        plus
-        accentNumber
-        testId="home-stat-this-week"
-      />
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  plus,
-  accentNumber,
-  testId,
-}: {
-  label: string;
-  value: number;
-  plus?: boolean;
-  accentNumber?: boolean;
-  testId: string;
-}) {
-  return (
-    <span data-testid={testId}>
-      {label}{' '}
-      <span
-        style={{
-          color: accentNumber ? ACCENT : '#aebfc2',
-          fontWeight: 600,
-        }}
-      >
-        {plus ? '+' : ''}
-        {value}
-      </span>
-    </span>
-  );
-}
-
-function Sep() {
-  return <span style={{ opacity: 0.4 }}>·</span>;
-}
+/** Component 9 — 빠른 현황 바.
+ *
+ * ★ REQ-014-F (PO 2026-07-02) — 삭제.
+ *   PO verbatim: "'검증된 사실 87·엔티티 149·출처 8·이번 주 +87' 이거 왜
+ *   2번이나 하는데? 최하단 지워야 할 것 아니냐?"
+ *   → HumilityLine 이 pill 배지로 승격했으므로 QuickStats 는 중복.
+ *   컴포넌트 자체를 제거해 dead-code 방지.
+ */
 
 function HomePopulated({
   brief,
@@ -770,6 +768,15 @@ function HomePopulated({
         onSphereState={onSphereState}
         assistantRef={assistantRef}
       />
+      {/* ★ REQ-014-F: 지표 pill 을 검색바 바로 아래로 이동.
+       *   이전에는 AssistantQuery + 하단 QuickStats 두 곳에 렌더돼
+       *   중복이었음. PO 지시로 최하단 삭제 + 검색바 아래 승격. */}
+      <HumilityLine
+        facts={brief.totals.facts}
+        entities={brief.totals.entities}
+        sources={brief.totals.sources}
+        thisWeek={brief.totals.this_week_validated}
+      />
       {/* feat/hearth-oracle-merge — inline Q&A surface. Renders below the
        * input only when there's a query / result / error. The sphere
        * state syncs through the assistantRef + onSphereState plumbing. */}
@@ -778,14 +785,7 @@ function HomePopulated({
         spaceId={spaceId}
         onStateChange={onSphereState}
       />
-      <HumilityLine
-        facts={brief.totals.facts}
-        entities={brief.totals.entities}
-        sources={brief.totals.sources}
-        thisWeek={brief.totals.this_week_validated}
-      />
       <TodayBriefingCard brief={brief} />
-      <QuickStats brief={brief} />
     </div>
   );
 }

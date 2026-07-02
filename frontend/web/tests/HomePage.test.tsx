@@ -146,11 +146,16 @@ describe('HomePage', () => {
     const cta = screen.getByTestId('home-briefing-pending-cta');
     expect(cta).toHaveAttribute('href', '/pending');
 
-    // Quick stats bar shows all four numbers.
-    expect(screen.getByTestId('home-stat-facts')).toHaveTextContent('247');
-    expect(screen.getByTestId('home-stat-entities')).toHaveTextContent('89');
-    expect(screen.getByTestId('home-stat-sources')).toHaveTextContent('34');
-    expect(screen.getByTestId('home-stat-this-week')).toHaveTextContent('+12');
+    // ★ REQ-014-F: 중복 QuickStats 삭제 — 지표는 이제 상단 humility pill
+    //   배지 (home-humility-*) 에서만 노출. 하단 home-stat-* 는 사라짐.
+    expect(screen.queryByTestId('home-quick-stats')).toBeNull();
+    expect(screen.queryByTestId('home-stat-facts')).toBeNull();
+    expect(screen.getByTestId('home-humility-facts')).toHaveTextContent('247');
+    expect(screen.getByTestId('home-humility-entities')).toHaveTextContent('89');
+    expect(screen.getByTestId('home-humility-sources')).toHaveTextContent('34');
+    expect(screen.getByTestId('home-humility-this-week')).toHaveTextContent(
+      '+12',
+    );
   });
 
   it('renders cold-start when brief.is_empty=true', () => {
