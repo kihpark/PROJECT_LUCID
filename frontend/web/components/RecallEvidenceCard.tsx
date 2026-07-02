@@ -26,6 +26,7 @@
 import type { RecallExampleFact } from '@/lib/recall-history';
 import type { RecallFact } from '@/lib/types';
 import {
+  isUuidLike,
   resolveEntityLabel,
   resolveSourceLabel,
   UNRESOLVED_SOURCE_LABEL,
@@ -63,6 +64,13 @@ type Props = ExampleProps | RealProps;
  *
  *  source_uid 는 URL 이면 host+path 표시, 그 외 (UUID) 는 "미해결 출처".
  *  ★ 다중 source 는 첫 non-placeholder 를 우선. 모두 UUID → "미해결 출처".
+ *
+ *  ★ REQ-014-E (PO 2026-07-02) — 이슈 1: `validator_id` 도 STAGE 3+4 대상.
+ *    backend `_hit_to_fact` 은 user_id (UUID) 를 그대로 흘려보내며,
+ *    이전 구현은 `by = rf.validator_id ?? ''` 그대로 meta 라인에 노출 →
+ *    "미해결 출처" 옆에 UUID 노출 회귀. resolve 실패 (UUID 형식) 면
+ *    빈 문자열 리턴 → 소비 측에서 아예 렌더 skip. 사람 이름 (예: "박기흥",
+ *    "PO") 은 그대로 표시.
  */
 function deriveRealDisplay(rf: RecallFact): {
   subject: string;
@@ -86,6 +94,12 @@ function deriveRealDisplay(rf: RecallFact): {
   );
   const src = firstUrlIdx >= 0 ? resolvedList[firstUrlIdx]! : UNRESOLVED_SOURCE_LABEL;
 
+  // ★ REQ-014-E — validator_id 가 UUID 형식이면 사용자 노출 0.
+  //   실 backend 는 user_id (UUID) 를 흘려보내며, 사람이 읽지 못한다.
+  //   test 시드 ("박기흥", "PO") 처럼 사람 이름은 그대로 표시.
+  const validatorRaw = rf.validator_id?.trim() ?? '';
+  const by = validatorRaw && !isUuidLike(validatorRaw) ? validatorRaw : '';
+
   return {
     subject: resolveEntityLabel(rf.subject_label),
     predicate: rf.predicate_label && rf.predicate_label.trim()
@@ -95,20 +109,26 @@ function deriveRealDisplay(rf: RecallFact): {
     src,
     srcResolved: firstUrlIdx >= 0,
     date: rf.validated_at?.slice(0, 10) ?? '',
-    by: rf.validator_id ?? '',
+    by,
   };
 }
 
 /**
  * ★ fix/recall-entity-exact-match-hallucination-block (PO 2026-07-01) —
- * `match_kind` badge. Renders 직접 언급 (teal) when the fact was returned
- * because the query *strictly* referenced this fact's entity, or 유사 참고
- * (amber) when the fact reached the response via embedding similarity or
- * cross-entity graph expansion. Anything non-`entity_direct` reads as
- * 유사 참고 so the user always sees WHICH kind of match they're looking
- * at. This is the visible half of the hallucination guard: users can
- * tell at a glance whether HEARTH's answer is grounded in a direct
- * mention or in a similarity neighbour.
+ * ★ REQ-014-E (PO 2026-07-02) — 이슈 2: "유사 참고" (amber) 배지 완전 폐기.
+ *
+ *  옛 로직: match_kind !== 'entity_direct' → "유사 참고" amber 배지.
+ *  PO 판단 verbatim: "클릭도 안 되는데 왜? 사용자 무가치."
+ *  배지가 사용자에게 action 을 유도하지 않으므로 = 노이즈.
+ *
+ *  근거 카드 자체에 오르는 사실은 이미 recall API 가 relevance 필터를
+ *  통과시킨 결과 — "직접" vs "유사" 는 백엔드 내부 사정. 사용자는 사실을
+ *  "믿을 수 있는가" 만 궁금하며, 이는 출처·검증일 라인에서 판단한다.
+ *
+ *  ★ 렌더 skip. 데이터 자체 (match_kind) 는 유지 (백엔드/테스트/후속 UI
+ *    재활용 여지) — 다만 이 카드는 표시하지 않는다.
+ *  ★ testid `recall-evidence-match-kind` 참조하는 옛 e2e 는 이 fix 커밋
+ *    에서 함께 없애거나 skip 하도록 정리 (관련 spec 별도).
  */
 type MatchKind =
   | 'embedding'
@@ -117,37 +137,6 @@ type MatchKind =
   | 'similarity_fallback'
   | null
   | undefined;
-
-function renderMatchKindBadge(kind: MatchKind) {
-  const isDirect = kind === 'entity_direct';
-  const label = isDirect ? '직접 언급' : '유사 참고';
-  const testKind = isDirect ? 'entity_direct' : 'similarity_fallback';
-  // Teal (직접 언급) — reuse the same teal token the subject / predicate
-  // pill already use (see #2DD4BF / rgba(45,212,191,*) below). Amber
-  // (유사 참고) — Tailwind amber-300/400 range (#FCD34D / #F59E0B),
-  // consistent with the moderation warning badges elsewhere in the FE.
-  const color = isDirect ? '#5fe6d3' : '#FBBF24';
-  const border = isDirect
-    ? 'rgba(45,212,191,0.35)'
-    : 'rgba(251,191,36,0.35)';
-  return (
-    <span
-      data-testid="recall-evidence-match-kind"
-      data-recall-match-kind={testKind}
-      className="font-mono"
-      style={{
-        fontSize: 10,
-        color,
-        border: `1px solid ${border}`,
-        borderRadius: 5,
-        padding: '1px 6px',
-        letterSpacing: '0.02em',
-      }}
-    >
-      {label}
-    </span>
-  );
-}
 
 export function RecallEvidenceCard(props: Props) {
   const isReal = 'realFact' in props && props.realFact !== undefined;
@@ -164,11 +153,10 @@ export function RecallEvidenceCard(props: Props) {
         by: props.fact!.by,
       };
 
-  // Only real facts carry a match_kind (v1 example mode has no such
-  // concept). Undefined here is treated as "유사 참고" in the badge
-  // renderer — safest default when the backend response predates the
-  // field.
-  const matchKind: MatchKind = isReal ? props.realFact!.match_kind : undefined;
+  // ★ REQ-014-E — match_kind 는 데이터는 유지, 렌더 skip. 옛 참조 흔적.
+  //   (백엔드 필드 자체는 hallucination 가드 후속 UI 에 재활용.)
+  const _matchKind: MatchKind = isReal ? props.realFact!.match_kind : undefined;
+  void _matchKind;
 
   const handleSubjectClick = () => {
     if (isReal) {
@@ -185,6 +173,10 @@ export function RecallEvidenceCard(props: Props) {
     }
   };
 
+  // ★ REQ-014-E (PO 2026-07-02) — 이슈 3: 카드 wrapper 자체는 clickable X.
+  //   옛 구현은 cursor: pointer + hover 시 border 강조 → PO dogfood: "클릭
+  //   해도 아무 동작 X. 왜?". 커서를 default 로 되돌리고 hover 강조도 제거.
+  //   subject (대상) 클릭 = 유지 (↓ handleSubjectClick).
   return (
     <div
       data-testid="recall-evidence-card"
@@ -194,14 +186,7 @@ export function RecallEvidenceCard(props: Props) {
         border: '1px solid #14211f',
         borderRadius: 12,
         padding: '13px 15px',
-        cursor: 'pointer',
-        transition: 'border-color 120ms ease',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = '#21342f';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = '#14211f';
+        cursor: 'default',
       }}
     >
       <div
@@ -265,8 +250,7 @@ export function RecallEvidenceCard(props: Props) {
         >
           {display.object}
         </span>
-        {/* ★ match_kind 배지 (real 모드 전용). */}
-        {isReal && renderMatchKindBadge(matchKind)}
+        {/* ★ REQ-014-E — 옛 match_kind 배지 폐기 (사용자 무가치 노이즈). */}
       </div>
       {/* 메타 한 줄. */}
       <div
@@ -302,8 +286,13 @@ export function RecallEvidenceCard(props: Props) {
         </span>
         <span style={{ opacity: 0.4 }}>·</span>
         <span>검증 {display.date}</span>
-        <span style={{ opacity: 0.4 }}>·</span>
-        <span>{display.by}</span>
+        {/* ★ REQ-014-E — validator_id 가 UUID 면 by = '' → separator + span skip. */}
+        {display.by ? (
+          <>
+            <span style={{ opacity: 0.4 }}>·</span>
+            <span>{display.by}</span>
+          </>
+        ) : null}
       </div>
     </div>
   );

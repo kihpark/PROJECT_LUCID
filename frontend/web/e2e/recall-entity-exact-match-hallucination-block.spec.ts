@@ -332,17 +332,12 @@ test.describe('★ fix/recall-entity-exact-match-hallucination-block', () => {
     const cards = page.getByTestId('recall-evidence-card');
     await expect(cards).toHaveCount(3);
 
-    // ★ 모두 '직접 언급' teal 배지.
-    const badges = page.getByTestId('recall-evidence-match-kind');
-    await expect(badges).toHaveCount(3);
-    for (let i = 0; i < 3; i++) {
-      const badge = badges.nth(i);
-      await expect(badge).toHaveAttribute(
-        'data-recall-match-kind',
-        'entity_direct',
-      );
-      await expect(badge).toHaveText('직접 언급');
-    }
+    // ★ REQ-014-E (PO 2026-07-02) — match_kind 배지 자체 폐기.
+    //   백엔드가 entity_direct 로 판정한 사실만 나오는지의 hallucination-block
+    //   자체는 아래 "더불어민주당 fact 노출 안 됨" 라인으로 계속 검증한다.
+    await expect(
+      page.getByTestId('recall-evidence-match-kind'),
+    ).toHaveCount(0);
 
     // ★ 더불어민주당 fact 절대 노출 안 됨 (hallucination 방지 핵심).
     for (const demoFact of ['F-DEMO-001', 'F-DEMO-002', 'F-DEMO-003']) {
@@ -369,7 +364,7 @@ test.describe('★ fix/recall-entity-exact-match-hallucination-block', () => {
     );
   });
 
-  test('★ Query 매칭 entity 0 → similarity fallback + 유사 참고 amber badge', async ({
+  test('★ Query 매칭 entity 0 → similarity fallback (배지 없음, 사실만 노출)', async ({
     authenticatedPage: page,
   }) => {
     await gotoRecall(page, { mode: 'similarity_fallback' });
@@ -382,17 +377,12 @@ test.describe('★ fix/recall-entity-exact-match-hallucination-block', () => {
     const cards = page.getByTestId('recall-evidence-card');
     await expect(cards).toHaveCount(3);
 
-    // ★ 모두 '유사 참고' amber 배지.
-    const badges = page.getByTestId('recall-evidence-match-kind');
-    await expect(badges).toHaveCount(3);
-    for (let i = 0; i < 3; i++) {
-      const badge = badges.nth(i);
-      await expect(badge).toHaveAttribute(
-        'data-recall-match-kind',
-        'similarity_fallback',
-      );
-      await expect(badge).toHaveText('유사 참고');
-    }
+    // ★ REQ-014-E (PO 2026-07-02) — "유사 참고" 배지 자체 폐기.
+    //   사용자 클릭 유도 없는 노이즈였음. similarity_fallback 경로 자체는
+    //   backend 가 hits 를 실어 보내는지로 계속 검증 (cards.toHaveCount(3)).
+    await expect(
+      page.getByTestId('recall-evidence-match-kind'),
+    ).toHaveCount(0);
 
     await screenshot(
       page,
